@@ -1,2 +1,6 @@
 # brd-srs-to-test-case
-Đồ án Tốt nghiệp
+
+# steps to run app (require API Token)
+pip install -r requirements.txt
+# run other, change filename
+python -m streamlit run app.py
