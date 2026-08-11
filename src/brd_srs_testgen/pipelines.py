@@ -22,6 +22,7 @@ from .models import (
     TestCaseBatch,
 )
 from .providers import (
+    BudgetExceeded,
     GenerationResult,
     ProviderError,
     StructuredOutputError,
@@ -285,6 +286,7 @@ class PipelineContext:
         current_messages = [message.copy() for message in messages]
         transport_retries = 0
         schema_repaired = False
+        observed_timeout: ProviderError | None = None
         while True:
             if cancellation_event is not None and cancellation_event.is_set():
                 raise CancelledError("A sibling worker failed.")
@@ -295,6 +297,7 @@ class PipelineContext:
                 )
             except ProviderError as error:
                 self._record_latency(time.perf_counter() - started)
+                observed_timeout = error if error.timed_out else None
                 if cancellation_event is not None and cancellation_event.is_set():
                     raise CancelledError("A sibling worker failed.") from error
                 if not error.retryable or transport_retries == 2:
@@ -307,7 +310,13 @@ class PipelineContext:
                     self.sleep(delay)
                 elif cancellation_event.wait(delay):
                     raise CancelledError("A sibling worker failed.") from error
+            except BudgetExceeded as error:
+                self._record_latency(time.perf_counter() - started)
+                if observed_timeout is not None and error.reservation_blocked:
+                    raise observed_timeout from error
+                raise
             except StructuredOutputError as error:
+                observed_timeout = None
                 self._record(error)
                 if cancellation_event is not None and cancellation_event.is_set():
                     raise CancelledError("A sibling worker failed.") from error

@@ -20,7 +20,9 @@ TIMEOUT_CODES = {408, 504}
 
 
 class BudgetExceeded(RuntimeError):
-    pass
+    def __init__(self, message: str, *, reservation_blocked: bool = False) -> None:
+        super().__init__(message)
+        self.reservation_blocked = reservation_blocked
 
 
 class ProviderError(RuntimeError):
@@ -92,7 +94,10 @@ class BudgetLedger:
         with self._lock:
             remaining = self.limit - self.used - self.reserved
             if tokens > remaining:
-                raise BudgetExceeded(f"Need {tokens} tokens; {remaining} remain.")
+                raise BudgetExceeded(
+                    f"Need {tokens} tokens; {remaining} remain.",
+                    reservation_blocked=True,
+                )
             self.reserved += tokens
             reservation = Reservation(tokens)
             object.__setattr__(reservation, "_ledger", self)

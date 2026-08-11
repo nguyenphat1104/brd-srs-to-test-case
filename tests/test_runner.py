@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+import brd_srs_testgen.providers as providers_module
 import brd_srs_testgen.storage as storage_module
 from brd_srs_testgen import runner
 from brd_srs_testgen.documents import DocumentError
@@ -443,6 +444,44 @@ def test_exhausted_provider_timeout_is_persisted_as_timeout(
     assert single.metrics.retries == 2
     assert event["failure_category"] == "timeout"
     assert event["failure_message"] == "request timed out"
+
+
+def test_actual_ollama_timeout_survives_budget_blocked_retry(
+    tmp_path, monkeypatch
+) -> None:
+    evidence = chunk().model_copy(
+        update={"text": f"{chunk().text} {'x' * 40_000}"}
+    )
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [evidence])
+    for condition in (
+        Condition.STAGED_SINGLE_AGENT,
+        Condition.CENTRALIZED_MULTI_AGENT,
+    ):
+        monkeypatch.setitem(
+            runner.PIPELINES, condition, lambda _context, _chunks: bundle()
+        )
+    calls = 0
+
+    def timeout(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise TimeoutError("ollama timed out")
+
+    monkeypatch.setattr(providers_module, "urlopen", timeout)
+    store = RunStore(tmp_path)
+
+    result = run_comparison(b"pdf", settings(), store=store)
+    single = result.conditions[Condition.SINGLE_PROMPT]
+    _metrics, event = _persisted_condition(
+        store, result, Condition.SINGLE_PROMPT
+    )
+
+    assert calls == 1
+    assert single.manifest.failure_category.value == "timeout"
+    assert single.metrics.charged_tokens > 30_000
+    assert single.metrics.budget_exhausted is False
+    assert event["failure_category"] == "timeout"
+    assert event["failure_message"] == "ollama timed out"
 
 
 def test_terminal_event_retains_failed_validation_report(
