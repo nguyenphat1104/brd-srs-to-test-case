@@ -36,6 +36,11 @@ Messages = list[dict[str, str]]
 PROMPT_VERSION = "research-core-v1"
 WORKER_COUNT = 3
 
+
+class PipelineOutputError(ValueError):
+    pass
+
+
 RULES = """Rules:
 - Write in English only.
 - Return only the requested schema as valid JSON.
@@ -496,13 +501,13 @@ def _validate_worker_ids(
     seen: set[str] = set()
     for item_id in item_ids:
         if not lower <= int(item_id.removeprefix(f"{prefix}-")) <= upper:
-            raise ValueError(
+            raise PipelineOutputError(
                 f"{label.title()} ID {item_id} is outside worker "
                 f"{worker_index + 1} range {prefix}-{lower:03d} through "
                 f"{prefix}-{upper:03d}."
             )
         if item_id in seen:
-            raise ValueError(
+            raise PipelineOutputError(
                 f"Worker {worker_index + 1} returned duplicate {label} ID {item_id}."
             )
         seen.add(item_id)
@@ -540,7 +545,7 @@ def _validate_worker_cases(
     scenario_ids = {scenario.scenario_id for scenario in batch.scenarios}
     for test_case in batch.test_cases:
         if test_case.scenario_id not in scenario_ids:
-            raise ValueError(
+            raise PipelineOutputError(
                 f"Test case {test_case.test_case_id} references unknown worker "
                 f"scenario {test_case.scenario_id}."
             )
@@ -555,12 +560,12 @@ def _validate_worker_cases(
     ]
     for label, artifact_id, requirement_ids in artifacts:
         if not assigned_ids.intersection(requirement_ids):
-            raise ValueError(
+            raise PipelineOutputError(
                 f"{label} {artifact_id} must include an assigned requirement."
             )
         unknown_ids = set(requirement_ids) - allowed_ids
         if unknown_ids:
-            raise ValueError(
+            raise PipelineOutputError(
                 f"{label} {artifact_id} references requirement IDs "
                 f"{sorted(unknown_ids)} outside assigned requirements and "
                 "dependency context."

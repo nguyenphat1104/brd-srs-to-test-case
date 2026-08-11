@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+import brd_srs_testgen.storage as storage_module
 from brd_srs_testgen import runner
 from brd_srs_testgen.documents import DocumentError
 from brd_srs_testgen.models import (
@@ -19,7 +20,11 @@ from brd_srs_testgen.models import (
     ScenarioBatch,
     TestCaseBatch as ModelTestCaseBatch,
 )
-from brd_srs_testgen.providers import BudgetLedger, GenerationResult, ProviderError
+from brd_srs_testgen.providers import (
+    BudgetLedger,
+    GenerationResult,
+    ProviderError,
+)
 from brd_srs_testgen.runner import ProviderSettings, run_comparison
 from brd_srs_testgen.storage import ImmutableArtifactError, RunStore, StorageError
 from tests.factories import bundle, chunk
@@ -281,3 +286,366 @@ def test_parsing_failure_is_persisted(tmp_path, monkeypatch) -> None:
     assert (
         store.comparison_dir(result.manifest.comparison_id) / "failure.json"
     ).exists()
+
+
+class ChargedProvider(ScriptedProvider):
+    def generate(self, messages, schema, *, max_output_tokens):
+        result = super().generate(
+            messages, schema, max_output_tokens=max_output_tokens
+        )
+        reservation = self.ledger.reserve(7)
+        self.ledger.settle(reservation, 7)
+        return result
+
+
+class BudgetFailingProvider:
+    model = "test-model"
+
+    def __init__(self, ledger: BudgetLedger) -> None:
+        self.ledger = ledger
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        reservation = self.ledger.reserve(1)
+        self.ledger.settle(reservation, self.ledger.limit + 2)
+        raise AssertionError("BudgetExceeded was not raised")
+
+
+class InvalidCentralProvider(CentralProvider):
+    def generate(self, messages, schema, *, max_output_tokens):
+        result = super().generate(
+            messages, schema, max_output_tokens=max_output_tokens
+        )
+        if (
+            schema is RequirementBatch
+            and "WORKER REQUIREMENT EXTRACTION 1/3" in messages[-1]["content"]
+            and result.value.requirements
+        ):
+            invalid = result.value.requirements[0].model_copy(
+                update={"requirement_id": "REQ-1001"}
+            )
+            return _result(RequirementBatch(requirements=[invalid]))
+        return result
+
+
+def _persisted_condition(store, result, condition: Condition):
+    directory = store.condition_dir(result.manifest.comparison_id, condition)
+    metrics = json.loads((directory / "metrics.json").read_text())
+    event = json.loads((directory / "events.jsonl").read_text().splitlines()[-1])
+    return metrics, event
+
+
+def test_charged_tokens_match_metrics_download_persistence_and_event(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    base_factory = provider_factory()
+
+    def factory(condition, ledger):
+        if condition is Condition.SINGLE_PROMPT:
+            return ChargedProvider(ledger, [bundle()])
+        return base_factory(condition, ledger)
+
+    store = RunStore(tmp_path)
+    result = run_comparison(
+        b"pdf", settings(), store=store, provider_factory=factory
+    )
+    single = result.conditions[Condition.SINGLE_PROMPT]
+    persisted, event = _persisted_condition(
+        store, result, Condition.SINGLE_PROMPT
+    )
+
+    assert single.metrics.charged_tokens == 7
+    assert single.download_bundle()["metrics"] == persisted
+    assert persisted["charged_tokens"] == event["charged_tokens"] == 7
+    assert persisted["input_tokens"] == persisted["output_tokens"] == 1
+
+
+def test_budget_failure_keeps_charged_tokens_without_reported_usage(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    base_factory = provider_factory()
+
+    def factory(condition, ledger):
+        if condition is Condition.SINGLE_PROMPT:
+            return BudgetFailingProvider(ledger)
+        return base_factory(condition, ledger)
+
+    store = RunStore(tmp_path)
+    result = run_comparison(
+        b"pdf", settings(), store=store, provider_factory=factory
+    )
+    single = result.conditions[Condition.SINGLE_PROMPT]
+    persisted, event = _persisted_condition(
+        store, result, Condition.SINGLE_PROMPT
+    )
+
+    assert single.manifest.failure_category.value == "budget_exhaustion"
+    assert single.metrics.input_tokens == single.metrics.output_tokens == 0
+    assert single.metrics.charged_tokens == settings().token_ceiling + 2
+    assert single.download_bundle()["metrics"] == persisted
+    assert persisted["charged_tokens"] == event["charged_tokens"]
+
+
+def test_progress_callback_exceptions_never_change_the_run(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def broken_progress(_condition, _message):
+        raise RuntimeError("observer broke")
+
+    result = run_comparison(
+        b"pdf",
+        settings(),
+        store=RunStore(tmp_path),
+        provider_factory=provider_factory(),
+        progress=broken_progress,
+    )
+
+    assert all(
+        condition.manifest.status is RunStatus.COMPLETED
+        for condition in result.conditions.values()
+    )
+
+
+def test_parse_failure_emits_terminal_progress(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        runner,
+        "parse_pdf",
+        lambda _data: (_ for _ in ()).throw(DocumentError("unreadable")),
+    )
+    trace = []
+
+    run_comparison(
+        b"pdf",
+        settings(),
+        store=RunStore(tmp_path),
+        progress=lambda condition, message: trace.append((condition, message)),
+    )
+
+    assert trace == [(None, "Parsing PDF"), (None, "Failed")]
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://user:secret@host",
+        "http://host?token=secret",
+        "http://host#secret",
+        "http://host?",
+        "http://host#",
+        " http://host",
+        "http://ho st",
+        123,
+    ],
+)
+def test_ollama_credential_bearing_urls_fail_before_persistence(
+    tmp_path, base_url
+) -> None:
+    configured = ProviderSettings(
+        provider="ollama",
+        model="test-model",
+        token_ceiling=100_000,
+        base_url=base_url,
+    )
+
+    with pytest.raises(ValueError):
+        run_comparison(b"pdf", configured, store=RunStore(tmp_path))
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ollama_credentials_are_not_exposed_by_settings_repr() -> None:
+    configured = ProviderSettings(
+        provider="ollama",
+        model="test-model",
+        token_ceiling=100_000,
+        base_url="http://user:secret@host",
+    )
+
+    assert "user" not in repr(configured)
+    assert "secret" not in repr(configured)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"provider": 1},
+        {"model": 1},
+        {"token_ceiling": "100"},
+        {"provider": "gemini", "api_key": 1},
+    ],
+)
+def test_provider_settings_reject_wrong_types(overrides) -> None:
+    values = {
+        "provider": "ollama",
+        "model": "test-model",
+        "token_ceiling": 100_000,
+    }
+    values.update(overrides)
+
+    with pytest.raises(ValueError):
+        ProviderSettings(**values).validate()
+
+
+def test_provider_secrets_are_redacted_from_condition_files(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    secret = "gemini-super-secret"
+    configured = ProviderSettings(
+        provider="gemini",
+        model="test-model",
+        token_ceiling=100_000,
+        api_key=secret,
+    )
+    base_factory = provider_factory()
+
+    def factory(condition, ledger):
+        if condition is Condition.SINGLE_PROMPT:
+            raise ValueError(f"api_key={secret} token=secondary password=tertiary")
+        return base_factory(condition, ledger)
+
+    run_comparison(
+        b"pdf", configured, store=RunStore(tmp_path), provider_factory=factory
+    )
+    persisted = "\n".join(
+        path.read_text() for path in tmp_path.rglob("*") if path.is_file()
+    )
+
+    assert secret not in persisted
+    assert "secondary" not in persisted
+    assert "tertiary" not in persisted
+
+
+@pytest.mark.parametrize("mismatch", ["shared_ledger", "wrong_model"])
+def test_injected_provider_integrity_failure_is_isolated(
+    tmp_path, monkeypatch, mismatch
+) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    base_factory = provider_factory()
+    first_ledger = None
+
+    def factory(condition, ledger):
+        nonlocal first_ledger
+        provider = base_factory(condition, ledger)
+        if condition is Condition.SINGLE_PROMPT:
+            first_ledger = ledger
+        elif condition is Condition.STAGED_SINGLE_AGENT:
+            if mismatch == "shared_ledger":
+                provider.ledger = first_ledger
+            else:
+                provider.model = "wrong-model"
+        return provider
+
+    result = run_comparison(
+        b"pdf", settings(), store=RunStore(tmp_path), provider_factory=factory
+    )
+
+    assert (
+        result.conditions[Condition.STAGED_SINGLE_AGENT].manifest.failure_category.value
+        == "configuration"
+    )
+    assert (
+        result.conditions[Condition.CENTRALIZED_MULTI_AGENT].manifest.status
+        is RunStatus.COMPLETED
+    )
+
+
+def test_invalid_central_worker_output_is_semantic_failure(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    base_factory = provider_factory()
+
+    def factory(condition, ledger):
+        if condition is Condition.CENTRALIZED_MULTI_AGENT:
+            return InvalidCentralProvider(ledger)
+        return base_factory(condition, ledger)
+
+    result = run_comparison(
+        b"pdf", settings(), store=RunStore(tmp_path), provider_factory=factory
+    )
+
+    assert (
+        result.conditions[
+            Condition.CENTRALIZED_MULTI_AGENT
+        ].manifest.failure_category.value
+        == "semantic_validation"
+    )
+
+
+def test_unexpected_pipeline_defect_is_re_raised(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def defect(_context, _chunks):
+        raise AssertionError("programming defect")
+
+    monkeypatch.setitem(runner.PIPELINES, Condition.SINGLE_PROMPT, defect)
+    store = RunStore(tmp_path)
+
+    with pytest.raises(AssertionError, match="programming defect"):
+        run_comparison(
+            b"pdf",
+            settings(),
+            store=store,
+            provider_factory=provider_factory(),
+        )
+
+    comparison = next(path for path in tmp_path.iterdir() if path.is_dir())
+    condition = comparison / "conditions" / Condition.SINGLE_PROMPT
+    assert json.loads((condition / "manifest.json").read_text())["status"] == "running"
+    assert {path.name for path in condition.iterdir()} == {
+        "manifest.json",
+        "events.jsonl",
+    }
+
+
+def test_runner_finalization_failure_rolls_back_and_stops(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    original_write = storage_module._atomic_text
+    failed = False
+
+    def fail_midway(path, text):
+        nonlocal failed
+        if path.name == "scenarios.json" and not failed:
+            failed = True
+            raise OSError("injected finalization failure")
+        original_write(path, text)
+
+    monkeypatch.setattr(storage_module, "_atomic_text", fail_midway)
+    store = RunStore(tmp_path)
+
+    with pytest.raises(OSError, match="injected finalization failure"):
+        run_comparison(
+            b"pdf",
+            settings(),
+            store=store,
+            provider_factory=provider_factory(),
+        )
+
+    comparison = next(path for path in tmp_path.iterdir() if path.is_dir())
+    conditions = comparison / "conditions"
+    single = conditions / Condition.SINGLE_PROMPT
+    assert (
+        json.loads((single / "manifest.json").read_text())["status"] == "running"
+    )
+    assert [
+        json.loads(line)["stage"]
+        for line in (single / "events.jsonl").read_text().splitlines()
+    ] == ["started"]
+    assert {path.name for path in single.iterdir()} == {
+        "manifest.json",
+        "events.jsonl",
+    }
+    assert not (conditions / Condition.STAGED_SINGLE_AGENT).exists()
+
+
+def test_comparison_ids_are_unique_with_frozen_time(monkeypatch) -> None:
+    class FrozenDateTime:
+        @classmethod
+        def now(cls, _timezone):
+            return datetime(2026, 8, 11, tzinfo=UTC)
+
+    monkeypatch.setattr(runner, "datetime", FrozenDateTime)
+
+    first = runner._comparison_id("a" * 64)
+    second = runner._comparison_id("a" * 64)
+
+    assert first != second
+    assert first.startswith("20260811T000000000000Z-aaaaaaaaaaaa-")

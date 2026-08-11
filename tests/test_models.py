@@ -155,6 +155,10 @@ def metrics(**overrides: object) -> RunMetrics:
     return RunMetrics(**values)
 
 
+def test_metrics_default_charged_tokens_for_backward_compatibility() -> None:
+    assert metrics().charged_tokens == 0
+
+
 @pytest.mark.parametrize(
     "field, value",
     [
@@ -172,6 +176,7 @@ def metrics(**overrides: object) -> RunMetrics:
         ("test_case_count", -1),
         ("input_tokens", -1),
         ("output_tokens", -1),
+        ("charged_tokens", -1),
         ("latency_seconds", -0.1),
         ("retries", -1),
         ("schema_repairs", -1),

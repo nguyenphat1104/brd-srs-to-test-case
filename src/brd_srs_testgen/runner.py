@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
+from uuid import uuid4
 
 import google.genai as genai
 
@@ -24,6 +26,7 @@ from .models import (
 from .pipelines import (
     PROMPT_VERSION,
     PipelineContext,
+    PipelineOutputError,
     run_centralized_multi_agent,
     run_single_prompt,
     run_staged_single_agent,
@@ -46,18 +49,25 @@ ProviderFactory = Callable[[Condition, BudgetLedger], StructuredProvider]
 Progress = Callable[[Condition | None, str], None]
 
 
+class ConfigurationError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class ProviderSettings:
     provider: str
     model: str
     token_ceiling: int
     api_key: str = field(default="", repr=False)
-    base_url: str = "http://localhost:11434"
+    base_url: str = field(default="http://localhost:11434", repr=False)
 
     def validate(self) -> None:
-        if self.provider not in {"gemini", "ollama"}:
+        if not isinstance(self.provider, str) or self.provider not in {
+            "gemini",
+            "ollama",
+        }:
             raise ValueError("Provider must be gemini or ollama.")
-        if not self.model.strip():
+        if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("Model must not be blank.")
         if (
             isinstance(self.token_ceiling, bool)
@@ -65,16 +75,34 @@ class ProviderSettings:
             or self.token_ceiling < 1
         ):
             raise ValueError("Token ceiling must be positive.")
+        if not isinstance(self.api_key, str):
+            raise ValueError("API key must be a string.")
         if self.provider == "gemini" and not self.api_key.strip():
             raise ValueError("Gemini API key is required.")
         if self.provider == "ollama":
-            parsed = urlsplit(self.base_url)
-            if (
-                parsed.scheme not in {"http", "https"}
-                or not parsed.netloc
-                or any(character.isspace() for character in parsed.netloc)
+            if not isinstance(self.base_url, str) or any(
+                character.isspace() for character in self.base_url
             ):
                 raise ValueError("Ollama base URL must be an HTTP(S) URL.")
+            try:
+                parsed = urlsplit(self.base_url)
+                hostname = parsed.hostname
+                parsed.port
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    "Ollama base URL must be an HTTP(S) URL."
+                ) from error
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or "?" in self.base_url
+                or "#" in self.base_url
+            ):
+                raise ValueError(
+                    "Ollama base URL cannot contain credentials, query, or fragment."
+                )
 
 
 @dataclass(frozen=True)
@@ -85,7 +113,6 @@ class ConditionResult:
     rtm: list[RTMRow]
     metrics: RunMetrics
 
-    @property
     def download_bundle(self) -> dict:
         bundle = self.bundle
         return {
@@ -127,7 +154,7 @@ def _now() -> str:
 
 def _comparison_id(document_hash: str) -> str:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-    return f"{timestamp}-{document_hash[:12]}"
+    return f"{timestamp}-{document_hash[:12]}-{uuid4().hex[:8]}"
 
 
 def _make_provider(
@@ -145,6 +172,7 @@ def _empty_metrics(
     *,
     latency_seconds: float,
     budget_exhausted: bool,
+    charged_tokens: int,
 ) -> RunMetrics:
     return RunMetrics(
         completion=False,
@@ -163,6 +191,7 @@ def _empty_metrics(
         test_case_count=0,
         input_tokens=context.input_tokens if context else 0,
         output_tokens=context.output_tokens if context else 0,
+        charged_tokens=charged_tokens,
         latency_seconds=latency_seconds,
         retries=context.retries if context else 0,
         schema_repairs=context.schema_repairs if context else 0,
@@ -171,7 +200,7 @@ def _empty_metrics(
     )
 
 
-def _failure_category(error: Exception) -> FailureCategory:
+def _failure_category(error: Exception) -> FailureCategory | None:
     if isinstance(error, BudgetExceeded):
         return FailureCategory.BUDGET_EXHAUSTION
     if isinstance(error, StructuredOutputError):
@@ -184,7 +213,11 @@ def _failure_category(error: Exception) -> FailureCategory:
         )
     if isinstance(error, TimeoutError):
         return FailureCategory.TIMEOUT
-    return FailureCategory.CONFIGURATION
+    if isinstance(error, PipelineOutputError):
+        return FailureCategory.SEMANTIC_VALIDATION
+    if isinstance(error, ConfigurationError):
+        return FailureCategory.CONFIGURATION
+    return None
 
 
 PIPELINES = {
@@ -194,16 +227,13 @@ PIPELINES = {
 }
 
 
-def _write_bundle(
-    store: RunStore,
-    comparison_id: str,
-    condition: Condition,
+def _bundle_artifacts(
     bundle: ArtifactBundle,
     validation: ValidationReport,
     rtm: list[RTMRow],
     metrics: RunMetrics,
-) -> None:
-    values = {
+) -> dict[str, object]:
+    return {
         "requirements.json": [
             item.model_dump(mode="json") for item in bundle.requirements
         ],
@@ -215,13 +245,37 @@ def _write_bundle(
         "rtm.json": [item.model_dump(mode="json") for item in rtm],
         "metrics.json": metrics.model_dump(mode="json"),
     }
-    for filename, value in values.items():
-        store.write_artifact(comparison_id, condition, filename, value)
 
 
 def _safe_message(error: Exception, settings: ProviderSettings) -> str:
     message = str(error)
-    return message.replace(settings.api_key, "[REDACTED]") if settings.api_key else message
+    secrets = [settings.api_key]
+    try:
+        parsed = urlsplit(settings.base_url)
+        secrets.extend(
+            [
+                parsed.username or "",
+                parsed.password or "",
+                *(value for _key, value in parse_qsl(parsed.query)),
+                parsed.fragment,
+            ]
+        )
+    except (TypeError, ValueError):
+        pass
+    for secret in sorted(filter(None, secrets), key=len, reverse=True):
+        message = message.replace(secret, "[REDACTED]")
+    return re.sub(
+        r"(?i)\b(api[_-]?key|token|password|secret)\s*[:=]\s*[^\s,;]+",
+        r"\1=[REDACTED]",
+        message,
+    )
+
+
+def _notify(progress: Progress, condition: Condition | None, message: str) -> None:
+    try:
+        progress(condition, message)
+    except Exception:
+        pass
 
 
 def run_comparison(
@@ -251,7 +305,7 @@ def run_comparison(
         started_at=_now(),
     )
 
-    progress(None, "Parsing PDF")
+    _notify(progress, None, "Parsing PDF")
     try:
         chunks = parse_pdf(pdf_bytes)
     except DocumentError as error:
@@ -266,6 +320,7 @@ def run_comparison(
             update={"completed_at": datetime.fromisoformat(_now())}
         )
         store.update_comparison(manifest)
+        _notify(progress, None, "Failed")
         return ComparisonResult(
             manifest=manifest,
             conditions={},
@@ -276,7 +331,7 @@ def run_comparison(
     store.create_comparison(manifest, chunks)
     results: dict[Condition, ConditionResult] = {}
     for condition in manifest.condition_order:
-        progress(condition, "Starting")
+        _notify(progress, condition, "Starting")
         condition_manifest = ConditionManifest(
             condition=condition,
             status=RunStatus.RUNNING,
@@ -300,7 +355,18 @@ def run_comparison(
         rtm: list[RTMRow] = []
         started = time.perf_counter()
         try:
-            provider = provider_factory(condition, ledger)
+            try:
+                provider = provider_factory(condition, ledger)
+            except Exception as error:
+                raise ConfigurationError(str(error)) from error
+            if getattr(provider, "ledger", None) is not ledger:
+                raise ConfigurationError(
+                    "Provider must use the condition budget ledger."
+                )
+            if getattr(provider, "model", None) != settings.model:
+                raise ConfigurationError(
+                    "Provider model must match the comparison model."
+                )
             context = PipelineContext(provider=provider)
             bundle = PIPELINES[condition](context, chunks)
             validation = validate_bundle(bundle, chunks)
@@ -311,6 +377,7 @@ def run_comparison(
                 validation,
                 input_tokens=context.input_tokens,
                 output_tokens=context.output_tokens,
+                charged_tokens=context.charged_tokens,
                 latency_seconds=latency,
                 retries=context.retries,
                 schema_repairs=context.schema_repairs,
@@ -337,10 +404,13 @@ def run_comparison(
                 )
         except Exception as error:
             category = _failure_category(error)
+            if category is None:
+                raise
             metrics = _empty_metrics(
                 context,
                 latency_seconds=time.perf_counter() - started,
                 budget_exhausted=category is FailureCategory.BUDGET_EXHAUSTION,
+                charged_tokens=ledger.used,
             )
             bundle = None
             validation = None
@@ -354,39 +424,28 @@ def run_comparison(
                 }
             )
 
-        if bundle is None:
-            store.write_artifact(
-                manifest.comparison_id,
-                condition,
-                "metrics.json",
-                metrics.model_dump(mode="json"),
-            )
-        else:
-            _write_bundle(
-                store,
-                manifest.comparison_id,
-                condition,
-                bundle,
-                validation,
-                rtm,
-                metrics,
-            )
-        store.append_event(
-            manifest.comparison_id,
-            condition,
-            {
-                "timestamp": _now(),
-                "stage": "finished",
-                "status": condition_manifest.status.value,
-                "input_tokens": metrics.input_tokens,
-                "output_tokens": metrics.output_tokens,
-                "retries": metrics.retries,
-                "schema_repairs": metrics.schema_repairs,
-                "semantic_revisions": metrics.semantic_revisions,
-                "charged_tokens": ledger.used,
-            },
+        artifacts = (
+            {"metrics.json": metrics.model_dump(mode="json")}
+            if bundle is None
+            else _bundle_artifacts(bundle, validation, rtm, metrics)
         )
-        store.update_condition(manifest.comparison_id, condition_manifest)
+        finished_event = {
+            "timestamp": _now(),
+            "stage": "finished",
+            "status": condition_manifest.status.value,
+            "input_tokens": metrics.input_tokens,
+            "output_tokens": metrics.output_tokens,
+            "retries": metrics.retries,
+            "schema_repairs": metrics.schema_repairs,
+            "semantic_revisions": metrics.semantic_revisions,
+            "charged_tokens": metrics.charged_tokens,
+        }
+        store.finalize_condition(
+            manifest.comparison_id,
+            condition_manifest,
+            artifacts,
+            finished_event,
+        )
         results[condition] = ConditionResult(
             manifest=condition_manifest,
             bundle=bundle,
@@ -394,11 +453,11 @@ def run_comparison(
             rtm=rtm,
             metrics=metrics,
         )
-        progress(condition, condition_manifest.status.value.title())
+        _notify(progress, condition, condition_manifest.status.value.title())
 
     manifest = manifest.model_copy(
         update={"completed_at": datetime.fromisoformat(_now())}
     )
     store.update_comparison(manifest)
-    progress(None, "Complete")
+    _notify(progress, None, "Complete")
     return ComparisonResult(manifest=manifest, conditions=results)

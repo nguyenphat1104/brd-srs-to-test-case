@@ -73,12 +73,15 @@ def _atomic_text(path: Path, text: str) -> None:
 
 
 def _atomic_json(path: Path, value: Any) -> None:
-    _atomic_text(
-        path,
+    _atomic_text(path, _json_text(value))
+
+
+def _json_text(value: Any) -> str:
+    return (
         json.dumps(
             value, allow_nan=False, ensure_ascii=False, indent=2, sort_keys=True
         )
-        + "\n",
+        + "\n"
     )
 
 
@@ -176,6 +179,26 @@ class RunStore:
         except ValueError as error:
             raise StorageError("Condition manifest is invalid.") from error
 
+    def _terminal_condition(
+        self, current: ConditionManifest, manifest: ConditionManifest
+    ) -> ConditionManifest:
+        updated = self._validated_condition(manifest)
+        if any(
+            getattr(updated, field) != getattr(current, field)
+            for field in (
+                "condition",
+                "provider",
+                "model",
+                "temperature",
+                "token_ceiling",
+                "started_at",
+            )
+        ):
+            raise ImmutableArtifactError("Condition configuration cannot be updated.")
+        if updated.status not in {RunStatus.COMPLETED, RunStatus.FAILED}:
+            raise ImmutableArtifactError("Condition updates must be terminal.")
+        return updated
+
     def _cleanup_created(self, directory: Path) -> None:
         self._assert_no_symlinks(directory)
         shutil.rmtree(directory)
@@ -263,24 +286,86 @@ class RunStore:
             current = self._condition_manifest(comparison_id, manifest.condition)
             if current.status is not RunStatus.RUNNING:
                 raise ImmutableArtifactError("Terminal conditions cannot be updated.")
-            updated = self._validated_condition(manifest)
-            if any(
-                getattr(updated, field) != getattr(current, field)
-                for field in (
-                    "condition",
-                    "provider",
-                    "model",
-                    "temperature",
-                    "token_ceiling",
-                    "started_at",
-                )
-            ):
-                raise ImmutableArtifactError("Condition configuration cannot be updated.")
-            if updated.status not in {RunStatus.COMPLETED, RunStatus.FAILED}:
-                raise ImmutableArtifactError("Condition updates must be terminal.")
+            updated = self._terminal_condition(current, manifest)
             self._assert_no_symlinks(path)
             _atomic_json(path, updated.model_dump(mode="json"))
         return path
+
+    def finalize_condition(
+        self,
+        comparison_id: str,
+        manifest: ConditionManifest,
+        artifacts: dict[str, Any],
+        finished_event: Any,
+    ) -> Path:
+        validated = self._validated_condition(manifest)
+        artifact_texts: dict[str, str] = {}
+        normalized_names: set[str] = set()
+        for filename, value in artifacts.items():
+            filename = _component(filename)
+            normalized = filename.casefold()
+            if normalized in {
+                "manifest.json",
+                "events.jsonl",
+                ".runstore.lock",
+            } or normalized.startswith(".tmp-"):
+                raise StorageError("Artifact filename is reserved by the run store.")
+            if normalized in normalized_names:
+                raise StorageError("Artifact filenames must be unique.")
+            normalized_names.add(normalized)
+            artifact_texts[filename] = _json_text(value)
+        event_text = json.dumps(
+            finished_event, allow_nan=False, ensure_ascii=False, sort_keys=True
+        )
+        manifest_text = _json_text(validated.model_dump(mode="json"))
+        directory = self.condition_dir(comparison_id, validated.condition)
+        manifest_path = directory / "manifest.json"
+        events_path = directory / "events.jsonl"
+
+        with self._mutation():
+            if self._comparison_manifest(comparison_id).completed_at is not None:
+                raise ImmutableArtifactError(
+                    "Completed comparisons cannot finalize conditions."
+                )
+            current = self._condition_manifest(comparison_id, validated.condition)
+            if current.status is not RunStatus.RUNNING:
+                raise ImmutableArtifactError("Terminal conditions cannot be finalized.")
+            self._terminal_condition(current, validated)
+            paths = {filename: directory / filename for filename in artifact_texts}
+            for path in [*paths.values(), manifest_path, events_path]:
+                self._assert_no_symlinks(path)
+            for path in paths.values():
+                if path.exists():
+                    raise ImmutableArtifactError("Artifact already exists.")
+
+            original_manifest = manifest_path.read_text(encoding="utf-8")
+            original_events = (
+                events_path.read_text(encoding="utf-8")
+                if events_path.exists()
+                else None
+            )
+            events = original_events or ""
+            if events and not events.endswith("\n"):
+                events += "\n"
+            created: list[Path] = []
+            try:
+                for filename, text in artifact_texts.items():
+                    path = paths[filename]
+                    created.append(path)
+                    _atomic_text(path, text)
+                _atomic_text(events_path, events + event_text + "\n")
+                _atomic_text(manifest_path, manifest_text)
+            except Exception:
+                for path in created:
+                    path.unlink(missing_ok=True)
+                if original_events is None:
+                    events_path.unlink(missing_ok=True)
+                else:
+                    _atomic_text(events_path, original_events)
+                _atomic_text(manifest_path, original_manifest)
+                _fsync_directory(directory)
+                raise
+        return manifest_path
 
     def write_artifact(
         self, comparison_id: str, condition: Condition, filename: str, value: Any
@@ -302,12 +387,13 @@ class RunStore:
         self, comparison_id: str, filename: str, value: Any
     ) -> Path:
         filename = _component(filename)
-        if filename in {
+        normalized = filename.casefold()
+        if normalized in {
             "manifest.json",
             "chunks.json",
             "conditions",
             ".runstore.lock",
-        } or filename.startswith(".tmp-"):
+        } or normalized.startswith(".tmp-"):
             raise StorageError("Artifact filename is reserved by the run store.")
         path = self.comparison_dir(comparison_id) / filename
         with self._mutation():

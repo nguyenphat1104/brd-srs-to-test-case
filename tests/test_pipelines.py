@@ -15,6 +15,7 @@ from brd_srs_testgen.models import (
     TestCaseBatch as ModelTestCaseBatch,
 )
 from brd_srs_testgen.pipelines import (
+    PipelineOutputError,
     RULES,
     PipelineContext,
     run_centralized_multi_agent,
@@ -154,21 +155,21 @@ class InvalidWorkerProvider(CentralProvider):
 
 
 def test_centralized_rejects_out_of_range_worker_id() -> None:
-    with pytest.raises(ValueError, match="outside worker 1 range"):
+    with pytest.raises(PipelineOutputError, match="outside worker 1 range"):
         run_centralized_multi_agent(
             PipelineContext(provider=InvalidWorkerProvider("range")), [chunk()]
         )
 
 
 def test_centralized_rejects_duplicate_worker_id() -> None:
-    with pytest.raises(ValueError, match="duplicate scenario ID"):
+    with pytest.raises(PipelineOutputError, match="duplicate scenario ID"):
         run_centralized_multi_agent(
             PipelineContext(provider=InvalidWorkerProvider("duplicate")), [chunk()]
         )
 
 
 def test_centralized_rejects_bad_scenario_parent() -> None:
-    with pytest.raises(ValueError, match="unknown worker scenario"):
+    with pytest.raises(PipelineOutputError, match="unknown worker scenario"):
         run_centralized_multi_agent(
             PipelineContext(provider=InvalidWorkerProvider("parent")), [chunk()]
         )
@@ -201,7 +202,9 @@ def test_worker_cases_reject_dependency_only_artifacts(target: str) -> None:
         dependency if target == "test_case" else assigned,
     )
 
-    with pytest.raises(ValueError, match="must include an assigned requirement"):
+    with pytest.raises(
+        PipelineOutputError, match="must include an assigned requirement"
+    ):
         pipeline_module._validate_worker_cases(0, batch, assigned, dependency)
 
 
@@ -214,7 +217,8 @@ def test_worker_cases_reject_unknown_requirement_links(target: str) -> None:
     )
 
     with pytest.raises(
-        ValueError, match="outside assigned requirements and dependency context"
+        PipelineOutputError,
+        match="outside assigned requirements and dependency context",
     ):
         pipeline_module._validate_worker_cases(0, batch, assigned, ["REQ-002"])
 

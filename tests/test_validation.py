@@ -105,6 +105,7 @@ def test_metrics_include_usage_and_duplicate_rate() -> None:
         report,
         input_tokens=100,
         output_tokens=50,
+        charged_tokens=175,
         latency_seconds=1.25,
         retries=1,
         schema_repairs=0,
@@ -114,6 +115,7 @@ def test_metrics_include_usage_and_duplicate_rate() -> None:
 
     assert metrics.input_tokens == 100
     assert metrics.output_tokens == 50
+    assert metrics.charged_tokens == 175
     assert metrics.duplicate_test_case_rate == 1.0
 
 

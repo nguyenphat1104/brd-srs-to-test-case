@@ -242,6 +242,7 @@ def compute_metrics(
     schema_repairs: int,
     semantic_revisions: int,
     budget_exhausted: bool,
+    charged_tokens: int = 0,
 ) -> RunMetrics:
     requirements = {item.requirement_id for item in bundle.requirements}
     scenario_requirement_ids = {
@@ -313,6 +314,7 @@ def compute_metrics(
         test_case_count=len(bundle.test_cases),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        charged_tokens=charged_tokens,
         latency_seconds=latency_seconds,
         retries=retries,
         schema_repairs=schema_repairs,

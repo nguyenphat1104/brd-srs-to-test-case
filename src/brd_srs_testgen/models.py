@@ -186,6 +186,7 @@ class RunMetrics(StrictModel):
     test_case_count: int = Field(ge=0)
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
+    charged_tokens: int = Field(default=0, ge=0)
     latency_seconds: float = Field(ge=0)
     retries: int = Field(ge=0)
     schema_repairs: int = Field(ge=0)

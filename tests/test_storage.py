@@ -481,3 +481,46 @@ def test_non_finite_json_is_rejected_without_corruption(tmp_path) -> None:
         / "invalid.json"
     ).exists()
     assert events.read_text() == original
+
+
+def test_condition_finalization_validates_names_and_json_before_writing(tmp_path) -> None:
+    store = RunStore(tmp_path)
+    comparison = comparison_manifest()
+    running = condition_manifest()
+    store.create_comparison(comparison, [chunk()])
+    store.start_condition(comparison.comparison_id, running)
+    store.append_event(
+        comparison.comparison_id, running.condition, {"stage": "started"}
+    )
+    directory = store.condition_dir(comparison.comparison_id, running.condition)
+    original_manifest = (directory / "manifest.json").read_bytes()
+    original_events = (directory / "events.jsonl").read_bytes()
+    terminal = running.model_copy(
+        update={"status": RunStatus.COMPLETED, "completed_at": datetime.now(UTC)}
+    )
+
+    with pytest.raises(StorageError):
+        store.finalize_condition(
+            comparison.comparison_id,
+            terminal,
+            {"Manifest.JSON": {}},
+            {"stage": "finished", "status": "completed"},
+        )
+    with pytest.raises(StorageError):
+        store.finalize_condition(
+            comparison.comparison_id,
+            terminal,
+            {"result.json": {}, "RESULT.JSON": {}},
+            {"stage": "finished", "status": "completed"},
+        )
+    with pytest.raises(ValueError):
+        store.finalize_condition(
+            comparison.comparison_id,
+            terminal,
+            {"first.json": {}, "invalid.json": {"value": float("nan")}},
+            {"stage": "finished", "status": "completed"},
+        )
+
+    assert (directory / "manifest.json").read_bytes() == original_manifest
+    assert (directory / "events.jsonl").read_bytes() == original_events
+    assert not (directory / "first.json").exists()
