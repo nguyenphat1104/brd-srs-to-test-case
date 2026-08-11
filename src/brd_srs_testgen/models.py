@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 
 class StrictModel(BaseModel):
@@ -108,7 +109,7 @@ class TestCase(StrictModel):
     title: str = Field(min_length=1)
     priority: TestPriority
     preconditions: list[str] = Field(default_factory=list)
-    test_data: dict[str, str] = Field(default_factory=dict)
+    test_data: dict[str, JsonValue] = Field(default_factory=dict)
     steps: list[TestStep] = Field(min_length=1)
     source_references: list[SourceReference] = Field(min_length=1)
 
@@ -171,24 +172,24 @@ class RTMRow(StrictModel):
 class RunMetrics(StrictModel):
     completion: bool
     schema_valid: bool
-    citation_coverage: float
-    requirement_scenario_coverage: float
-    requirement_test_case_coverage: float
-    positive_scenario_coverage: float
-    non_positive_scenario_coverage: float
-    rtm_completeness: float
-    orphan_rate: float
-    invalid_reference_rate: float
-    duplicate_test_case_rate: float
-    requirement_count: int
-    scenario_count: int
-    test_case_count: int
-    input_tokens: int
-    output_tokens: int
-    latency_seconds: float
-    retries: int
-    schema_repairs: int
-    semantic_revisions: int
+    citation_coverage: float = Field(ge=0, le=1)
+    requirement_scenario_coverage: float = Field(ge=0, le=1)
+    requirement_test_case_coverage: float = Field(ge=0, le=1)
+    positive_scenario_coverage: float = Field(ge=0, le=1)
+    non_positive_scenario_coverage: float = Field(ge=0, le=1)
+    rtm_completeness: float = Field(ge=0, le=1)
+    orphan_rate: float = Field(ge=0, le=1)
+    invalid_reference_rate: float = Field(ge=0, le=1)
+    duplicate_test_case_rate: float = Field(ge=0, le=1)
+    requirement_count: int = Field(ge=0)
+    scenario_count: int = Field(ge=0)
+    test_case_count: int = Field(ge=0)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    latency_seconds: float = Field(ge=0)
+    retries: int = Field(ge=0)
+    schema_repairs: int = Field(ge=0)
+    semantic_revisions: int = Field(ge=0)
     budget_exhausted: bool
 
 
@@ -197,23 +198,56 @@ class ConditionManifest(StrictModel):
     status: RunStatus
     provider: str
     model: str
-    temperature: float
-    token_ceiling: int
-    started_at: str
-    completed_at: str | None = None
+    temperature: float = Field(ge=0)
+    token_ceiling: int = Field(ge=1)
+    started_at: AwareDatetime
+    completed_at: AwareDatetime | None = None
     failure_category: FailureCategory | None = None
     failure_message: str | None = None
+
+    @model_validator(mode="after")
+    def validate_status(self) -> Self:
+        if self.completed_at is not None and self.completed_at < self.started_at:
+            raise ValueError("completed_at cannot be earlier than started_at")
+        if self.status is RunStatus.COMPLETED:
+            if self.completed_at is None:
+                raise ValueError("completed runs require completed_at")
+            if self.failure_category is not None or self.failure_message is not None:
+                raise ValueError("completed runs cannot have failure details")
+        elif self.status is RunStatus.FAILED:
+            if self.completed_at is None or self.failure_category is None:
+                raise ValueError("failed runs require completed_at and failure_category")
+        elif any(
+            value is not None
+            for value in (
+                self.completed_at,
+                self.failure_category,
+                self.failure_message,
+            )
+        ):
+            raise ValueError("running runs cannot have completion or failure details")
+        return self
 
 
 class ComparisonManifest(StrictModel):
     comparison_id: str
-    document_hash: str
+    document_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     provider: str
     model: str
-    temperature: float
-    token_ceiling: int
+    temperature: float = Field(ge=0)
+    token_ceiling: int = Field(ge=1)
     condition_order: list[Condition]
     prompt_version: str
     schema_version: str
-    started_at: str
-    completed_at: str | None = None
+    started_at: AwareDatetime
+    completed_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def validate_condition_order(self) -> Self:
+        if self.completed_at is not None and self.completed_at < self.started_at:
+            raise ValueError("completed_at cannot be earlier than started_at")
+        if len(self.condition_order) != len(Condition) or set(self.condition_order) != set(
+            Condition
+        ):
+            raise ValueError("condition_order must contain each condition exactly once")
+        return self
