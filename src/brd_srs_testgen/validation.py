@@ -34,7 +34,14 @@ def validate_bundle(
     issues: list[ValidationIssue] = []
     requirements = {item.requirement_id: item for item in bundle.requirements}
     scenarios = {item.scenario_id: item for item in bundle.scenarios}
+    scenario_requirement_ids_by_id: dict[str, set[str]] = {}
+    for scenario in bundle.scenarios:
+        scenario_requirement_ids_by_id.setdefault(scenario.scenario_id, set()).update(
+            scenario.requirement_ids
+        )
 
+    if not (bundle.requirements or bundle.scenarios or bundle.test_cases):
+        issues.append(_issue("empty_bundle", "bundle", "Bundle has no artifacts."))
     for duplicate in sorted(
         set().union(
             _duplicates([item.requirement_id for item in bundle.requirements]),
@@ -104,7 +111,7 @@ def validate_bundle(
                     )
                 )
         if scenario and not set(test_case.requirement_ids).issubset(
-            scenario.requirement_ids
+            scenario_requirement_ids_by_id[test_case.scenario_id]
         ):
             issues.append(
                 _issue(
@@ -217,14 +224,11 @@ def _duplicates_rate(bundle: ArtifactBundle) -> float:
         fingerprints.append(
             set(zip(words, words[1:], words[2:])) if len(words) >= 3 else set(words)
         )
-    pairs = list(combinations(fingerprints, 2))
-    return _ratio(
-        sum(
-            _ratio(len(left & right), len(left | right)) >= 0.85
-            for left, right in pairs
-        ),
-        len(pairs),
-    )
+    duplicate_pairs = pair_count = 0
+    for left, right in combinations(fingerprints, 2):
+        pair_count += 1
+        duplicate_pairs += _ratio(len(left & right), len(left | right)) >= 0.85
+    return _ratio(duplicate_pairs, pair_count)
 
 
 def compute_metrics(
@@ -240,7 +244,6 @@ def compute_metrics(
     budget_exhausted: bool,
 ) -> RunMetrics:
     requirements = {item.requirement_id for item in bundle.requirements}
-    scenarios = {item.scenario_id: item for item in bundle.scenarios}
     scenario_requirement_ids = {
         requirement_id
         for scenario in bundle.scenarios
@@ -283,14 +286,10 @@ def compute_metrics(
         schema_valid=True,
         citation_coverage=_ratio(
             sum(
-                artifact_id not in invalid_source_artifact_ids
-                for artifact_id in [
-                    *[item.requirement_id for item in bundle.requirements],
-                    *[item.scenario_id for item in bundle.scenarios],
-                    *[item.test_case_id for item in bundle.test_cases],
-                ]
+                requirement.requirement_id not in invalid_source_artifact_ids
+                for requirement in bundle.requirements
             ),
-            len(artifacts),
+            len(bundle.requirements),
         ),
         requirement_scenario_coverage=_ratio(
             len(scenario_requirement_ids), len(requirements)
