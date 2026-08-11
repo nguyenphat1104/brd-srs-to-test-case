@@ -1,6 +1,9 @@
 # brd-srs-to-test-case
 
-# steps to run app (require API Token)
-pip install -r requirements.txt
-# run other, change filename
-python -m streamlit run app.py
+Research core for comparing controlled BRD/SRS-to-test-case generation conditions.
+
+[Operations guide](docs/research-core-operations.md)
+
+```sh
+env PYTHONPATH=src .venv/bin/python -m streamlit run app.py
+```
