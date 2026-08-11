@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Generic, Protocol, TypeVar
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from pydantic import BaseModel
@@ -13,7 +15,7 @@ from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 Messages = list[dict[str, str]]
-RETRYABLE_CODES = {429, 500, 502, 503, 504}
+RETRYABLE_CODES = {408, 429, 500, 502, 503, 504}
 
 
 class BudgetExceeded(RuntimeError):
@@ -46,18 +48,30 @@ class StructuredOutputError(RuntimeError):
 @dataclass(frozen=True)
 class Reservation:
     tokens: int
+    _ledger: object | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _identity: object = field(
+        default_factory=object, init=False, repr=False, compare=False
+    )
 
 
 @dataclass
 class BudgetLedger:
     limit: int
     used: int = 0
-    reserved: int = 0
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    reserved: int = field(default=0, init=False)
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
+    _active: dict[object, int] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if self.limit < 1:
+        if _token_count(self.limit, "Token limit") < 1:
             raise ValueError("Token limit must be positive.")
+        _token_count(self.used, "Used token count")
+        if self.used > self.limit:
+            raise ValueError("Used tokens cannot exceed the token limit.")
 
     @property
     def remaining(self) -> int:
@@ -65,24 +79,35 @@ class BudgetLedger:
             return self.limit - self.used - self.reserved
 
     def reserve(self, tokens: int) -> Reservation:
-        if tokens < 1:
-            raise ValueError("Reservation must be positive.")
+        _positive_token_count(tokens, "Reservation")
         with self._lock:
             remaining = self.limit - self.used - self.reserved
             if tokens > remaining:
                 raise BudgetExceeded(f"Need {tokens} tokens; {remaining} remain.")
             self.reserved += tokens
-        return Reservation(tokens)
+            reservation = Reservation(tokens)
+            object.__setattr__(reservation, "_ledger", self)
+            self._active[reservation._identity] = tokens
+        return reservation
+
+    def _release(self, reservation: Reservation) -> int:
+        if (
+            reservation._ledger is not self
+            or reservation._identity not in self._active
+        ):
+            raise ValueError("Reservation is not active for this ledger.")
+        return self._active.pop(reservation._identity)
 
     def cancel(self, reservation: Reservation) -> None:
         with self._lock:
-            self.reserved -= reservation.tokens
+            self.reserved -= self._release(reservation)
 
     def settle(self, reservation: Reservation, actual_tokens: int) -> None:
+        _token_count(actual_tokens, "Actual token count")
         with self._lock:
-            self.reserved -= reservation.tokens
+            self.reserved -= self._release(reservation)
             self.used += actual_tokens
-            over = self.used > self.limit
+            over = self.used + self.reserved > self.limit
         if over:
             raise BudgetExceeded(
                 f"Actual usage {self.used} exceeded token limit {self.limit}."
@@ -95,10 +120,15 @@ class GenerationResult(Generic[T]):
     input_tokens: int
     output_tokens: int
     latency_seconds: float
+    billed_tokens: int | None = None
 
     @property
     def total_tokens(self) -> int:
-        return self.input_tokens + self.output_tokens
+        return (
+            self.billed_tokens
+            if self.billed_tokens is not None
+            else self.input_tokens + self.output_tokens
+        )
 
 
 class StructuredProvider(Protocol):
@@ -129,6 +159,62 @@ def _error_code(error: Exception) -> int | None:
     return status if isinstance(status, int) else None
 
 
+def _token_count(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a nonnegative integer.")
+    return value
+
+
+def _positive_token_count(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer.")
+    return value
+
+
+def _max_output_tokens(value: object) -> int:
+    return _positive_token_count(value, "max_output_tokens")
+
+
+def _is_transient(error: Exception) -> bool:
+    error_type = type(error)
+    return isinstance(error, (TimeoutError, ConnectionError)) or any(
+        base.__module__ in {"httpx", "httpx._exceptions"}
+        and base.__name__ == "TransportError"
+        for base in error_type.__mro__
+    ) or (
+        error_type.__module__.startswith("google.genai.")
+        and error_type.__name__ in {"APIConnectionError", "APITimeoutError"}
+    )
+
+
+def _provider_error(error: Exception) -> ProviderError:
+    code = _error_code(error)
+    return ProviderError(
+        str(error),
+        code=code,
+        retryable=code in RETRYABLE_CODES or _is_transient(error),
+    )
+
+
+def _url_error_retryable(error: URLError) -> bool:
+    reason = error.reason
+    return isinstance(reason, (TimeoutError, ConnectionError)) or (
+        isinstance(reason, socket.gaierror) and reason.errno == socket.EAI_AGAIN
+    )
+
+
+def _ollama_url(base_url: str) -> str:
+    url = f"{base_url}/api/chat"
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or any(char.isspace() for char in parsed.netloc)
+    ):
+        raise ValueError("Invalid Ollama URL.")
+    return url
+
+
 class GeminiProvider:
     def __init__(self, client, model: str, ledger: BudgetLedger) -> None:
         self.client = client
@@ -142,18 +228,17 @@ class GeminiProvider:
         *,
         max_output_tokens: int,
     ) -> GenerationResult[T]:
+        max_output_tokens = _max_output_tokens(max_output_tokens)
         prompt = _prompt(messages)
         try:
-            input_estimate = int(
+            input_estimate = _token_count(
                 self.client.models.count_tokens(
                     model=self.model, contents=prompt
-                ).total_tokens
+                ).total_tokens,
+                "Input token count",
             )
         except Exception as error:
-            code = _error_code(error)
-            raise ProviderError(
-                str(error), code=code, retryable=code in RETRYABLE_CODES or code is None
-            ) from error
+            raise _provider_error(error) from error
 
         reservation = self.ledger.reserve(input_estimate + max_output_tokens)
         started = time.perf_counter()
@@ -172,16 +257,39 @@ class GeminiProvider:
                 },
             )
         except Exception as error:
-            self.ledger.cancel(reservation)
-            code = _error_code(error)
-            raise ProviderError(
-                str(error), code=code, retryable=code in RETRYABLE_CODES or code is None
-            ) from error
+            if isinstance(error, (ValueError, TypeError)):
+                self.ledger.cancel(reservation)
+            else:
+                self.ledger.settle(reservation, reservation.tokens)
+            raise _provider_error(error) from error
 
-        input_tokens = int(interaction.usage.total_input_tokens)
-        output_tokens = int(interaction.usage.total_output_tokens)
-        self.ledger.settle(reservation, input_tokens + output_tokens)
-        raw_text = interaction.output_text
+        try:
+            input_tokens = _token_count(
+                interaction.usage.total_input_tokens, "Input token count"
+            )
+            output_tokens = _token_count(
+                interaction.usage.total_output_tokens, "Output token count"
+            )
+            reported_total = getattr(interaction.usage, "total_tokens", None)
+            total_tokens = (
+                input_tokens + output_tokens
+                if reported_total is None
+                else max(
+                    _token_count(reported_total, "Total token count"),
+                    input_tokens + output_tokens,
+                )
+            )
+        except Exception as error:
+            self.ledger.settle(reservation, reservation.tokens)
+            raise ProviderError(
+                "Gemini returned an incomplete response.", code=None, retryable=False
+            ) from error
+        self.ledger.settle(reservation, total_tokens)
+        raw_text = getattr(interaction, "output_text", None)
+        if not isinstance(raw_text, str):
+            raise ProviderError(
+                "Gemini returned an incomplete response.", code=None, retryable=False
+            )
         try:
             value = schema.model_validate_json(raw_text)
         except Exception as error:
@@ -196,6 +304,7 @@ class GeminiProvider:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_seconds=time.perf_counter() - started,
+            billed_tokens=total_tokens,
         )
 
 
@@ -220,6 +329,7 @@ class OllamaProvider:
         *,
         max_output_tokens: int,
     ) -> GenerationResult[T]:
+        max_output_tokens = _max_output_tokens(max_output_tokens)
         payload = {
             "model": self.model,
             "messages": messages,
@@ -229,35 +339,56 @@ class OllamaProvider:
             "options": {"temperature": 0.0, "num_predict": max_output_tokens},
         }
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        try:
+            request = Request(
+                _ollama_url(self.base_url),
+                data=encoded,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+        except (TypeError, ValueError) as error:
+            raise ProviderError(
+                "Invalid Ollama URL.", code=None, retryable=False
+            ) from error
         reservation = self.ledger.reserve(len(encoded) + max_output_tokens)
-        request = Request(
-            f"{self.base_url}/api/chat",
-            data=encoded,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
         started = time.perf_counter()
         try:
-            with urlopen(request, timeout=self.timeout) as response:
-                result = json.load(response)
-        except HTTPError as error:
+            response = urlopen(request, timeout=self.timeout)
+        except ValueError as error:
             self.ledger.cancel(reservation)
+            raise ProviderError("Invalid Ollama URL.", code=None, retryable=False) from error
+        except HTTPError as error:
+            self.ledger.settle(reservation, reservation.tokens)
             raise ProviderError(
                 str(error), code=error.code, retryable=error.code in RETRYABLE_CODES
             ) from error
-        except (URLError, TimeoutError) as error:
-            self.ledger.cancel(reservation)
+        except URLError as error:
+            self.ledger.settle(reservation, reservation.tokens)
+            raise ProviderError(
+                str(error), code=None, retryable=_url_error_retryable(error)
+            ) from error
+        except (TimeoutError, ConnectionError) as error:
+            self.ledger.settle(reservation, reservation.tokens)
             raise ProviderError(str(error), code=None, retryable=True) from error
         except Exception as error:
-            self.ledger.cancel(reservation)
+            self.ledger.settle(reservation, reservation.tokens)
             raise ProviderError(str(error), code=None, retryable=False) from error
 
         try:
-            input_tokens = int(result["prompt_eval_count"])
-            output_tokens = int(result["eval_count"])
+            with response:
+                result = json.load(response)
+        except Exception as error:
+            self.ledger.settle(reservation, reservation.tokens)
+            raise ProviderError(str(error), code=None, retryable=False) from error
+
+        try:
+            input_tokens = _token_count(result["prompt_eval_count"], "Input token count")
+            output_tokens = _token_count(
+                result["eval_count"], "Output token count"
+            )
             raw_text = result["message"]["content"]
         except (KeyError, TypeError, ValueError) as error:
-            self.ledger.cancel(reservation)
+            self.ledger.settle(reservation, reservation.tokens)
             raise ProviderError(
                 "Ollama returned an incomplete response.", code=None, retryable=False
             ) from error
