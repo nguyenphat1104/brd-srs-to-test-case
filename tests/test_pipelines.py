@@ -1,4 +1,5 @@
 import json
+import threading
 from collections import deque
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from brd_srs_testgen import pipelines as pipeline_module
 from brd_srs_testgen.models import (
     ArtifactBundle,
+    GeneratedCases,
     RequirementBatch,
     ReviewIssue,
     ReviewResult,
@@ -15,6 +17,7 @@ from brd_srs_testgen.models import (
 from brd_srs_testgen.pipelines import (
     RULES,
     PipelineContext,
+    run_centralized_multi_agent,
     run_single_prompt,
     run_staged_single_agent,
     scenarios_prompt,
@@ -27,6 +30,59 @@ from brd_srs_testgen.providers import (
     StructuredOutputError,
 )
 from tests.factories import bundle, chunk
+
+
+class CentralProvider:
+    model = "test-model"
+
+    def __init__(self) -> None:
+        self.ledger = BudgetLedger(100_000)
+        self.calls = []
+        self.lock = threading.Lock()
+        self.artifacts = bundle()
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        content = messages[-1]["content"]
+        with self.lock:
+            self.calls.append((messages, schema, max_output_tokens))
+        if schema is RequirementBatch:
+            value = RequirementBatch(
+                requirements=(
+                    self.artifacts.requirements
+                    if "p0001-c001" in content or "CANDIDATES" in content
+                    else []
+                )
+            )
+        elif schema is GeneratedCases:
+            assigned = '"requirements":[]' not in content.replace(" ", "")
+            value = GeneratedCases(
+                scenarios=self.artifacts.scenarios if assigned else [],
+                test_cases=self.artifacts.test_cases if assigned else [],
+            )
+        elif schema is ReviewResult:
+            value = ReviewResult(accepted=True)
+        else:
+            value = self.artifacts
+        return GenerationResult(
+            value=schema.model_validate(value.model_dump(mode="json")),
+            input_tokens=1,
+            output_tokens=1,
+            latency_seconds=0.01,
+        )
+
+
+def test_centralized_workers_receive_isolated_assignments() -> None:
+    provider = CentralProvider()
+    context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
+
+    result = run_centralized_multi_agent(context, [chunk()])
+
+    assert result == bundle()
+    worker_calls = [
+        call for call in provider.calls if "WORKER REQUIREMENT EXTRACTION" in call[0][0]["content"]
+    ]
+    assert len(worker_calls) == 3
+    assert all(len(call[0]) == 1 for call in worker_calls)
 
 
 class ScriptedProvider:

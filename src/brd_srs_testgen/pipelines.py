@@ -4,6 +4,7 @@ import json
 import threading
 import time
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TypeVar
 
@@ -13,6 +14,8 @@ from .documents import render_chunks
 from .models import (
     ArtifactBundle,
     DocumentChunk,
+    GeneratedCases,
+    Requirement,
     RequirementBatch,
     ReviewResult,
     ScenarioBatch,
@@ -78,6 +81,51 @@ def requirements_prompt(chunks: Iterable[DocumentChunk]) -> str:
 
 Extract and consolidate all supported functional, nonfunctional, and business requirements from the full evidence. Preserve ambiguities and dependencies when supported.
 Return one RequirementBatch.
+
+{_evidence(chunks)}"""
+
+
+def worker_requirements_prompt(
+    worker_index: int, chunks: Iterable[DocumentChunk]
+) -> str:
+    return f"""{RULES}
+
+WORKER REQUIREMENT EXTRACTION {worker_index + 1}/{WORKER_COUNT}
+
+Inspect only the assigned evidence. Extract every supported functional, nonfunctional, and business requirement, preserving dependencies, ambiguities, and exact evidence citations. Candidate IDs must start at REQ-{worker_index * 1000 + 1:03d}. Return one RequirementBatch. If the assignment is empty, return {{"requirements":[]}}.
+
+{_evidence(chunks)}"""
+
+
+def reconcile_requirements_prompt(
+    chunks: Iterable[DocumentChunk], candidates: list[Requirement]
+) -> str:
+    candidate_batch = RequirementBatch(requirements=candidates)
+    return f"""{RULES}
+
+Reconcile the untrusted candidate requirements against the full PDF evidence. Remove duplicates, resolve supported dependencies and conflicts, preserve supported ambiguities, and renumber the final requirements contiguously from REQ-001. Return one RequirementBatch.
+
+Candidate requirements JSON:
+{_data_block("CANDIDATES JSON", candidate_batch.model_dump_json())}
+
+{_evidence(chunks)}"""
+
+
+def worker_cases_prompt(
+    worker_index: int,
+    requirements: list[Requirement],
+    chunks: Iterable[DocumentChunk],
+) -> str:
+    requirement_batch = RequirementBatch(requirements=requirements)
+    start = worker_index * 1000 + 1
+    return f"""{RULES}
+
+WORKER CASE GENERATION {worker_index + 1}/{WORKER_COUNT}
+
+Generate scenarios and executable manual test cases only for the assigned requirements, grounded only in the assigned evidence. Scenario IDs must start at SCN-{start:03d}; test-case IDs must start at TC-{start:03d}. Include positive, negative, boundary, edge, and state-transition coverage wherever supported. Return one GeneratedCases. If the assignment is empty, return empty scenarios and test_cases lists.
+
+Assigned requirements JSON:
+{_data_block("ASSIGNED REQUIREMENTS JSON", requirement_batch.model_dump_json())}
 
 {_evidence(chunks)}"""
 
@@ -366,4 +414,111 @@ def run_staged_single_agent(
         requirements=requirements.requirements,
         scenarios=scenarios.scenarios,
         test_cases=test_cases.test_cases,
+    )
+
+
+def _balance(items: list[T], weight: Callable[[T], int]) -> list[list[T]]:
+    groups: list[list[T]] = [[] for _ in range(WORKER_COUNT)]
+    totals = [0] * WORKER_COUNT
+    for item in sorted(items, key=weight, reverse=True):
+        worker_index = min(range(WORKER_COUNT), key=totals.__getitem__)
+        groups[worker_index].append(item)
+        totals[worker_index] += weight(item)
+    return groups
+
+
+def _relevant_chunks(
+    requirements: list[Requirement], chunks: list[DocumentChunk]
+) -> list[DocumentChunk]:
+    chunk_ids = {
+        reference.chunk_id
+        for requirement in requirements
+        for reference in requirement.source_references
+    }
+    return [chunk for chunk in chunks if chunk.chunk_id in chunk_ids]
+
+
+def run_centralized_multi_agent(
+    context: PipelineContext, chunks: Iterable[DocumentChunk]
+) -> ArtifactBundle:
+    chunks = list(chunks)
+    chunk_groups = _balance(chunks, lambda chunk: len(chunk.text))
+    with ThreadPoolExecutor(max_workers=WORKER_COUNT) as executor:
+        futures = [
+            executor.submit(
+                context.generate,
+                [_user(worker_requirements_prompt(worker_index, group))],
+                RequirementBatch,
+                8_000,
+            )
+            for worker_index, group in enumerate(chunk_groups)
+        ]
+        try:
+            worker_requirements = [future.result() for future in futures]
+        except Exception:
+            for future in futures:
+                future.cancel()
+            raise
+
+    candidates = [
+        requirement
+        for batch in worker_requirements
+        for requirement in batch.requirements
+    ]
+    requirements = context.generate(
+        [_user(reconcile_requirements_prompt(chunks, candidates))],
+        RequirementBatch,
+        12_000,
+    )
+
+    requirement_groups = _balance(
+        requirements.requirements,
+        lambda requirement: len(requirement.description)
+        + 100 * len(requirement.source_references),
+    )
+    with ThreadPoolExecutor(max_workers=WORKER_COUNT) as executor:
+        futures = [
+            executor.submit(
+                context.generate,
+                [
+                    _user(
+                        worker_cases_prompt(
+                            worker_index,
+                            group,
+                            _relevant_chunks(group, chunks),
+                        )
+                    )
+                ],
+                GeneratedCases,
+                16_000,
+            )
+            for worker_index, group in enumerate(requirement_groups)
+        ]
+        try:
+            worker_cases = [future.result() for future in futures]
+        except Exception:
+            for future in futures:
+                future.cancel()
+            raise
+
+    bundle = ArtifactBundle(
+        requirements=requirements.requirements,
+        scenarios=[scenario for batch in worker_cases for scenario in batch.scenarios],
+        test_cases=[test_case for batch in worker_cases for test_case in batch.test_cases],
+    )
+    review = context.generate(
+        [_user(review_prompt("artifact bundle", bundle, chunks))],
+        ReviewResult,
+        4_000,
+    )
+    if review.accepted:
+        return bundle
+    return context.revise(
+        [],
+        "artifact bundle",
+        bundle,
+        review,
+        chunks,
+        ArtifactBundle,
+        30_000,
     )
