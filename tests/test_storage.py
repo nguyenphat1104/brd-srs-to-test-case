@@ -91,3 +91,44 @@ def test_events_are_appended_with_atomic_replacement(tmp_path) -> None:
         / "events.jsonl"
     ).read_text().splitlines()
     assert len(events) == 2
+
+
+@pytest.mark.parametrize("unsafe_id", ["../escaped", "absolute"])
+def test_unsafe_comparison_ids_cannot_escape_root(tmp_path, unsafe_id) -> None:
+    root = tmp_path / "runs"
+    store = RunStore(root)
+    comparison_id = (
+        "../escaped" if unsafe_id == "../escaped" else str(tmp_path / "absolute-id")
+    )
+    manifest = comparison_manifest().model_copy(
+        update={"comparison_id": comparison_id}
+    )
+    escaped = tmp_path / "escaped" if unsafe_id == "../escaped" else tmp_path / "absolute-id"
+
+    with pytest.raises(ValueError):
+        store.create_comparison(manifest, [chunk()])
+
+    assert not root.exists()
+    assert not escaped.exists()
+
+
+@pytest.mark.parametrize("unsafe_name", ["../artifact.json", "absolute"])
+def test_unsafe_artifact_names_cannot_escape_root(tmp_path, unsafe_name) -> None:
+    root = tmp_path / "runs"
+    store = RunStore(root)
+    manifest = comparison_manifest()
+    store.create_comparison(manifest, [chunk()])
+    store.start_condition(manifest.comparison_id, condition_manifest())
+    filename = (
+        "../artifact.json"
+        if unsafe_name == "../artifact.json"
+        else str(tmp_path / "artifact.json")
+    )
+    escaped = tmp_path / "artifact.json"
+
+    with pytest.raises(ValueError):
+        store.write_artifact(
+            manifest.comparison_id, Condition.SINGLE_PROMPT, filename, []
+        )
+
+    assert not escaped.exists()

@@ -13,6 +13,20 @@ class ImmutableArtifactError(RuntimeError):
     pass
 
 
+def _component(value: str) -> str:
+    path = Path(value)
+    if (
+        not value
+        or value in {".", ".."}
+        or "/" in value
+        or "\\" in value
+        or path.is_absolute()
+        or len(path.parts) != 1
+    ):
+        raise ValueError("Path must be a single normal component.")
+    return value
+
+
 def _atomic_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(prefix=".tmp-", dir=path.parent)
@@ -39,7 +53,7 @@ class RunStore:
         self.root = Path(root)
 
     def comparison_dir(self, comparison_id: str) -> Path:
-        return self.root / comparison_id
+        return self.root / _component(comparison_id)
 
     def condition_dir(self, comparison_id: str, condition: Condition) -> Path:
         return self.comparison_dir(comparison_id) / "conditions" / condition.value
@@ -82,7 +96,7 @@ class RunStore:
     def write_artifact(
         self, comparison_id: str, condition: Condition, filename: str, value: Any
     ) -> Path:
-        path = self.condition_dir(comparison_id, condition) / filename
+        path = self.condition_dir(comparison_id, condition) / _component(filename)
         if path.exists():
             raise ImmutableArtifactError("Artifact already exists.")
         _atomic_json(path, value)
