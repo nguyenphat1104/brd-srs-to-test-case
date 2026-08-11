@@ -70,9 +70,9 @@ Provider credentials remain in Streamlit session state and are never passed to s
 
 ### 4.2 Document evidence
 
-The evidence component hashes the uploaded PDF bytes with SHA-256, extracts text per page, normalizes whitespace, and creates bounded chunks without crossing page boundaries. Empty pages are retained in page accounting but do not create chunks. Oversized paragraphs are split at sentence or word boundaries; text is never silently truncated.
+The evidence component hashes the uploaded PDF bytes with SHA-256, rejects encrypted PDFs, extracts text per page, normalizes whitespace, and creates chunks of at most 6,000 characters without crossing page boundaries or adding overlap. Empty pages are retained in page accounting but do not create chunks. Oversized paragraphs are split at sentence or word boundaries; text is never silently truncated.
 
-Chunk IDs combine page number, page-local chunk number, and the first 12 hexadecimal characters of the normalized chunk SHA-256 hash. Every chunk stores its page, detected section when available, normalized text, and full content hash.
+Chunk IDs combine page number, page-local chunk number, and the first 12 hexadecimal characters of the normalized chunk SHA-256 hash. Every chunk stores its page, normalized text, and full content hash. Its section is the first non-empty page line of 3-100 characters that is either all uppercase or begins with a numeric heading such as `2.1`; otherwise the section is empty.
 
 Every requirement cites at least one chunk. Scenarios and test cases inherit or add citations. A citation excerpt is valid only when its whitespace-normalized text occurs in the cited chunk.
 
@@ -94,11 +94,13 @@ Strict models reject unknown fields and represent:
 
 Requirements, scenarios, and test cases use explicit unique IDs. Scenarios may reference multiple requirements. Every test case references exactly one scenario and one or more requirements. Each step has a positive integer order, action, and expected result.
 
-The field definitions and enumerated values from the broader approved design remain canonical unless this focused specification narrows them explicitly.
+The field definitions and enumerated values from the [broader approved design](2026-08-10-centralized-agent-test-case-generation-design.md) remain canonical unless this focused specification narrows them explicitly.
 
 ### 4.4 Provider boundary
 
 Gemini and Ollama adapters accept the same logical request: message history, target JSON schema, temperature, and maximum output tokens. They return parsed structured content plus normalized input tokens, output tokens, latency, model identifier, and retry metadata.
+
+Before a call, the adapter estimates input tokens and the ledger reserves that estimate plus maximum output tokens. Gemini uses its token-count endpoint. Ollama conservatively reserves the UTF-8 byte length of the serialized prompt and schema because its standard generation response reports prompt tokens only after execution. Reported usage settles the reservation. If actual usage pushes the ledger past its ceiling, the condition is marked budget-exhausted and makes no further calls.
 
 The adapters contain provider-specific transport and usage parsing. Pipeline code does not branch on provider type. A direct `if` selection is sufficient; this slice does not add a registry, plugin system, or provider factory hierarchy.
 
@@ -198,9 +200,9 @@ Events contain timestamps, stage names, sanitized provider metadata, token usage
 
 - Temperature is fixed at `0.0` for all conditions.
 - The UI requires a positive per-condition token ceiling and applies the same value to every condition.
-- Calls are refused before execution when their declared maximum would exceed the remaining ledger balance.
-- Transient timeouts, connection failures, rate limits, and eligible server failures receive bounded exponential-backoff retries.
-- Malformed structured output receives at most one schema-repair request per artifact.
+- Calls are refused before execution when estimated input tokens plus maximum output tokens would exceed the remaining ledger balance.
+- Transient timeouts, connection failures, HTTP 429, and HTTP 500/502/503/504 failures receive at most two retries after the initial call, delayed by 1 then 2 seconds.
+- A malformed single-prompt bundle receives at most one schema-repair request. In staged and centralized conditions, each malformed artifact response receives at most one schema-repair request.
 - Single-prompt receives no semantic revision.
 - Staged and centralized conditions receive at most one verifier-directed semantic revision per artifact.
 - Validation never drops invalid or uncovered artifacts silently.
