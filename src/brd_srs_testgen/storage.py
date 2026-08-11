@@ -298,6 +298,27 @@ class RunStore:
             _atomic_json(path, value)
         return path
 
+    def write_comparison_artifact(
+        self, comparison_id: str, filename: str, value: Any
+    ) -> Path:
+        filename = _component(filename)
+        path = self.comparison_dir(comparison_id) / filename
+        with self._mutation():
+            directory, _ = self._require_comparison(comparison_id)
+            if self._comparison_manifest(comparison_id).completed_at is not None:
+                raise ImmutableArtifactError(
+                    "Completed comparisons cannot write artifacts."
+                )
+            chunks = directory / "chunks.json"
+            self._assert_no_symlinks(chunks)
+            if not chunks.is_file():
+                raise StorageError("Comparison chunks do not exist.")
+            self._assert_no_symlinks(path)
+            if path.exists():
+                raise ImmutableArtifactError("Artifact already exists.")
+            _atomic_json(path, value)
+        return path
+
     def append_event(
         self, comparison_id: str, condition: Condition, event: Any
     ) -> Path:
