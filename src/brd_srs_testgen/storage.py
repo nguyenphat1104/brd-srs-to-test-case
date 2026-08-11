@@ -183,7 +183,10 @@ class RunStore:
     def create_comparison(
         self, manifest: ComparisonManifest, chunks: list[DocumentChunk]
     ) -> Path:
-        directory = self.comparison_dir(manifest.comparison_id)
+        validated = self._validated_comparison(manifest)
+        if validated.completed_at is not None:
+            raise ImmutableArtifactError("Comparisons must start unfinished.")
+        directory = self.comparison_dir(validated.comparison_id)
         with self._mutation(create_root=True):
             self._assert_no_symlinks(directory)
             try:
@@ -191,7 +194,7 @@ class RunStore:
             except FileExistsError as error:
                 raise ImmutableArtifactError("Comparison already exists.") from error
             try:
-                _atomic_json(directory / "manifest.json", manifest.model_dump(mode="json"))
+                _atomic_json(directory / "manifest.json", validated.model_dump(mode="json"))
                 _atomic_json(
                     directory / "chunks.json",
                     [chunk.model_dump(mode="json") for chunk in chunks],
@@ -233,16 +236,20 @@ class RunStore:
     def start_condition(
         self, comparison_id: str, manifest: ConditionManifest
     ) -> Path:
-        directory = self.condition_dir(comparison_id, manifest.condition)
+        validated = self._validated_condition(manifest)
+        if validated.status is not RunStatus.RUNNING:
+            raise ImmutableArtifactError("Conditions must start running.")
+        directory = self.condition_dir(comparison_id, validated.condition)
         with self._mutation():
-            self._require_comparison(comparison_id)
+            if self._comparison_manifest(comparison_id).completed_at is not None:
+                raise ImmutableArtifactError("Completed comparisons cannot start conditions.")
             self._assert_no_symlinks(directory)
             try:
                 directory.mkdir(parents=True, exist_ok=False)
             except FileExistsError as error:
                 raise ImmutableArtifactError("Condition already exists.") from error
             try:
-                _atomic_json(directory / "manifest.json", manifest.model_dump(mode="json"))
+                _atomic_json(directory / "manifest.json", validated.model_dump(mode="json"))
             except Exception:
                 self._cleanup_created(directory)
                 raise
@@ -251,6 +258,8 @@ class RunStore:
     def update_condition(self, comparison_id: str, manifest: ConditionManifest) -> Path:
         path = self.condition_dir(comparison_id, manifest.condition) / "manifest.json"
         with self._mutation():
+            if self._comparison_manifest(comparison_id).completed_at is not None:
+                raise ImmutableArtifactError("Completed comparisons cannot update conditions.")
             current = self._condition_manifest(comparison_id, manifest.condition)
             if current.status is not RunStatus.RUNNING:
                 raise ImmutableArtifactError("Terminal conditions cannot be updated.")
@@ -279,6 +288,8 @@ class RunStore:
         filename = _component(filename)
         path = self.condition_dir(comparison_id, condition) / filename
         with self._mutation():
+            if self._comparison_manifest(comparison_id).completed_at is not None:
+                raise ImmutableArtifactError("Completed comparisons cannot write artifacts.")
             if self._condition_manifest(comparison_id, condition).status is not RunStatus.RUNNING:
                 raise ImmutableArtifactError("Terminal conditions cannot write artifacts.")
             self._assert_no_symlinks(path)
@@ -293,6 +304,8 @@ class RunStore:
         path = self.condition_dir(comparison_id, condition) / "events.jsonl"
         event_text = json.dumps(event, allow_nan=False, ensure_ascii=False, sort_keys=True)
         with self._mutation():
+            if self._comparison_manifest(comparison_id).completed_at is not None:
+                raise ImmutableArtifactError("Completed comparisons cannot append events.")
             if self._condition_manifest(comparison_id, condition).status is not RunStatus.RUNNING:
                 raise ImmutableArtifactError("Terminal conditions cannot append events.")
             self._assert_no_symlinks(path)

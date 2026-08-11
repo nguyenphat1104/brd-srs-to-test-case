@@ -235,14 +235,6 @@ def test_terminal_manifests_cannot_be_updated(tmp_path) -> None:
     store = RunStore(tmp_path)
     manifest = comparison_manifest()
     store.create_comparison(manifest, [chunk()])
-    completed_comparison = manifest.model_copy(
-        update={"completed_at": datetime.now(UTC)}
-    )
-    store.update_comparison(completed_comparison)
-
-    with pytest.raises(ImmutableArtifactError):
-        store.update_comparison(completed_comparison)
-
     condition = condition_manifest()
     store.start_condition(manifest.comparison_id, condition)
     completed_condition = condition.model_copy(
@@ -255,6 +247,14 @@ def test_terminal_manifests_cannot_be_updated(tmp_path) -> None:
 
     with pytest.raises(ImmutableArtifactError):
         store.update_condition(manifest.comparison_id, completed_condition)
+
+    completed_comparison = manifest.model_copy(
+        update={"completed_at": datetime.now(UTC)}
+    )
+    store.update_comparison(completed_comparison)
+
+    with pytest.raises(ImmutableArtifactError):
+        store.update_comparison(completed_comparison)
 
 
 def test_comparison_configuration_cannot_be_updated(tmp_path) -> None:
@@ -323,6 +323,84 @@ def test_completed_conditions_reject_artifacts_and_events(tmp_path) -> None:
         / "after-completion.json"
     ).exists()
     assert events.read_text() == original
+
+
+def test_completed_comparisons_reject_all_child_mutations(tmp_path) -> None:
+    store = RunStore(tmp_path)
+    manifest = comparison_manifest()
+    condition = condition_manifest()
+    store.create_comparison(manifest, [chunk()])
+    store.start_condition(manifest.comparison_id, condition)
+    store.append_event(manifest.comparison_id, Condition.SINGLE_PROMPT, {"stage": "final"})
+    condition_path = store.condition_dir(manifest.comparison_id, Condition.SINGLE_PROMPT)
+    original_manifest = (condition_path / "manifest.json").read_text()
+    events = condition_path / "events.jsonl"
+    original_events = events.read_text()
+    store.update_comparison(
+        manifest.model_copy(update={"completed_at": datetime.now(UTC)})
+    )
+    other_condition = condition.model_copy(
+        update={"condition": Condition.STAGED_SINGLE_AGENT}
+    )
+    completed_condition = condition.model_copy(
+        update={
+            "status": RunStatus.COMPLETED,
+            "completed_at": datetime.now(UTC),
+        }
+    )
+
+    with pytest.raises(ImmutableArtifactError):
+        store.start_condition(manifest.comparison_id, other_condition)
+    with pytest.raises(ImmutableArtifactError):
+        store.update_condition(manifest.comparison_id, completed_condition)
+    with pytest.raises(ImmutableArtifactError):
+        store.write_artifact(
+            manifest.comparison_id,
+            Condition.SINGLE_PROMPT,
+            "after-completion.json",
+            {},
+        )
+    with pytest.raises(ImmutableArtifactError):
+        store.append_event(
+            manifest.comparison_id,
+            Condition.SINGLE_PROMPT,
+            {"stage": "late"},
+        )
+
+    assert not store.condition_dir(
+        manifest.comparison_id, Condition.STAGED_SINGLE_AGENT
+    ).exists()
+    assert (condition_path / "manifest.json").read_text() == original_manifest
+    assert events.read_text() == original_events
+    assert not (condition_path / "after-completion.json").exists()
+
+
+def test_terminal_manifests_cannot_start_persistence(tmp_path) -> None:
+    root = tmp_path / "runs"
+    store = RunStore(root)
+    comparison = comparison_manifest().model_copy(
+        update={"completed_at": datetime.now(UTC)}
+    )
+
+    with pytest.raises(ImmutableArtifactError):
+        store.create_comparison(comparison, [chunk()])
+
+    assert not root.exists()
+    manifest = comparison_manifest()
+    store.create_comparison(manifest, [chunk()])
+    terminal_condition = condition_manifest().model_copy(
+        update={
+            "status": RunStatus.COMPLETED,
+            "completed_at": datetime.now(UTC),
+        }
+    )
+
+    with pytest.raises(ImmutableArtifactError):
+        store.start_condition(manifest.comparison_id, terminal_condition)
+
+    assert not store.condition_dir(
+        manifest.comparison_id, Condition.SINGLE_PROMPT
+    ).exists()
 
 
 @pytest.mark.parametrize("failed_file", ["manifest.json", "chunks.json"])
