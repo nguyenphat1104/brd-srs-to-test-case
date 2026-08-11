@@ -142,7 +142,6 @@ def validate_bundle(
     test_requirement_ids = {
         requirement_id
         for case in bundle.test_cases
-        if case.scenario_id in scenarios
         for requirement_id in case.requirement_ids
         if requirement_id in requirements
     }
@@ -251,7 +250,6 @@ def compute_metrics(
     test_requirement_ids = {
         requirement_id
         for case in bundle.test_cases
-        if case.scenario_id in scenarios
         for requirement_id in case.requirement_ids
         if requirement_id in requirements
     }

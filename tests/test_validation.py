@@ -59,6 +59,32 @@ def test_uncovered_requirement_remains_in_rtm() -> None:
     assert not rows[1].covered
 
 
+def test_orphan_case_retains_requirement_test_case_coverage() -> None:
+    artifacts = bundle()
+    orphan = artifacts.test_cases[0].model_copy(update={"scenario_id": "SCN-999"})
+    artifacts = artifacts.model_copy(update={"test_cases": [orphan]})
+
+    report = validate_bundle(artifacts, [chunk()])
+    metrics = compute_metrics(
+        artifacts,
+        report,
+        input_tokens=0,
+        output_tokens=0,
+        latency_seconds=0,
+        retries=0,
+        schema_repairs=0,
+        semantic_revisions=0,
+        budget_exhausted=False,
+    )
+
+    assert {issue.code for issue in report.issues} >= {
+        "missing_scenario",
+        "orphan_test_case",
+    }
+    assert report.uncovered_requirement_ids == []
+    assert metrics.requirement_test_case_coverage == 1.0
+
+
 def test_metrics_include_usage_and_duplicate_rate() -> None:
     artifacts = bundle()
     duplicate = artifacts.test_cases[0].model_copy(
