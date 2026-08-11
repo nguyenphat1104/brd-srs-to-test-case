@@ -88,11 +88,13 @@ Return one RequirementBatch.
 def worker_requirements_prompt(
     worker_index: int, chunks: Iterable[DocumentChunk]
 ) -> str:
+    lower = worker_index * 1000 + 1
+    upper = (worker_index + 1) * 1000
     return f"""{RULES}
 
 WORKER REQUIREMENT EXTRACTION {worker_index + 1}/{WORKER_COUNT}
 
-Inspect only the assigned evidence. Extract every supported functional, nonfunctional, and business requirement, preserving dependencies, ambiguities, and exact evidence citations. Candidate IDs must start at REQ-{worker_index * 1000 + 1:03d}. Return one RequirementBatch. If the assignment is empty, return {{"requirements":[]}}.
+Inspect only the assigned evidence. Extract every supported functional, nonfunctional, and business requirement, preserving dependencies, ambiguities, and exact evidence citations. Candidate IDs must use the inclusive range REQ-{lower:03d} through REQ-{upper:03d}; you must not emit IDs outside these ranges. Return one RequirementBatch. If the assignment is empty, return {{"requirements":[]}}.
 
 {_evidence(chunks)}"""
 
@@ -117,12 +119,13 @@ def worker_cases_prompt(
     chunks: Iterable[DocumentChunk],
 ) -> str:
     requirement_batch = RequirementBatch(requirements=requirements)
-    start = worker_index * 1000 + 1
+    lower = worker_index * 1000 + 1
+    upper = (worker_index + 1) * 1000
     return f"""{RULES}
 
 WORKER CASE GENERATION {worker_index + 1}/{WORKER_COUNT}
 
-Generate scenarios and executable manual test cases only for the assigned requirements, grounded only in the assigned evidence. Scenario IDs must start at SCN-{start:03d}; test-case IDs must start at TC-{start:03d}. Include positive, negative, boundary, edge, and state-transition coverage wherever supported. Return one GeneratedCases. If the assignment is empty, return empty scenarios and test_cases lists.
+Generate scenarios and executable manual test cases only for the assigned requirements, grounded only in the assigned evidence. Scenario IDs must use the inclusive range SCN-{lower:03d} through SCN-{upper:03d}; test-case IDs must use the inclusive range TC-{lower:03d} through TC-{upper:03d}; you must not emit IDs outside these ranges. Include positive, negative, boundary, edge, and state-transition coverage wherever supported. Return one GeneratedCases. If the assignment is empty, return empty scenarios and test_cases lists.
 
 Assigned requirements JSON:
 {_data_block("ASSIGNED REQUIREMENTS JSON", requirement_batch.model_dump_json())}

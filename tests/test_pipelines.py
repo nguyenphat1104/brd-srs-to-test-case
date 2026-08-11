@@ -22,6 +22,8 @@ from brd_srs_testgen.pipelines import (
     run_staged_single_agent,
     scenarios_prompt,
     single_prompt,
+    worker_cases_prompt,
+    worker_requirements_prompt,
 )
 from brd_srs_testgen.providers import (
     BudgetLedger,
@@ -83,6 +85,23 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
     ]
     assert len(worker_calls) == 3
     assert all(len(call[0]) == 1 for call in worker_calls)
+
+
+@pytest.mark.parametrize(
+    ("worker_index", "lower", "upper"),
+    [(0, 1, 1000), (1, 1001, 2000), (2, 2001, 3000)],
+)
+def test_worker_prompts_use_disjoint_inclusive_id_ranges(
+    worker_index: int, lower: int, upper: int
+) -> None:
+    requirements = worker_requirements_prompt(worker_index, [chunk()])
+    cases = worker_cases_prompt(worker_index, bundle().requirements, [chunk()])
+
+    assert f"REQ-{lower:03d} through REQ-{upper:03d}" in requirements
+    assert f"SCN-{lower:03d} through SCN-{upper:03d}" in cases
+    assert f"TC-{lower:03d} through TC-{upper:03d}" in cases
+    assert "must not emit IDs outside these ranges" in requirements
+    assert "must not emit IDs outside these ranges" in cases
 
 
 class ScriptedProvider:
