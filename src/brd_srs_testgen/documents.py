@@ -53,8 +53,8 @@ def _pieces(text: str, max_chars: int) -> Iterable[str]:
         cut = remaining.rfind(" ", 0, max_chars + 1)
         if cut <= 0:
             cut = max_chars
-        yield remaining[:cut].strip()
-        remaining = remaining[cut:].strip()
+        yield remaining[:cut]
+        remaining = remaining[cut:]
 
 
 def chunk_pages(

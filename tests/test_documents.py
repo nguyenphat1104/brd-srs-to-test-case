@@ -24,6 +24,16 @@ def test_chunk_ids_are_stable_page_aware_and_bounded() -> None:
     assert first[0].section == "AUTHENTICATION"
 
 
+def test_chunk_splits_preserve_normalized_text() -> None:
+    text = "alpha beta gamma delta"
+
+    chunks = chunk_pages([(1, text)], max_chars=10)
+
+    assert "".join(chunk.text for chunk in chunks) == text
+    assert all(len(chunk.text) <= 10 for chunk in chunks)
+    assert all(chunk.text for chunk in chunks)
+
+
 def test_source_excerpt_must_exist_in_referenced_chunk() -> None:
     chunks = chunk_pages([(1, "The system shall authenticate users.")])
     valid = SourceReference(
