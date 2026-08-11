@@ -1,14 +1,18 @@
 from datetime import UTC, datetime
+from concurrent.futures import ThreadPoolExecutor
+import json
+import os
 
 import pytest
 
+import brd_srs_testgen.storage as storage
 from brd_srs_testgen.models import (
     ComparisonManifest,
     Condition,
     ConditionManifest,
     RunStatus,
 )
-from brd_srs_testgen.storage import ImmutableArtifactError, RunStore
+from brd_srs_testgen.storage import ImmutableArtifactError, RunStore, StorageError
 from tests.factories import bundle, chunk
 
 
@@ -132,3 +136,202 @@ def test_unsafe_artifact_names_cannot_escape_root(tmp_path, unsafe_name) -> None
         )
 
     assert not escaped.exists()
+
+
+def test_concurrent_artifact_writes_keep_the_original(tmp_path) -> None:
+    store = RunStore(tmp_path)
+    manifest = comparison_manifest()
+    store.create_comparison(manifest, [chunk()])
+    store.start_condition(manifest.comparison_id, condition_manifest())
+
+    def write(writer: int) -> str:
+        try:
+            store.write_artifact(
+                manifest.comparison_id,
+                Condition.SINGLE_PROMPT,
+                "requirements.json",
+                {"writer": writer},
+            )
+        except ImmutableArtifactError:
+            return "immutable"
+        return "written"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(write, range(2)))
+
+    path = store.condition_dir(manifest.comparison_id, Condition.SINGLE_PROMPT) / "requirements.json"
+    assert results.count("written") == 1
+    assert results.count("immutable") == 1
+    assert json.loads(path.read_text()) in ({"writer": 0}, {"writer": 1})
+
+
+def test_concurrent_event_appends_keep_every_event(tmp_path) -> None:
+    store = RunStore(tmp_path)
+    manifest = comparison_manifest()
+    store.create_comparison(manifest, [chunk()])
+    store.start_condition(manifest.comparison_id, condition_manifest())
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(
+            executor.map(
+                lambda number: store.append_event(
+                    manifest.comparison_id,
+                    Condition.SINGLE_PROMPT,
+                    {"number": number},
+                ),
+                range(20),
+            )
+        )
+
+    path = store.condition_dir(manifest.comparison_id, Condition.SINGLE_PROMPT) / "events.jsonl"
+    assert {json.loads(line)["number"] for line in path.read_text().splitlines()} == set(
+        range(20)
+    )
+
+
+def test_symlinked_paths_cannot_escape_root(tmp_path) -> None:
+    root = tmp_path / "runs"
+    store = RunStore(root)
+    manifest = comparison_manifest()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "manifest.json"
+    sentinel.write_text(json.dumps(manifest.model_dump(mode="json")))
+    root.mkdir()
+    os.symlink(outside, root / manifest.comparison_id)
+
+    with pytest.raises(StorageError):
+        store.update_comparison(manifest)
+
+    assert sentinel.read_text() == json.dumps(manifest.model_dump(mode="json"))
+
+
+def test_symlinked_condition_cannot_escape_root(tmp_path) -> None:
+    root = tmp_path / "runs"
+    store = RunStore(root)
+    manifest = comparison_manifest()
+    store.create_comparison(manifest, [chunk()])
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "manifest.json").write_text(
+        json.dumps(condition_manifest().model_dump(mode="json"))
+    )
+    conditions = root / manifest.comparison_id / "conditions"
+    conditions.mkdir()
+    os.symlink(outside, conditions / Condition.SINGLE_PROMPT)
+
+    with pytest.raises(StorageError):
+        store.write_artifact(
+            manifest.comparison_id,
+            Condition.SINGLE_PROMPT,
+            "artifact.json",
+            {},
+        )
+
+    assert not (outside / "artifact.json").exists()
+
+
+def test_terminal_manifests_cannot_be_updated(tmp_path) -> None:
+    store = RunStore(tmp_path)
+    manifest = comparison_manifest()
+    store.create_comparison(manifest, [chunk()])
+    completed_comparison = manifest.model_copy(
+        update={"completed_at": datetime.now(UTC)}
+    )
+    store.update_comparison(completed_comparison)
+
+    with pytest.raises(ImmutableArtifactError):
+        store.update_comparison(completed_comparison)
+
+    condition = condition_manifest()
+    store.start_condition(manifest.comparison_id, condition)
+    completed_condition = condition.model_copy(
+        update={
+            "status": RunStatus.COMPLETED,
+            "completed_at": datetime.now(UTC),
+        }
+    )
+    store.update_condition(manifest.comparison_id, completed_condition)
+
+    with pytest.raises(ImmutableArtifactError):
+        store.update_condition(manifest.comparison_id, completed_condition)
+
+
+@pytest.mark.parametrize("failed_file", ["manifest.json", "chunks.json"])
+def test_comparison_creation_failure_is_cleaned_up(tmp_path, monkeypatch, failed_file) -> None:
+    store = RunStore(tmp_path)
+    manifest = comparison_manifest()
+    original = storage._atomic_json
+
+    def fail(path, value) -> None:
+        if path.name == failed_file:
+            raise OSError("write failed")
+        original(path, value)
+
+    monkeypatch.setattr(storage, "_atomic_json", fail)
+    with pytest.raises(OSError, match="write failed"):
+        store.create_comparison(manifest, [chunk()])
+
+    assert not store.comparison_dir(manifest.comparison_id).exists()
+    monkeypatch.setattr(storage, "_atomic_json", original)
+    store.create_comparison(manifest, [chunk()])
+
+
+def test_condition_creation_failure_is_cleaned_up(tmp_path, monkeypatch) -> None:
+    store = RunStore(tmp_path)
+    manifest = comparison_manifest()
+    store.create_comparison(manifest, [chunk()])
+    original = storage._atomic_json
+    monkeypatch.setattr(storage, "_atomic_json", lambda path, value: (_ for _ in ()).throw(OSError("write failed")))
+
+    with pytest.raises(OSError, match="write failed"):
+        store.start_condition(manifest.comparison_id, condition_manifest())
+
+    path = store.condition_dir(manifest.comparison_id, Condition.SINGLE_PROMPT)
+    assert not path.exists()
+    monkeypatch.setattr(storage, "_atomic_json", original)
+    store.start_condition(manifest.comparison_id, condition_manifest())
+
+
+def test_lifecycle_requires_existing_manifests(tmp_path) -> None:
+    store = RunStore(tmp_path)
+    manifest = comparison_manifest()
+
+    with pytest.raises(StorageError):
+        store.update_comparison(manifest)
+    with pytest.raises(StorageError):
+        store.write_artifact(
+            manifest.comparison_id, Condition.SINGLE_PROMPT, "artifact.json", {}
+        )
+    with pytest.raises(StorageError):
+        store.append_event(manifest.comparison_id, Condition.SINGLE_PROMPT, {})
+
+
+def test_non_finite_json_is_rejected_without_corruption(tmp_path) -> None:
+    store = RunStore(tmp_path)
+    manifest = comparison_manifest()
+    store.create_comparison(manifest, [chunk()])
+    store.start_condition(manifest.comparison_id, condition_manifest())
+    store.append_event(manifest.comparison_id, Condition.SINGLE_PROMPT, {"stage": "ok"})
+    events = store.condition_dir(manifest.comparison_id, Condition.SINGLE_PROMPT) / "events.jsonl"
+    original = events.read_text()
+
+    with pytest.raises(ValueError):
+        store.write_artifact(
+            manifest.comparison_id,
+            Condition.SINGLE_PROMPT,
+            "invalid.json",
+            {"value": float("nan")},
+        )
+    with pytest.raises(ValueError):
+        store.append_event(
+            manifest.comparison_id,
+            Condition.SINGLE_PROMPT,
+            {"value": float("inf")},
+        )
+
+    assert not (
+        store.condition_dir(manifest.comparison_id, Condition.SINGLE_PROMPT)
+        / "invalid.json"
+    ).exists()
+    assert events.read_text() == original

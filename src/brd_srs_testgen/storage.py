@@ -1,19 +1,38 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+import fcntl
 import json
 import os
-import tempfile
 from pathlib import Path
-from typing import Any
+import shutil
+import tempfile
+import threading
+from typing import Any, Iterator
 
-from .models import ComparisonManifest, Condition, ConditionManifest, DocumentChunk
+from .models import (
+    ComparisonManifest,
+    Condition,
+    ConditionManifest,
+    DocumentChunk,
+    RunStatus,
+)
 
 
-class ImmutableArtifactError(RuntimeError):
+class StorageError(RuntimeError):
     pass
 
 
+class ImmutableArtifactError(StorageError):
+    pass
+
+
+_MUTATION_LOCK = threading.RLock()
+
+
 def _component(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Path must be a single normal component.")
     path = Path(value)
     if (
         not value
@@ -27,8 +46,19 @@ def _component(value: str) -> str:
     return value
 
 
+def _fsync_directory(directory: Path) -> None:
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _atomic_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.parent.is_dir():
+        raise StorageError("Artifact parent directory does not exist.")
+    if path.is_symlink():
+        raise StorageError("Artifact path cannot be a symlink.")
     descriptor, temporary_name = tempfile.mkstemp(prefix=".tmp-", dir=path.parent)
     temporary_path = Path(temporary_name)
     try:
@@ -37,6 +67,7 @@ def _atomic_text(path: Path, text: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_path, path)
+        _fsync_directory(path.parent)
     finally:
         temporary_path.unlink(missing_ok=True)
 
@@ -44,7 +75,10 @@ def _atomic_text(path: Path, text: str) -> None:
 def _atomic_json(path: Path, value: Any) -> None:
     _atomic_text(
         path,
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            value, allow_nan=False, ensure_ascii=False, indent=2, sort_keys=True
+        )
+        + "\n",
     )
 
 
@@ -58,56 +92,162 @@ class RunStore:
     def condition_dir(self, comparison_id: str, condition: Condition) -> Path:
         return self.comparison_dir(comparison_id) / "conditions" / condition.value
 
+    @contextmanager
+    def _mutation(self, *, create_root: bool = False) -> Iterator[None]:
+        with _MUTATION_LOCK:
+            if create_root:
+                self.root.mkdir(parents=True, exist_ok=True)
+            elif not self.root.is_dir():
+                raise StorageError("Run-store root directory does not exist.")
+            lock_path = self.root / ".runstore.lock"
+            if lock_path.is_symlink():
+                raise StorageError("Run-store lock cannot be a symlink.")
+            with lock_path.open("a+") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    # ponytail: global serialization; use per-run locks if throughput matters.
+                    yield
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+    def _assert_no_symlinks(self, path: Path) -> None:
+        try:
+            relative = path.relative_to(self.root)
+        except ValueError as error:
+            raise StorageError("Run path must remain under the configured root.") from error
+        current = self.root
+        for component in relative.parts:
+            current /= component
+            if current.is_symlink():
+                raise StorageError("Run path cannot contain a symlink.")
+
+    def _require_comparison(self, comparison_id: str) -> tuple[Path, Path]:
+        directory = self.comparison_dir(comparison_id)
+        self._assert_no_symlinks(directory)
+        if not directory.is_dir():
+            raise StorageError("Comparison directory does not exist.")
+        manifest = directory / "manifest.json"
+        self._assert_no_symlinks(manifest)
+        if not manifest.is_file():
+            raise StorageError("Comparison manifest does not exist.")
+        return directory, manifest
+
+    def _require_condition(
+        self, comparison_id: str, condition: Condition
+    ) -> tuple[Path, Path]:
+        self._require_comparison(comparison_id)
+        directory = self.condition_dir(comparison_id, condition)
+        self._assert_no_symlinks(directory)
+        if not directory.is_dir():
+            raise StorageError("Condition directory does not exist.")
+        manifest = directory / "manifest.json"
+        self._assert_no_symlinks(manifest)
+        if not manifest.is_file():
+            raise StorageError("Condition manifest does not exist.")
+        return directory, manifest
+
+    def _comparison_manifest(self, comparison_id: str) -> ComparisonManifest:
+        _, path = self._require_comparison(comparison_id)
+        try:
+            return ComparisonManifest.model_validate_json(path.read_text(encoding="utf-8"))
+        except ValueError as error:
+            raise StorageError("Comparison manifest is invalid.") from error
+
+    def _condition_manifest(
+        self, comparison_id: str, condition: Condition
+    ) -> ConditionManifest:
+        _, path = self._require_condition(comparison_id, condition)
+        try:
+            return ConditionManifest.model_validate_json(path.read_text(encoding="utf-8"))
+        except ValueError as error:
+            raise StorageError("Condition manifest is invalid.") from error
+
+    def _cleanup_created(self, directory: Path) -> None:
+        self._assert_no_symlinks(directory)
+        shutil.rmtree(directory)
+
     def create_comparison(
         self, manifest: ComparisonManifest, chunks: list[DocumentChunk]
     ) -> Path:
         directory = self.comparison_dir(manifest.comparison_id)
-        try:
-            directory.mkdir(parents=True, exist_ok=False)
-        except FileExistsError as error:
-            raise ImmutableArtifactError("Comparison already exists.") from error
-        _atomic_json(directory / "manifest.json", manifest.model_dump(mode="json"))
-        _atomic_json(
-            directory / "chunks.json", [chunk.model_dump(mode="json") for chunk in chunks]
-        )
+        with self._mutation(create_root=True):
+            self._assert_no_symlinks(directory)
+            try:
+                directory.mkdir(parents=True, exist_ok=False)
+            except FileExistsError as error:
+                raise ImmutableArtifactError("Comparison already exists.") from error
+            try:
+                _atomic_json(directory / "manifest.json", manifest.model_dump(mode="json"))
+                _atomic_json(
+                    directory / "chunks.json",
+                    [chunk.model_dump(mode="json") for chunk in chunks],
+                )
+            except Exception:
+                self._cleanup_created(directory)
+                raise
         return directory
 
     def update_comparison(self, manifest: ComparisonManifest) -> Path:
         path = self.comparison_dir(manifest.comparison_id) / "manifest.json"
-        _atomic_json(path, manifest.model_dump(mode="json"))
+        with self._mutation():
+            current = self._comparison_manifest(manifest.comparison_id)
+            if current.completed_at is not None:
+                raise ImmutableArtifactError("Completed comparisons cannot be updated.")
+            self._assert_no_symlinks(path)
+            _atomic_json(path, manifest.model_dump(mode="json"))
         return path
 
     def start_condition(
         self, comparison_id: str, manifest: ConditionManifest
     ) -> Path:
         directory = self.condition_dir(comparison_id, manifest.condition)
-        try:
-            directory.mkdir(parents=True, exist_ok=False)
-        except FileExistsError as error:
-            raise ImmutableArtifactError("Condition already exists.") from error
-        _atomic_json(directory / "manifest.json", manifest.model_dump(mode="json"))
+        with self._mutation():
+            self._require_comparison(comparison_id)
+            self._assert_no_symlinks(directory)
+            try:
+                directory.mkdir(parents=True, exist_ok=False)
+            except FileExistsError as error:
+                raise ImmutableArtifactError("Condition already exists.") from error
+            try:
+                _atomic_json(directory / "manifest.json", manifest.model_dump(mode="json"))
+            except Exception:
+                self._cleanup_created(directory)
+                raise
         return directory
 
     def update_condition(self, comparison_id: str, manifest: ConditionManifest) -> Path:
         path = self.condition_dir(comparison_id, manifest.condition) / "manifest.json"
-        _atomic_json(path, manifest.model_dump(mode="json"))
+        with self._mutation():
+            current = self._condition_manifest(comparison_id, manifest.condition)
+            if current.status in {RunStatus.COMPLETED, RunStatus.FAILED}:
+                raise ImmutableArtifactError("Terminal conditions cannot be updated.")
+            self._assert_no_symlinks(path)
+            _atomic_json(path, manifest.model_dump(mode="json"))
         return path
 
     def write_artifact(
         self, comparison_id: str, condition: Condition, filename: str, value: Any
     ) -> Path:
-        path = self.condition_dir(comparison_id, condition) / _component(filename)
-        if path.exists():
-            raise ImmutableArtifactError("Artifact already exists.")
-        _atomic_json(path, value)
+        filename = _component(filename)
+        path = self.condition_dir(comparison_id, condition) / filename
+        with self._mutation():
+            self._require_condition(comparison_id, condition)
+            self._assert_no_symlinks(path)
+            if path.exists():
+                raise ImmutableArtifactError("Artifact already exists.")
+            _atomic_json(path, value)
         return path
 
     def append_event(
         self, comparison_id: str, condition: Condition, event: Any
     ) -> Path:
         path = self.condition_dir(comparison_id, condition) / "events.jsonl"
-        existing = path.read_text(encoding="utf-8") if path.exists() else ""
-        if existing and not existing.endswith("\n"):
-            existing += "\n"
-        _atomic_text(path, existing + json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+        event_text = json.dumps(event, allow_nan=False, ensure_ascii=False, sort_keys=True)
+        with self._mutation():
+            self._require_condition(comparison_id, condition)
+            self._assert_no_symlinks(path)
+            existing = path.read_text(encoding="utf-8") if path.exists() else ""
+            if existing and not existing.endswith("\n"):
+                existing += "\n"
+            _atomic_text(path, existing + event_text + "\n")
         return path
