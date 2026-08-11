@@ -11,6 +11,7 @@ from brd_srs_testgen.models import (
     ArtifactBundle,
     ComparisonManifest,
     Condition,
+    ConditionManifest,
     GeneratedCases,
     RequirementBatch,
     ReviewResult,
@@ -156,6 +157,65 @@ def test_comparison_artifacts_require_an_active_existing_comparison(tmp_path) ->
 
     assert json.loads(path.read_text()) == {"category": "parsing"}
     assert not (store.comparison_dir(manifest.comparison_id) / "late.json").exists()
+
+
+@pytest.mark.parametrize(
+    "reserved_name",
+    ["manifest.json", "chunks.json", "conditions", ".runstore.lock", ".tmp-artifact"],
+)
+def test_comparison_artifacts_reject_storage_owned_names_before_mutation(
+    tmp_path, monkeypatch, reserved_name
+) -> None:
+    store = RunStore(tmp_path)
+    manifest = ComparisonManifest(
+        comparison_id="comparison",
+        document_hash="0" * 64,
+        provider="ollama",
+        model="test-model",
+        temperature=0.0,
+        token_ceiling=100_000,
+        condition_order=list(Condition),
+        prompt_version="test",
+        schema_version="test",
+        started_at=datetime.now(UTC),
+    )
+    directory = store.create_comparison(manifest, [])
+    original = {
+        path.name: path.read_bytes() for path in directory.iterdir()
+    }
+    mutation = store._mutation
+
+    def reject_mutation(**_kwargs):
+        raise AssertionError("reserved names must be rejected before mutation")
+
+    monkeypatch.setattr(store, "_mutation", reject_mutation)
+    with pytest.raises(StorageError):
+        store.write_comparison_artifact(
+            manifest.comparison_id, reserved_name, {"corrupt": True}
+        )
+    monkeypatch.setattr(store, "_mutation", mutation)
+
+    assert {path.name: path.read_bytes() for path in directory.iterdir()} == original
+    store.write_comparison_artifact(
+        manifest.comparison_id, "failure.json", {"category": "parsing"}
+    )
+    store.start_condition(
+        manifest.comparison_id,
+        ConditionManifest(
+            condition=Condition.SINGLE_PROMPT,
+            status=RunStatus.RUNNING,
+            provider="ollama",
+            model="test-model",
+            temperature=0.0,
+            token_ceiling=100_000,
+            started_at=datetime.now(UTC),
+        ),
+    )
+
+    assert (directory / "failure.json").exists()
+    assert store.condition_dir(
+        manifest.comparison_id, Condition.SINGLE_PROMPT
+    ).is_dir()
 
 
 def test_comparison_runs_and_persists_all_conditions(tmp_path, monkeypatch) -> None:

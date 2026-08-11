@@ -302,6 +302,13 @@ class RunStore:
         self, comparison_id: str, filename: str, value: Any
     ) -> Path:
         filename = _component(filename)
+        if filename in {
+            "manifest.json",
+            "chunks.json",
+            "conditions",
+            ".runstore.lock",
+        } or filename.startswith(".tmp-"):
+            raise StorageError("Artifact filename is reserved by the run store.")
         path = self.comparison_dir(comparison_id) / filename
         with self._mutation():
             directory, _ = self._require_comparison(comparison_id)
