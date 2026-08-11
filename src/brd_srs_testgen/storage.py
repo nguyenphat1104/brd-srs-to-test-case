@@ -162,6 +162,20 @@ class RunStore:
         except ValueError as error:
             raise StorageError("Condition manifest is invalid.") from error
 
+    def _validated_comparison(
+        self, manifest: ComparisonManifest
+    ) -> ComparisonManifest:
+        try:
+            return ComparisonManifest.model_validate(manifest.model_dump(mode="json"))
+        except ValueError as error:
+            raise StorageError("Comparison manifest is invalid.") from error
+
+    def _validated_condition(self, manifest: ConditionManifest) -> ConditionManifest:
+        try:
+            return ConditionManifest.model_validate(manifest.model_dump(mode="json"))
+        except ValueError as error:
+            raise StorageError("Condition manifest is invalid.") from error
+
     def _cleanup_created(self, directory: Path) -> None:
         self._assert_no_symlinks(directory)
         shutil.rmtree(directory)
@@ -193,8 +207,27 @@ class RunStore:
             current = self._comparison_manifest(manifest.comparison_id)
             if current.completed_at is not None:
                 raise ImmutableArtifactError("Completed comparisons cannot be updated.")
+            updated = self._validated_comparison(manifest)
+            if any(
+                getattr(updated, field) != getattr(current, field)
+                for field in (
+                    "comparison_id",
+                    "document_hash",
+                    "provider",
+                    "model",
+                    "temperature",
+                    "token_ceiling",
+                    "condition_order",
+                    "prompt_version",
+                    "schema_version",
+                    "started_at",
+                )
+            ):
+                raise ImmutableArtifactError("Comparison configuration cannot be updated.")
+            if updated.completed_at is None:
+                raise ImmutableArtifactError("Comparison updates must set completed_at.")
             self._assert_no_symlinks(path)
-            _atomic_json(path, manifest.model_dump(mode="json"))
+            _atomic_json(path, updated.model_dump(mode="json"))
         return path
 
     def start_condition(
@@ -219,10 +252,25 @@ class RunStore:
         path = self.condition_dir(comparison_id, manifest.condition) / "manifest.json"
         with self._mutation():
             current = self._condition_manifest(comparison_id, manifest.condition)
-            if current.status in {RunStatus.COMPLETED, RunStatus.FAILED}:
+            if current.status is not RunStatus.RUNNING:
                 raise ImmutableArtifactError("Terminal conditions cannot be updated.")
+            updated = self._validated_condition(manifest)
+            if any(
+                getattr(updated, field) != getattr(current, field)
+                for field in (
+                    "condition",
+                    "provider",
+                    "model",
+                    "temperature",
+                    "token_ceiling",
+                    "started_at",
+                )
+            ):
+                raise ImmutableArtifactError("Condition configuration cannot be updated.")
+            if updated.status not in {RunStatus.COMPLETED, RunStatus.FAILED}:
+                raise ImmutableArtifactError("Condition updates must be terminal.")
             self._assert_no_symlinks(path)
-            _atomic_json(path, manifest.model_dump(mode="json"))
+            _atomic_json(path, updated.model_dump(mode="json"))
         return path
 
     def write_artifact(
@@ -231,7 +279,8 @@ class RunStore:
         filename = _component(filename)
         path = self.condition_dir(comparison_id, condition) / filename
         with self._mutation():
-            self._require_condition(comparison_id, condition)
+            if self._condition_manifest(comparison_id, condition).status is not RunStatus.RUNNING:
+                raise ImmutableArtifactError("Terminal conditions cannot write artifacts.")
             self._assert_no_symlinks(path)
             if path.exists():
                 raise ImmutableArtifactError("Artifact already exists.")
@@ -244,7 +293,8 @@ class RunStore:
         path = self.condition_dir(comparison_id, condition) / "events.jsonl"
         event_text = json.dumps(event, allow_nan=False, ensure_ascii=False, sort_keys=True)
         with self._mutation():
-            self._require_condition(comparison_id, condition)
+            if self._condition_manifest(comparison_id, condition).status is not RunStatus.RUNNING:
+                raise ImmutableArtifactError("Terminal conditions cannot append events.")
             self._assert_no_symlinks(path)
             existing = path.read_text(encoding="utf-8") if path.exists() else ""
             if existing and not existing.endswith("\n"):
