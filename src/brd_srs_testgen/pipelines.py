@@ -4,7 +4,7 @@ import json
 import threading
 import time
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from typing import TypeVar
 
@@ -30,6 +30,8 @@ from .providers import (
 
 
 T = TypeVar("T", bound=BaseModel)
+I = TypeVar("I")
+R = TypeVar("R")
 Messages = list[dict[str, str]]
 PROMPT_VERSION = "research-core-v1"
 WORKER_COUNT = 3
@@ -117,8 +119,15 @@ def worker_cases_prompt(
     worker_index: int,
     requirements: list[Requirement],
     chunks: Iterable[DocumentChunk],
+    *,
+    dependency_context: Iterable[Requirement] = (),
 ) -> str:
     requirement_batch = RequirementBatch(requirements=requirements)
+    dependency_json = json.dumps(
+        [item.model_dump(mode="json") for item in dependency_context],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     lower = worker_index * 1000 + 1
     upper = (worker_index + 1) * 1000
     return f"""{RULES}
@@ -129,6 +138,9 @@ Generate scenarios and executable manual test cases only for the assigned requir
 
 Assigned requirements JSON:
 {_data_block("ASSIGNED REQUIREMENTS JSON", requirement_batch.model_dump_json())}
+
+Dependency context JSON (read only; do not generate scenarios or test cases for these requirements):
+{_data_block("DEPENDENCY CONTEXT JSON", dependency_json)}
 
 {_evidence(chunks)}"""
 
@@ -263,11 +275,14 @@ class PipelineContext:
         schema: type[T],
         max_output_tokens: int,
         allow_schema_repair: bool = True,
+        cancellation_event: threading.Event | None = None,
     ) -> T:
         current_messages = [message.copy() for message in messages]
         transport_retries = 0
         schema_repaired = False
         while True:
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise CancelledError("A sibling worker failed.")
             started = time.perf_counter()
             try:
                 result = self.provider.generate(
@@ -275,15 +290,22 @@ class PipelineContext:
                 )
             except ProviderError as error:
                 self._record_latency(time.perf_counter() - started)
+                if cancellation_event is not None and cancellation_event.is_set():
+                    raise CancelledError("A sibling worker failed.") from error
                 if not error.retryable or transport_retries == 2:
                     raise
                 delay = 2**transport_retries
                 with self._lock:
                     self.retries += 1
                 transport_retries += 1
-                self.sleep(delay)
+                if cancellation_event is None:
+                    self.sleep(delay)
+                elif cancellation_event.wait(delay):
+                    raise CancelledError("A sibling worker failed.") from error
             except StructuredOutputError as error:
                 self._record(error)
+                if cancellation_event is not None and cancellation_event.is_set():
+                    raise CancelledError("A sibling worker failed.") from error
                 if not allow_schema_repair or schema_repaired:
                     raise
                 with self._lock:
@@ -420,14 +442,156 @@ def run_staged_single_agent(
     )
 
 
-def _balance(items: list[T], weight: Callable[[T], int]) -> list[list[T]]:
-    groups: list[list[T]] = [[] for _ in range(WORKER_COUNT)]
+def _balance(items: list[I], weight: Callable[[I], int]) -> list[list[I]]:
+    groups: list[list[I]] = [[] for _ in range(WORKER_COUNT)]
     totals = [0] * WORKER_COUNT
     for item in sorted(items, key=weight, reverse=True):
         worker_index = min(range(WORKER_COUNT), key=totals.__getitem__)
         groups[worker_index].append(item)
         totals[worker_index] += weight(item)
     return groups
+
+
+def _run_parallel_workers(
+    groups: list[list[I]],
+    worker: Callable[[int, list[I], threading.Event], R],
+) -> list[R]:
+    cancellation_event = threading.Event()
+    first_error: list[Exception] = []
+    error_lock = threading.Lock()
+
+    def invoke(worker_index: int, group: list[I]) -> R:
+        try:
+            return worker(worker_index, group, cancellation_event)
+        except Exception as error:
+            with error_lock:
+                if not first_error:
+                    first_error.append(error)
+            cancellation_event.set()
+            raise
+
+    with ThreadPoolExecutor(max_workers=WORKER_COUNT) as executor:
+        futures = [
+            executor.submit(invoke, worker_index, group)
+            for worker_index, group in enumerate(groups)
+        ]
+        _done, pending = wait(futures, return_when=FIRST_EXCEPTION)
+        if first_error:
+            for future in pending:
+                future.cancel()
+        wait(futures)
+    if first_error:
+        raise first_error[0]
+    return [future.result() for future in futures]
+
+
+def _worker_bounds(worker_index: int) -> tuple[int, int]:
+    return worker_index * 1000 + 1, (worker_index + 1) * 1000
+
+
+def _validate_worker_ids(
+    worker_index: int, label: str, prefix: str, item_ids: Iterable[str]
+) -> None:
+    lower, upper = _worker_bounds(worker_index)
+    seen: set[str] = set()
+    for item_id in item_ids:
+        if not lower <= int(item_id.removeprefix(f"{prefix}-")) <= upper:
+            raise ValueError(
+                f"{label.title()} ID {item_id} is outside worker "
+                f"{worker_index + 1} range {prefix}-{lower:03d} through "
+                f"{prefix}-{upper:03d}."
+            )
+        if item_id in seen:
+            raise ValueError(
+                f"Worker {worker_index + 1} returned duplicate {label} ID {item_id}."
+            )
+        seen.add(item_id)
+
+
+def _validate_worker_requirements(
+    worker_index: int, batch: RequirementBatch
+) -> None:
+    _validate_worker_ids(
+        worker_index,
+        "requirement",
+        "REQ",
+        (requirement.requirement_id for requirement in batch.requirements),
+    )
+
+
+def _validate_worker_cases(
+    worker_index: int,
+    batch: GeneratedCases,
+    assigned_requirement_ids: Iterable[str],
+    dependency_context_ids: Iterable[str],
+) -> None:
+    _validate_worker_ids(
+        worker_index,
+        "scenario",
+        "SCN",
+        (scenario.scenario_id for scenario in batch.scenarios),
+    )
+    _validate_worker_ids(
+        worker_index,
+        "test case",
+        "TC",
+        (test_case.test_case_id for test_case in batch.test_cases),
+    )
+    scenario_ids = {scenario.scenario_id for scenario in batch.scenarios}
+    for test_case in batch.test_cases:
+        if test_case.scenario_id not in scenario_ids:
+            raise ValueError(
+                f"Test case {test_case.test_case_id} references unknown worker "
+                f"scenario {test_case.scenario_id}."
+            )
+    assigned_ids = set(assigned_requirement_ids)
+    allowed_ids = assigned_ids | set(dependency_context_ids)
+    artifacts = [
+        ("Scenario", scenario.scenario_id, scenario.requirement_ids)
+        for scenario in batch.scenarios
+    ] + [
+        ("Test case", test_case.test_case_id, test_case.requirement_ids)
+        for test_case in batch.test_cases
+    ]
+    for label, artifact_id, requirement_ids in artifacts:
+        if not assigned_ids.intersection(requirement_ids):
+            raise ValueError(
+                f"{label} {artifact_id} must include an assigned requirement."
+            )
+        unknown_ids = set(requirement_ids) - allowed_ids
+        if unknown_ids:
+            raise ValueError(
+                f"{label} {artifact_id} references requirement IDs "
+                f"{sorted(unknown_ids)} outside assigned requirements and "
+                "dependency context."
+            )
+
+
+def _dependency_context(
+    assigned: list[Requirement], requirements: list[Requirement]
+) -> list[Requirement]:
+    by_id = {requirement.requirement_id: requirement for requirement in requirements}
+    assigned_ids = {requirement.requirement_id for requirement in assigned}
+    dependency_ids: set[str] = set()
+    pending = [
+        dependency_id
+        for requirement in assigned
+        for dependency_id in requirement.dependency_ids
+    ]
+    while pending:
+        dependency_id = pending.pop()
+        if dependency_id in assigned_ids or dependency_id in dependency_ids:
+            continue
+        dependency = by_id.get(dependency_id)
+        if dependency is None:
+            continue
+        dependency_ids.add(dependency_id)
+        pending.extend(dependency.dependency_ids)
+    return [
+        requirement
+        for requirement in requirements
+        if requirement.requirement_id in dependency_ids
+    ]
 
 
 def _relevant_chunks(
@@ -446,22 +610,22 @@ def run_centralized_multi_agent(
 ) -> ArtifactBundle:
     chunks = list(chunks)
     chunk_groups = _balance(chunks, lambda chunk: len(chunk.text))
-    with ThreadPoolExecutor(max_workers=WORKER_COUNT) as executor:
-        futures = [
-            executor.submit(
-                context.generate,
-                [_user(worker_requirements_prompt(worker_index, group))],
-                RequirementBatch,
-                8_000,
-            )
-            for worker_index, group in enumerate(chunk_groups)
-        ]
-        try:
-            worker_requirements = [future.result() for future in futures]
-        except Exception:
-            for future in futures:
-                future.cancel()
-            raise
+
+    def extract_requirements(
+        worker_index: int,
+        group: list[DocumentChunk],
+        cancellation_event: threading.Event,
+    ) -> RequirementBatch:
+        batch = context.generate(
+            [_user(worker_requirements_prompt(worker_index, group))],
+            RequirementBatch,
+            8_000,
+            cancellation_event=cancellation_event,
+        )
+        _validate_worker_requirements(worker_index, batch)
+        return batch
+
+    worker_requirements = _run_parallel_workers(chunk_groups, extract_requirements)
 
     candidates = [
         requirement
@@ -479,30 +643,37 @@ def run_centralized_multi_agent(
         lambda requirement: len(requirement.description)
         + 100 * len(requirement.source_references),
     )
-    with ThreadPoolExecutor(max_workers=WORKER_COUNT) as executor:
-        futures = [
-            executor.submit(
-                context.generate,
-                [
-                    _user(
-                        worker_cases_prompt(
-                            worker_index,
-                            group,
-                            _relevant_chunks(group, chunks),
-                        )
+
+    def generate_cases(
+        worker_index: int,
+        group: list[Requirement],
+        cancellation_event: threading.Event,
+    ) -> GeneratedCases:
+        dependencies = _dependency_context(group, requirements.requirements)
+        batch = context.generate(
+            [
+                _user(
+                    worker_cases_prompt(
+                        worker_index,
+                        group,
+                        _relevant_chunks([*group, *dependencies], chunks),
+                        dependency_context=dependencies,
                     )
-                ],
-                GeneratedCases,
-                16_000,
-            )
-            for worker_index, group in enumerate(requirement_groups)
-        ]
-        try:
-            worker_cases = [future.result() for future in futures]
-        except Exception:
-            for future in futures:
-                future.cancel()
-            raise
+                )
+            ],
+            GeneratedCases,
+            16_000,
+            cancellation_event=cancellation_event,
+        )
+        _validate_worker_cases(
+            worker_index,
+            batch,
+            (requirement.requirement_id for requirement in group),
+            (requirement.requirement_id for requirement in dependencies),
+        )
+        return batch
+
+    worker_cases = _run_parallel_workers(requirement_groups, generate_cases)
 
     bundle = ArtifactBundle(
         requirements=requirements.requirements,

@@ -85,6 +85,13 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
     ]
     assert len(worker_calls) == 3
     assert all(len(call[0]) == 1 for call in worker_calls)
+    assert sum("p0001-c001" not in call[0][0]["content"] for call in worker_calls) == 2
+    case_calls = [call for call in provider.calls if call[1] is GeneratedCases]
+    assert len(case_calls) == 3
+    assert sum(
+        '"requirements":[]' in call[0][0]["content"].replace(" ", "")
+        for call in case_calls
+    ) == 2
 
 
 @pytest.mark.parametrize(
@@ -102,6 +109,386 @@ def test_worker_prompts_use_disjoint_inclusive_id_ranges(
     assert f"TC-{lower:03d} through TC-{upper:03d}" in cases
     assert "must not emit IDs outside these ranges" in requirements
     assert "must not emit IDs outside these ranges" in cases
+
+
+class InvalidWorkerProvider(CentralProvider):
+    def __init__(self, invalid: str) -> None:
+        super().__init__()
+        self.invalid = invalid
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        result = super().generate(
+            messages, schema, max_output_tokens=max_output_tokens
+        )
+        content = messages[-1]["content"]
+        if self.invalid == "range" and "WORKER REQUIREMENT EXTRACTION 1/3" in content:
+            value = RequirementBatch(
+                requirements=[
+                    self.artifacts.requirements[0].model_copy(
+                        update={"requirement_id": "REQ-1001"}
+                    )
+                ]
+            )
+        elif self.invalid == "duplicate" and "WORKER CASE GENERATION 1/3" in content:
+            value = GeneratedCases(
+                scenarios=[self.artifacts.scenarios[0]] * 2,
+                test_cases=self.artifacts.test_cases,
+            )
+        elif self.invalid == "parent" and "WORKER CASE GENERATION 1/3" in content:
+            value = GeneratedCases(
+                scenarios=self.artifacts.scenarios,
+                test_cases=[
+                    self.artifacts.test_cases[0].model_copy(
+                        update={"scenario_id": "SCN-002"}
+                    )
+                ],
+            )
+        else:
+            return result
+        return GenerationResult(
+            value=value,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            latency_seconds=result.latency_seconds,
+        )
+
+
+def test_centralized_rejects_out_of_range_worker_id() -> None:
+    with pytest.raises(ValueError, match="outside worker 1 range"):
+        run_centralized_multi_agent(
+            PipelineContext(provider=InvalidWorkerProvider("range")), [chunk()]
+        )
+
+
+def test_centralized_rejects_duplicate_worker_id() -> None:
+    with pytest.raises(ValueError, match="duplicate scenario ID"):
+        run_centralized_multi_agent(
+            PipelineContext(provider=InvalidWorkerProvider("duplicate")), [chunk()]
+        )
+
+
+def test_centralized_rejects_bad_scenario_parent() -> None:
+    with pytest.raises(ValueError, match="unknown worker scenario"):
+        run_centralized_multi_agent(
+            PipelineContext(provider=InvalidWorkerProvider("parent")), [chunk()]
+        )
+
+
+def generated_with_requirement_ids(
+    scenario_requirement_ids: list[str], test_case_requirement_ids: list[str]
+) -> GeneratedCases:
+    artifacts = bundle()
+    return GeneratedCases(
+        scenarios=[
+            artifacts.scenarios[0].model_copy(
+                update={"requirement_ids": scenario_requirement_ids}
+            )
+        ],
+        test_cases=[
+            artifacts.test_cases[0].model_copy(
+                update={"requirement_ids": test_case_requirement_ids}
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize("target", ["scenario", "test_case"])
+def test_worker_cases_reject_dependency_only_artifacts(target: str) -> None:
+    assigned = ["REQ-001"]
+    dependency = ["REQ-002"]
+    batch = generated_with_requirement_ids(
+        dependency if target == "scenario" else assigned,
+        dependency if target == "test_case" else assigned,
+    )
+
+    with pytest.raises(ValueError, match="must include an assigned requirement"):
+        pipeline_module._validate_worker_cases(0, batch, assigned, dependency)
+
+
+@pytest.mark.parametrize("target", ["scenario", "test_case"])
+def test_worker_cases_reject_unknown_requirement_links(target: str) -> None:
+    assigned = ["REQ-001"]
+    batch = generated_with_requirement_ids(
+        ["REQ-001", "REQ-003"] if target == "scenario" else assigned,
+        ["REQ-001", "REQ-003"] if target == "test_case" else assigned,
+    )
+
+    with pytest.raises(
+        ValueError, match="outside assigned requirements and dependency context"
+    ):
+        pipeline_module._validate_worker_cases(0, batch, assigned, ["REQ-002"])
+
+
+def test_worker_cases_allow_assigned_and_dependency_links() -> None:
+    batch = generated_with_requirement_ids(
+        ["REQ-001", "REQ-002"], ["REQ-001", "REQ-002"]
+    )
+
+    pipeline_module._validate_worker_cases(
+        0, batch, ["REQ-001"], ["REQ-002"]
+    )
+
+
+class CancellationAwareContext(PipelineContext):
+    def generate(
+        self,
+        messages,
+        schema,
+        max_output_tokens,
+        allow_schema_repair=True,
+        cancellation_event=None,
+    ):
+        if cancellation_event is not None:
+            self.provider.cancellation_event = cancellation_event
+        return super().generate(
+            messages,
+            schema,
+            max_output_tokens,
+            allow_schema_repair,
+            cancellation_event,
+        )
+
+
+class FailingWorkerProvider:
+    model = "test-model"
+
+    def __init__(self) -> None:
+        self.ledger = BudgetLedger(100_000)
+        self.calls = []
+        self.lock = threading.Lock()
+        self.transient_started = threading.Event()
+        self.cancellation_event = None
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        content = messages[-1]["content"]
+        with self.lock:
+            self.calls.append((messages, schema, max_output_tokens))
+        if "WORKER REQUIREMENT EXTRACTION 1/3" in content:
+            assert self.transient_started.wait(1)
+            raise ProviderError("fatal worker", code=400, retryable=False)
+        if "WORKER REQUIREMENT EXTRACTION 2/3" in content:
+            self.transient_started.set()
+            assert self.cancellation_event is not None
+            assert self.cancellation_event.wait(1)
+            raise ProviderError("transient sibling", code=503, retryable=True)
+        return GenerationResult(
+            value=RequirementBatch(requirements=[]),
+            input_tokens=1,
+            output_tokens=1,
+            latency_seconds=0.01,
+        )
+
+
+def test_worker_failure_cancels_sibling_retry_and_follow_up_stages() -> None:
+    provider = FailingWorkerProvider()
+    delays = []
+    context = CancellationAwareContext(provider=provider, sleep=delays.append)
+
+    with pytest.raises(ProviderError, match="fatal worker"):
+        run_centralized_multi_agent(context, [chunk()])
+
+    assert context.retries == 0
+    assert delays == []
+    assert all(
+        "WORKER REQUIREMENT EXTRACTION" in call[0][0]["content"]
+        for call in provider.calls
+    )
+
+
+def dependent_inputs():
+    artifacts = bundle()
+    dependencies = {1: ["REQ-002"], 2: ["REQ-003"], 3: ["REQ-001"]}
+    chunks = []
+    requirements = []
+    for index in range(1, 4):
+        text = f"Dependency evidence {index}."
+        item = chunk().model_copy(
+            update={
+                "chunk_id": f"p000{index}-c001-dependency",
+                "page_number": index,
+                "text": text,
+                "content_hash": str(index) * 64,
+            }
+        )
+        reference = artifacts.requirements[0].source_references[0].model_copy(
+            update={
+                "chunk_id": item.chunk_id,
+                "page_number": index,
+                "excerpt": text,
+            }
+        )
+        chunks.append(item)
+        requirements.append(
+            artifacts.requirements[0].model_copy(
+                update={
+                    "requirement_id": f"REQ-{index:03d}",
+                    "title": f"Requirement {index}",
+                    "description": f"Requirement {index}",
+                    "dependency_ids": dependencies[index],
+                    "source_references": [reference],
+                }
+            )
+        )
+    return chunks, requirements
+
+
+def test_dependency_context_is_transitive_stable_and_read_only() -> None:
+    chunks, requirements = dependent_inputs()
+    dependencies = pipeline_module._dependency_context(
+        [requirements[0]], requirements
+    )
+    evidence = pipeline_module._relevant_chunks(
+        [requirements[0], *dependencies], chunks
+    )
+    prompt = worker_cases_prompt(
+        0,
+        [requirements[0]],
+        evidence,
+        dependency_context=dependencies,
+    )
+
+    assert [item.requirement_id for item in dependencies] == ["REQ-002", "REQ-003"]
+    assigned = prompt.split("<<<BEGIN ASSIGNED REQUIREMENTS JSON DATA>>>")[1].split(
+        "<<<END ASSIGNED REQUIREMENTS JSON DATA>>>"
+    )[0]
+    dependency_data = prompt.split("<<<BEGIN DEPENDENCY CONTEXT JSON DATA>>>")[1].split(
+        "<<<END DEPENDENCY CONTEXT JSON DATA>>>"
+    )[0]
+    assert [
+        item["requirement_id"] for item in json.loads(assigned)["requirements"]
+    ] == ["REQ-001"]
+    assert [item["requirement_id"] for item in json.loads(dependency_data)] == [
+        "REQ-002",
+        "REQ-003",
+    ]
+    assert [item.chunk_id for item in evidence] == [item.chunk_id for item in chunks]
+
+
+def test_balance_is_deterministic_and_preserves_every_item_once() -> None:
+    groups = pipeline_module._balance([6, 5, 4, 3, 2, 1], lambda item: item)
+
+    assert groups == [[6, 1], [5, 2], [4, 3]]
+    assert sorted(item for group in groups for item in group) == list(range(1, 7))
+
+
+class MergeProvider:
+    model = "test-model"
+
+    def __init__(self, requirements) -> None:
+        self.ledger = BudgetLedger(100_000)
+        self.calls = []
+        self.lock = threading.Lock()
+        self.requirements = requirements
+        self.artifacts = bundle()
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        content = messages[-1]["content"]
+        with self.lock:
+            self.calls.append((messages, schema, max_output_tokens))
+        if schema is RequirementBatch and "CANDIDATES" in content:
+            value = RequirementBatch(requirements=self.requirements)
+        elif schema is RequirementBatch:
+            worker = next(
+                index
+                for index in range(3)
+                if f"WORKER REQUIREMENT EXTRACTION {index + 1}/3" in content
+            )
+            value = RequirementBatch(
+                requirements=[
+                    self.requirements[worker].model_copy(
+                        update={"requirement_id": f"REQ-{worker * 1000 + 1:03d}"}
+                    )
+                ]
+            )
+        elif schema is GeneratedCases:
+            worker = next(
+                index
+                for index in range(3)
+                if f"WORKER CASE GENERATION {index + 1}/3" in content
+            )
+            requirement = self.requirements[worker]
+            scenario_id = f"SCN-{worker * 1000 + 1:03d}"
+            scenario = self.artifacts.scenarios[0].model_copy(
+                update={
+                    "scenario_id": scenario_id,
+                    "requirement_ids": [requirement.requirement_id],
+                    "source_references": requirement.source_references,
+                }
+            )
+            test_case = self.artifacts.test_cases[0].model_copy(
+                update={
+                    "test_case_id": f"TC-{worker * 1000 + 1:03d}",
+                    "scenario_id": scenario_id,
+                    "requirement_ids": [requirement.requirement_id],
+                    "source_references": requirement.source_references,
+                }
+            )
+            value = GeneratedCases(scenarios=[scenario], test_cases=[test_case])
+        else:
+            value = ReviewResult(accepted=True)
+        return GenerationResult(
+            value=schema.model_validate(value.model_dump(mode="json")),
+            input_tokens=1,
+            output_tokens=1,
+            latency_seconds=0.01,
+        )
+
+
+def test_centralized_merge_preserves_all_worker_outputs() -> None:
+    chunks, requirements = dependent_inputs()
+
+    result = run_centralized_multi_agent(
+        PipelineContext(provider=MergeProvider(requirements)), chunks
+    )
+
+    assert [item.requirement_id for item in result.requirements] == [
+        "REQ-001",
+        "REQ-002",
+        "REQ-003",
+    ]
+    assert [item.scenario_id for item in result.scenarios] == [
+        "SCN-001",
+        "SCN-1001",
+        "SCN-2001",
+    ]
+    assert [item.test_case_id for item in result.test_cases] == [
+        "TC-001",
+        "TC-1001",
+        "TC-2001",
+    ]
+    assert [item.scenario_id for item in result.test_cases] == [
+        item.scenario_id for item in result.scenarios
+    ]
+
+
+class RejectingCentralProvider(CentralProvider):
+    def generate(self, messages, schema, *, max_output_tokens):
+        result = super().generate(
+            messages, schema, max_output_tokens=max_output_tokens
+        )
+        if schema is ReviewResult:
+            return GenerationResult(
+                value=ReviewResult(accepted=False),
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                latency_seconds=result.latency_seconds,
+            )
+        return result
+
+
+def test_rejected_centralized_review_causes_one_standalone_revision() -> None:
+    provider = RejectingCentralProvider()
+    context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
+
+    result = run_centralized_multi_agent(context, [chunk()])
+
+    assert result == bundle()
+    assert context.semantic_revisions == 1
+    revision_calls = [call for call in provider.calls if call[1] is ArtifactBundle]
+    assert len(revision_calls) == 1
+    assert len(revision_calls[0][0]) == 1
+    assert "<<<BEGIN ARTIFACT JSON DATA>>>" in revision_calls[0][0][0]["content"]
+    assert "<<<BEGIN PDF EVIDENCE DATA>>>" in revision_calls[0][0][0]["content"]
 
 
 class ScriptedProvider:
