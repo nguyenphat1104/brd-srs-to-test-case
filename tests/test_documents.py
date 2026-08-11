@@ -1,7 +1,9 @@
+import io
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from pypdf import PdfWriter
 
 from brd_srs_testgen.documents import (
     DocumentError,
@@ -47,6 +49,17 @@ def test_source_excerpt_must_exist_in_referenced_chunk() -> None:
     assert not verify_source_reference(invalid, chunks)
 
 
+def test_empty_source_excerpt_is_rejected() -> None:
+    chunks = chunk_pages([(1, "The system shall authenticate users.")])
+    reference = SourceReference(
+        chunk_id=chunks[0].chunk_id,
+        page_number=1,
+        excerpt="  ",
+    )
+
+    assert not verify_source_reference(reference, chunks)
+
+
 def test_empty_pdf_text_is_rejected() -> None:
     with pytest.raises(DocumentError, match="extractable text"):
         chunk_pages([(1, "  "), (2, "")])
@@ -57,3 +70,17 @@ def test_encrypted_pdf_is_rejected() -> None:
     with patch("brd_srs_testgen.documents.PdfReader", return_value=reader):
         with pytest.raises(DocumentError, match="Encrypted"):
             extract_pages(b"pdf")
+
+
+def test_blank_pdf_retains_page_accounting() -> None:
+    pdf = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.write(pdf)
+
+    assert extract_pages(pdf.getvalue()) == [(1, "")]
+
+
+def test_malformed_pdf_is_rejected() -> None:
+    with pytest.raises(DocumentError, match="readable PDF"):
+        extract_pages(b"not a PDF")

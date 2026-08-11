@@ -45,16 +45,16 @@ def _section_heading(raw_text: str) -> str:
 
 
 def _pieces(text: str, max_chars: int) -> Iterable[str]:
-    remaining = text
-    while remaining:
-        if len(remaining) <= max_chars:
-            yield remaining
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        if end == len(text):
+            yield text[start:end]
             return
-        cut = remaining.rfind(" ", 0, max_chars + 1)
-        if cut <= 0:
-            cut = max_chars
-        yield remaining[:cut]
-        remaining = remaining[cut:]
+        cut = text.rfind(" ", start, end + 1)
+        end = cut if cut > start else end
+        yield text[start:end]
+        start = end
 
 
 def chunk_pages(
@@ -92,10 +92,12 @@ def verify_source_reference(
     reference: SourceReference, chunks: list[DocumentChunk]
 ) -> bool:
     chunk = next((item for item in chunks if item.chunk_id == reference.chunk_id), None)
+    excerpt = normalize_text(reference.excerpt)
     return bool(
-        chunk
+        excerpt
+        and chunk
         and chunk.page_number == reference.page_number
-        and normalize_text(reference.excerpt).casefold()
+        and excerpt.casefold()
         in normalize_text(chunk.text).casefold()
     )
 
