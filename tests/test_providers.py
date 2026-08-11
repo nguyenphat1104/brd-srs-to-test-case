@@ -456,6 +456,34 @@ def test_gemini_count_token_errors_are_classified(
 
 
 @pytest.mark.parametrize(
+    "error",
+    [
+        TimeoutError("timed out"),
+        httpx.ReadTimeout(
+            "timed out", request=httpx.Request("GET", "https://example.com")
+        ),
+        APITimeoutError("timed out"),
+        StatusError(408),
+    ],
+)
+def test_gemini_timeout_errors_preserve_timeout_identity(error: Exception) -> None:
+    client = SimpleNamespace(
+        models=RaisingModels(error), interactions=FakeInteractions()
+    )
+    provider = GeminiProvider(client, "gemini-test", BudgetLedger(limit=100))
+
+    with pytest.raises(ProviderError) as raised:
+        provider.generate(
+            [{"role": "user", "content": "Extract"}],
+            RequirementBatch,
+            max_output_tokens=40,
+        )
+
+    assert raised.value.retryable is True
+    assert raised.value.timed_out is True
+
+
+@pytest.mark.parametrize(
     ("error", "retryable", "used"),
     [
         (TypeError("bad response"), False, 0),
@@ -507,6 +535,7 @@ def test_ollama_url_errors_charge_reservation_and_classify_reason(
             )
 
     assert error.value.retryable is retryable
+    assert error.value.timed_out is isinstance(reason, TimeoutError)
     assert ledger.used == len(opened.call_args.args[0].data) + 40
     assert ledger.reserved == 0
 

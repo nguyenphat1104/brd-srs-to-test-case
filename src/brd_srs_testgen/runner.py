@@ -206,6 +206,8 @@ def _failure_category(error: Exception) -> FailureCategory | None:
     if isinstance(error, StructuredOutputError):
         return FailureCategory.SCHEMA_FAILURE
     if isinstance(error, ProviderError):
+        if error.timed_out:
+            return FailureCategory.TIMEOUT
         return (
             FailureCategory.TRANSPORT_EXHAUSTION
             if error.retryable
@@ -433,12 +435,25 @@ def run_comparison(
             "timestamp": _now(),
             "stage": "finished",
             "status": condition_manifest.status.value,
+            "provider": condition_manifest.provider,
+            "model": condition_manifest.model,
+            "temperature": condition_manifest.temperature,
+            "token_ceiling": condition_manifest.token_ceiling,
             "input_tokens": metrics.input_tokens,
             "output_tokens": metrics.output_tokens,
             "retries": metrics.retries,
             "schema_repairs": metrics.schema_repairs,
             "semantic_revisions": metrics.semantic_revisions,
             "charged_tokens": metrics.charged_tokens,
+            "validation": (
+                validation.model_dump(mode="json") if validation else None
+            ),
+            "failure_category": (
+                condition_manifest.failure_category.value
+                if condition_manifest.failure_category
+                else None
+            ),
+            "failure_message": condition_manifest.failure_message,
         }
         store.finalize_condition(
             manifest.comparison_id,

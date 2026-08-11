@@ -1,3 +1,4 @@
+import hashlib
 import io
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -9,6 +10,7 @@ from brd_srs_testgen.documents import (
     DocumentError,
     chunk_pages,
     extract_pages,
+    normalize_text,
     verify_source_reference,
 )
 from brd_srs_testgen.models import SourceReference
@@ -27,13 +29,18 @@ def test_chunk_ids_are_stable_page_aware_and_bounded() -> None:
 
 
 def test_chunk_splits_preserve_normalized_text() -> None:
-    text = "alpha beta gamma delta"
+    text = "  alpha   beta\tgamma\n delta  "
 
     chunks = chunk_pages([(1, text)], max_chars=10)
 
-    assert "".join(chunk.text for chunk in chunks) == text
+    assert " ".join(chunk.text for chunk in chunks) == normalize_text(text)
     assert all(len(chunk.text) <= 10 for chunk in chunks)
     assert all(chunk.text for chunk in chunks)
+    assert all(chunk.text == normalize_text(chunk.text) for chunk in chunks)
+    assert all(
+        chunk.content_hash == hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+        for chunk in chunks
+    )
 
 
 def test_source_excerpt_must_exist_in_referenced_chunk() -> None:

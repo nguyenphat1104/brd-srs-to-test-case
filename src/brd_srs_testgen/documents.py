@@ -68,7 +68,8 @@ def chunk_pages(
         if not text:
             continue
         section = _section_heading(raw_text)
-        for sequence, piece in enumerate(_pieces(text, max_chars), 1):
+        pieces = filter(None, map(normalize_text, _pieces(text, max_chars)))
+        for sequence, piece in enumerate(pieces, 1):
             digest = hashlib.sha256(piece.encode("utf-8")).hexdigest()
             chunks.append(
                 DocumentChunk(

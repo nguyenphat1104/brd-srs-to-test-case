@@ -16,6 +16,7 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 Messages = list[dict[str, str]]
 RETRYABLE_CODES = {408, 429, 500, 502, 503, 504}
+TIMEOUT_CODES = {408, 504}
 
 
 class BudgetExceeded(RuntimeError):
@@ -23,10 +24,18 @@ class BudgetExceeded(RuntimeError):
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, message: str, *, code: int | None, retryable: bool) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int | None,
+        retryable: bool,
+        timed_out: bool = False,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.retryable = retryable
+        self.timed_out = timed_out
 
 
 class StructuredOutputError(RuntimeError):
@@ -187,12 +196,30 @@ def _is_transient(error: Exception) -> bool:
     )
 
 
+def _is_timeout(error: Exception) -> bool:
+    error_type = type(error)
+    return _error_code(error) in TIMEOUT_CODES or isinstance(
+        error, TimeoutError
+    ) or any(
+        (
+            base.__module__ in {"httpx", "httpx._exceptions"}
+            and base.__name__ == "TimeoutException"
+        )
+        or (
+            base.__module__.startswith("google.genai.")
+            and base.__name__ == "APITimeoutError"
+        )
+        for base in error_type.__mro__
+    )
+
+
 def _provider_error(error: Exception) -> ProviderError:
     code = _error_code(error)
     return ProviderError(
         str(error),
         code=code,
         retryable=code in RETRYABLE_CODES or _is_transient(error),
+        timed_out=_is_timeout(error),
     )
 
 
@@ -360,16 +387,27 @@ class OllamaProvider:
         except HTTPError as error:
             self.ledger.settle(reservation, reservation.tokens)
             raise ProviderError(
-                str(error), code=error.code, retryable=error.code in RETRYABLE_CODES
+                str(error),
+                code=error.code,
+                retryable=error.code in RETRYABLE_CODES,
+                timed_out=error.code in TIMEOUT_CODES,
             ) from error
         except URLError as error:
             self.ledger.settle(reservation, reservation.tokens)
             raise ProviderError(
-                str(error), code=None, retryable=_url_error_retryable(error)
+                str(error),
+                code=None,
+                retryable=_url_error_retryable(error),
+                timed_out=_is_timeout(error.reason),
             ) from error
         except (TimeoutError, ConnectionError) as error:
             self.ledger.settle(reservation, reservation.tokens)
-            raise ProviderError(str(error), code=None, retryable=True) from error
+            raise ProviderError(
+                str(error),
+                code=None,
+                retryable=True,
+                timed_out=_is_timeout(error),
+            ) from error
         except Exception as error:
             self.ledger.settle(reservation, reservation.tokens)
             raise ProviderError(str(error), code=None, retryable=False) from error

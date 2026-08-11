@@ -310,6 +310,18 @@ class BudgetFailingProvider:
         raise AssertionError("BudgetExceeded was not raised")
 
 
+class TimeoutProvider:
+    model = "test-model"
+
+    def __init__(self, ledger: BudgetLedger) -> None:
+        self.ledger = ledger
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        raise ProviderError(
+            "request timed out", code=None, retryable=True, timed_out=True
+        )
+
+
 class InvalidCentralProvider(CentralProvider):
     def generate(self, messages, schema, *, max_output_tokens):
         result = super().generate(
@@ -358,6 +370,13 @@ def test_charged_tokens_match_metrics_download_persistence_and_event(
     assert single.download_bundle()["metrics"] == persisted
     assert persisted["charged_tokens"] == event["charged_tokens"] == 7
     assert persisted["input_tokens"] == persisted["output_tokens"] == 1
+    assert event["provider"] == "ollama"
+    assert event["model"] == "test-model"
+    assert event["temperature"] == 0.0
+    assert event["token_ceiling"] == 100_000
+    assert event["validation"] == single.validation.model_dump(mode="json")
+    assert event["failure_category"] is None
+    assert event["failure_message"] is None
 
 
 def test_budget_failure_keeps_charged_tokens_without_reported_usage(
@@ -385,6 +404,82 @@ def test_budget_failure_keeps_charged_tokens_without_reported_usage(
     assert single.metrics.charged_tokens == settings().token_ceiling + 2
     assert single.download_bundle()["metrics"] == persisted
     assert persisted["charged_tokens"] == event["charged_tokens"]
+    assert event["provider"] == "ollama"
+    assert event["model"] == "test-model"
+    assert event["validation"] is None
+    assert event["failure_category"] == "budget_exhaustion"
+    assert event["failure_message"]
+
+
+def test_exhausted_provider_timeout_is_persisted_as_timeout(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    base_factory = provider_factory()
+
+    def factory(condition, ledger):
+        if condition is Condition.SINGLE_PROMPT:
+            return TimeoutProvider(ledger)
+        return base_factory(condition, ledger)
+
+    def timeout_pipeline(context, _chunks):
+        context.sleep = lambda _seconds: None
+        return context.generate([], ArtifactBundle, max_output_tokens=1)
+
+    monkeypatch.setitem(
+        runner.PIPELINES, Condition.SINGLE_PROMPT, timeout_pipeline
+    )
+    store = RunStore(tmp_path)
+
+    result = run_comparison(
+        b"pdf", settings(), store=store, provider_factory=factory
+    )
+    single = result.conditions[Condition.SINGLE_PROMPT]
+    _metrics, event = _persisted_condition(
+        store, result, Condition.SINGLE_PROMPT
+    )
+
+    assert single.manifest.failure_category.value == "timeout"
+    assert single.metrics.retries == 2
+    assert event["failure_category"] == "timeout"
+    assert event["failure_message"] == "request timed out"
+
+
+def test_terminal_event_retains_failed_validation_report(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    artifacts = bundle()
+    requirement = artifacts.requirements[0].model_copy(
+        update={
+            "source_references": [
+                artifacts.requirements[0].source_references[0].model_copy(
+                    update={"chunk_id": "missing-chunk"}
+                )
+            ]
+        }
+    )
+    invalid = artifacts.model_copy(update={"requirements": [requirement]})
+    base_factory = provider_factory()
+
+    def factory(condition, ledger):
+        if condition is Condition.SINGLE_PROMPT:
+            return ScriptedProvider(ledger, [invalid])
+        return base_factory(condition, ledger)
+
+    store = RunStore(tmp_path)
+    result = run_comparison(
+        b"pdf", settings(), store=store, provider_factory=factory
+    )
+    single = result.conditions[Condition.SINGLE_PROMPT]
+    _metrics, event = _persisted_condition(
+        store, result, Condition.SINGLE_PROMPT
+    )
+
+    assert single.validation.valid is False
+    assert event["validation"] == single.validation.model_dump(mode="json")
+    assert event["failure_category"] == "semantic_validation"
+    assert event["failure_message"] == "1 deterministic validation issues."
 
 
 def test_progress_callback_exceptions_never_change_the_run(tmp_path, monkeypatch) -> None:
