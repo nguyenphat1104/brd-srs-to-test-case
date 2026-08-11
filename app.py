@@ -9,6 +9,14 @@ from brd_srs_testgen.models import Condition, RunStatus
 from brd_srs_testgen.runner import ComparisonResult, ConditionResult, ProviderSettings, run_comparison
 
 
+def _default_model(provider: str) -> str:
+    return "gemini-2.5-flash" if provider == "gemini" else "gemma4"
+
+
+def _reset_model() -> None:
+    st.session_state["model"] = _default_model(st.session_state["provider"])
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
 
@@ -22,6 +30,14 @@ def _download(label: str, value: Any, filename: str, key: str) -> None:
         key=key,
         on_click="ignore",
     )
+
+
+def _safe_error(error: Exception, settings: ProviderSettings) -> str:
+    message = str(error)
+    for secret in (settings.api_key, settings.base_url):
+        if secret:
+            message = message.replace(secret, "[REDACTED]")
+    return message
 
 
 def _render_condition(result: ConditionResult) -> None:
@@ -43,7 +59,22 @@ def _render_condition(result: ConditionResult) -> None:
     token_label = "Charged tokens" if charged else "Reported tokens"
     token_value = charged or metrics.input_tokens + metrics.output_tokens
     st.metric("Requirements", metrics.requirement_count)
+    st.metric("Scenarios", metrics.scenario_count)
     st.metric("Test cases", metrics.test_case_count)
+    st.metric("Citation coverage", f"{metrics.citation_coverage:.0%}")
+    st.metric(
+        "Requirement-to-scenario coverage",
+        f"{metrics.requirement_scenario_coverage:.0%}",
+    )
+    st.metric(
+        "Requirement-to-test-case coverage",
+        f"{metrics.requirement_test_case_coverage:.0%}",
+    )
+    st.metric("Positive scenario coverage", f"{metrics.positive_scenario_coverage:.0%}")
+    st.metric(
+        "Non-positive scenario coverage",
+        f"{metrics.non_positive_scenario_coverage:.0%}",
+    )
     st.metric("RTM completeness", f"{metrics.rtm_completeness:.0%}")
     st.metric(token_label, token_value)
     st.metric("Latency", f"{metrics.latency_seconds:.2f} s")
@@ -100,25 +131,30 @@ def main() -> None:
     st.set_page_config(page_title="BRD/SRS Test-Case Research Core", layout="wide")
     st.title("BRD/SRS Test-Case Research Core")
     st.write("Compare three controlled generation conditions for one text-extractable BRD or SRS PDF.")
+    if "model" not in st.session_state:
+        st.session_state["model"] = _default_model(st.session_state.get("provider", "gemini"))
 
     with st.sidebar:
         st.header("Provider configuration")
-        provider = st.selectbox("Provider", ["gemini", "ollama"])
-        model = st.text_input("Model", value="gemini-2.5-flash" if provider == "gemini" else "llama3.2")
+        provider = st.selectbox(
+            "Provider", ["gemini", "ollama"], key="provider", on_change=_reset_model
+        )
+        model = st.text_input("Model", key="model")
         api_key = ""
         base_url = "http://localhost:11434"
         if provider == "gemini":
-            api_key = st.text_input("Gemini API key", type="password")
+            api_key = st.text_input("Gemini API key", type="password", key="api_key")
         else:
-            base_url = st.text_input("Ollama base URL", value=base_url)
+            base_url = st.text_input("Ollama base URL", value=base_url, key="base_url")
         token_ceiling = st.number_input(
-            "Token ceiling", min_value=1000, value=100_000, step=1000
+            "Token ceiling", min_value=1000, value=100_000, step=1000, key="token_ceiling"
         )
         st.caption("Temperature is fixed at 0.0. Centralized condition uses 3 workers.")
 
-    uploaded_pdf = st.file_uploader("BRD/SRS PDF", type=["pdf"])
-    if st.button("Run all three conditions", type="primary"):
-        if uploaded_pdf is None:
+    uploaded = st.file_uploader("BRD/SRS PDF", type=["pdf"], key="pdf")
+    if st.button("Run all three conditions", type="primary", key="run"):
+        st.session_state.pop("comparison_result", None)
+        if uploaded is None:
             st.error("Upload one PDF before running the comparison.")
         else:
             settings = ProviderSettings(
@@ -136,15 +172,21 @@ def main() -> None:
                         status.write(f"{name}: {message}")
 
                     runner = st.session_state.get("_runner", run_comparison)
-                    st.session_state["comparison_result"] = runner(
-                        uploaded_pdf.getvalue(), settings, progress
+                    result = runner(
+                        uploaded.getvalue(), settings, progress=progress
                     )
-                    status.update(label="Comparison complete", state="complete", expanded=False)
+                    st.session_state["comparison_result"] = result
+                    if result.failure_category:
+                        status.update(label="Comparison failed", state="error", expanded=True)
+                    else:
+                        status.update(
+                            label="Comparison complete", state="complete", expanded=False
+                        )
             except Exception as error:
-                st.error(f"Comparison failed: {error}")
+                st.error(f"Comparison failed: {_safe_error(error, settings)}")
 
     result = st.session_state.get("comparison_result")
-    if result is not None:
+    if isinstance(result, ComparisonResult):
         _render_result(result)
 
 
