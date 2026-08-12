@@ -36,7 +36,7 @@ class TestPriority(StrEnum):
     P3 = "P3"
 
 
-class Condition(StrEnum):
+class RunType(StrEnum):
     SINGLE_PROMPT = "single_prompt"
     STAGED_SINGLE_AGENT = "staged_single_agent"
     CENTRALIZED_MULTI_AGENT = "centralized_multi_agent"
@@ -204,13 +204,18 @@ class RunMetrics(StrictModel):
     budget_exhausted: bool
 
 
-class ConditionManifest(StrictModel):
-    condition: Condition
+class RunManifest(StrictModel):
+    run_id: str = Field(min_length=1)
+    source_filename: str = Field(min_length=1)
+    document_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    run_type: RunType
     status: RunStatus
-    provider: str
-    model: str
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
     temperature: float = Field(ge=0)
     token_ceiling: int = Field(ge=1)
+    prompt_version: str = Field(min_length=1)
+    schema_version: str = Field(min_length=1)
     started_at: AwareDatetime
     completed_at: AwareDatetime | None = None
     failure_category: FailureCategory | None = None
@@ -230,35 +235,55 @@ class ConditionManifest(StrictModel):
                 raise ValueError("failed runs require completed_at and failure_category")
         elif any(
             value is not None
-            for value in (
-                self.completed_at,
-                self.failure_category,
-                self.failure_message,
-            )
+            for value in (self.completed_at, self.failure_category, self.failure_message)
         ):
-            raise ValueError("running runs cannot have completion or failure details")
+            raise ValueError("running runs cannot have terminal fields")
         return self
 
 
-class ComparisonManifest(StrictModel):
-    comparison_id: str
-    document_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+class RunResult(StrictModel):
+    manifest: RunManifest
+    bundle: ArtifactBundle | None = None
+    validation: ValidationReport | None = None
+    rtm: list[RTMRow] = Field(default_factory=list)
+    metrics: RunMetrics | None = None
+
+    def download_bundle(self) -> dict[str, JsonValue]:
+        bundle = self.bundle
+        return {
+            "manifest": self.manifest.model_dump(mode="json"),
+            "requirements": (
+                [item.model_dump(mode="json") for item in bundle.requirements]
+                if bundle
+                else []
+            ),
+            "scenarios": (
+                [item.model_dump(mode="json") for item in bundle.scenarios] if bundle else []
+            ),
+            "test_cases": (
+                [item.model_dump(mode="json") for item in bundle.test_cases]
+                if bundle
+                else []
+            ),
+            "validation": self.validation.model_dump(mode="json") if self.validation else None,
+            "rtm": [item.model_dump(mode="json") for item in self.rtm],
+            "metrics": self.metrics.model_dump(mode="json") if self.metrics else None,
+        }
+
+
+class RunHistoryItem(StrictModel):
+    run_id: str
+    source_filename: str
+    run_type: RunType
+    status: RunStatus
     provider: str
     model: str
-    temperature: float = Field(ge=0)
-    token_ceiling: int = Field(ge=1)
-    condition_order: list[Condition]
-    prompt_version: str
-    schema_version: str
     started_at: AwareDatetime
-    completed_at: AwareDatetime | None = None
+    completed_at: AwareDatetime | None
+    requirement_count: int | None = None
+    scenario_count: int | None = None
+    test_case_count: int | None = None
 
-    @model_validator(mode="after")
-    def validate_condition_order(self) -> Self:
-        if self.completed_at is not None and self.completed_at < self.started_at:
-            raise ValueError("completed_at cannot be earlier than started_at")
-        if len(self.condition_order) != len(Condition) or set(self.condition_order) != set(
-            Condition
-        ):
-            raise ValueError("condition_order must contain each condition exactly once")
-        return self
+    @property
+    def display_status(self) -> str:
+        return "Interrupted" if self.status is RunStatus.RUNNING else self.status.value.title()

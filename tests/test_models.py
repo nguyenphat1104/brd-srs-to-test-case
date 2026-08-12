@@ -1,19 +1,22 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
+import brd_srs_testgen
 import pytest
 from pydantic import ValidationError
 
+import brd_srs_testgen.models as models
 from brd_srs_testgen.models import (
     ArtifactBundle,
-    Condition,
-    ConditionManifest,
-    ComparisonManifest,
     FailureCategory,
     Requirement,
     RequirementPriority,
     RequirementType,
+    RunHistoryItem,
+    RunManifest,
     RunMetrics,
+    RunResult,
     RunStatus,
+    RunType,
     Scenario,
     ScenarioType,
     SourceReference,
@@ -21,6 +24,7 @@ from brd_srs_testgen.models import (
     TestPriority as Priority,
     TestStep as Step,
 )
+from tests.factories import completed_run
 
 
 def source() -> SourceReference:
@@ -190,85 +194,203 @@ def test_metrics_reject_out_of_range_or_negative_values(
         metrics(**{field: value})
 
 
-def manifest(**overrides: object) -> ConditionManifest:
+def run_manifest(**overrides: object) -> RunManifest:
+    now = datetime.now(UTC)
     values: dict[str, object] = {
-        "condition": Condition.SINGLE_PROMPT,
-        "status": RunStatus.COMPLETED,
-        "provider": "gemini",
-        "model": "gemini-2.5-flash",
+        "run_id": "20260812T120000000000Z-ecac9f035813-12345678",
+        "source_filename": "sample.pdf",
+        "document_hash": "a" * 64,
+        "run_type": RunType.SINGLE_PROMPT,
+        "status": RunStatus.RUNNING,
+        "provider": "ollama",
+        "model": "gemma4",
         "temperature": 0.0,
-        "token_ceiling": 1,
-        "started_at": "2026-08-11T00:00:00+00:00",
-        "completed_at": "2026-08-11T00:00:01+00:00",
+        "token_ceiling": 100_000,
+        "prompt_version": "research-core-v1",
+        "schema_version": "research-core-v1",
+        "started_at": now,
     }
     values.update(overrides)
-    return ConditionManifest(**values)
+    return RunManifest(**values)
 
 
-def test_condition_manifest_parses_timestamps_and_enforces_status_invariants() -> None:
-    completed = manifest()
+def test_running_run_has_no_terminal_fields() -> None:
+    manifest = run_manifest()
 
-    assert isinstance(completed.started_at, datetime)
-    assert isinstance(completed.completed_at, datetime)
+    assert manifest.run_type is RunType.SINGLE_PROMPT
+    assert manifest.completed_at is None
 
-    for overrides in (
-        {"token_ceiling": 0},
-        {"temperature": -0.1},
-        {"started_at": "not-a-timestamp"},
-        {"started_at": "2026-08-11T00:00:00"},
-        {"completed_at": None},
-        {"completed_at": "2026-08-10T23:59:59+00:00"},
-        {"failure_message": "unexpected"},
-        {"status": RunStatus.FAILED, "failure_category": None},
+
+@pytest.mark.parametrize(
+    "field", ["completed_at", "failure_category", "failure_message"]
+)
+def test_running_run_rejects_each_terminal_field(field: str) -> None:
+    now = datetime.now(UTC)
+    value: object = {
+        "completed_at": now,
+        "failure_category": FailureCategory.PARSING,
+        "failure_message": "Unexpected failure.",
+    }[field]
+
+    with pytest.raises(ValidationError, match="running runs cannot have terminal fields"):
+        run_manifest(started_at=now, **{field: value})
+
+
+def test_completed_at_cannot_predate_started_at() -> None:
+    now = datetime.now(UTC)
+
+    with pytest.raises(
+        ValidationError, match="completed_at cannot be earlier than started_at"
+    ):
+        run_manifest(started_at=now, completed_at=now - timedelta(seconds=1))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("failure_category", FailureCategory.PARSING),
+        ("failure_message", "Unexpected failure."),
+    ],
+)
+def test_completed_run_rejects_failure_details(field: str, value: object) -> None:
+    now = datetime.now(UTC)
+
+    with pytest.raises(
+        ValidationError, match="completed runs cannot have failure details"
+    ):
+        run_manifest(
+            status=RunStatus.COMPLETED,
+            started_at=now,
+            completed_at=now,
+            **{field: value},
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_id", ""),
+        ("source_filename", ""),
+        ("provider", ""),
+        ("model", ""),
+        ("prompt_version", ""),
+        ("schema_version", ""),
+        ("document_hash", "A" * 64),
+        ("temperature", -0.1),
+        ("token_ceiling", 0),
+        ("started_at", datetime.now()),
+    ],
+)
+def test_run_manifest_rejects_invalid_fields(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        run_manifest(**{field: value})
+
+
+def test_completed_run_requires_completion_time() -> None:
+    with pytest.raises(ValidationError, match="completed runs require completed_at"):
+        run_manifest(status=RunStatus.COMPLETED)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"failure_category": FailureCategory.PARSING},
         {
-            "status": RunStatus.FAILED,
-            "completed_at": None,
-            "failure_category": FailureCategory.TIMEOUT,
-        },
-        {
-            "status": RunStatus.RUNNING,
+            "started_at": "2026-08-11T00:00:00+00:00",
             "completed_at": "2026-08-11T00:00:01+00:00",
         },
-    ):
-        with pytest.raises(ValidationError):
-            manifest(**overrides)
+    ],
+)
+def test_failed_run_requires_category_and_completion_time(
+    overrides: dict[str, object]
+) -> None:
+    with pytest.raises(ValidationError, match="failed runs require"):
+        run_manifest(status=RunStatus.FAILED, **overrides)
 
 
-def comparison_manifest(**overrides: object) -> ComparisonManifest:
-    values: dict[str, object] = {
-        "comparison_id": "comparison-001",
-        "document_hash": "a" * 64,
-        "provider": "gemini",
-        "model": "gemini-2.5-flash",
-        "temperature": 0.0,
-        "token_ceiling": 1,
-        "condition_order": list(Condition),
-        "prompt_version": "v1",
-        "schema_version": "v1",
-        "started_at": "2026-08-11T00:00:00+00:00",
-        "completed_at": "2026-08-11T00:00:01+00:00",
+def test_failed_run_accepts_safe_failure_details() -> None:
+    now = datetime.now(UTC)
+    manifest = run_manifest(
+        status=RunStatus.FAILED,
+        started_at=now,
+        completed_at=now,
+        failure_category=FailureCategory.PARSING,
+        failure_message="PDF contains insufficient extractable text.",
+    )
+
+    assert manifest.failure_category is FailureCategory.PARSING
+
+
+def test_run_result_download_bundle_handles_missing_artifacts() -> None:
+    result = RunResult(manifest=run_manifest())
+
+    assert result.download_bundle() == {
+        "manifest": result.manifest.model_dump(mode="json"),
+        "requirements": [],
+        "scenarios": [],
+        "test_cases": [],
+        "validation": None,
+        "rtm": [],
+        "metrics": None,
     }
-    values.update(overrides)
-    return ComparisonManifest(**values)
 
 
-def test_comparison_manifest_validates_boundaries_and_condition_order() -> None:
-    item = comparison_manifest()
+def test_run_result_download_bundle_serializes_populated_result() -> None:
+    payload = completed_run().download_bundle()
 
-    assert isinstance(item.started_at, datetime)
-    assert isinstance(item.completed_at, datetime)
+    assert payload["requirements"][0]["requirement_id"] == "REQ-001"
+    assert payload["scenarios"][0]["scenario_id"] == "SCN-001"
+    assert payload["test_cases"][0]["test_case_id"] == "TC-001"
+    assert payload["validation"] == {
+        "valid": True,
+        "issues": [],
+        "uncovered_requirement_ids": [],
+        "orphan_scenario_ids": [],
+        "orphan_test_case_ids": [],
+    }
+    assert payload["rtm"][0]["covered"] is True
+    assert payload["metrics"]["charged_tokens"] == 30
 
-    for overrides in (
-        {"document_hash": "A" * 64},
-        {"document_hash": "a" * 63},
-        {"temperature": -0.1},
-        {"token_ceiling": 0},
-        {"started_at": "not-a-timestamp"},
-        {"started_at": "2026-08-11T00:00:00"},
-        {"completed_at": "2026-08-10T23:59:59+00:00"},
-        {"condition_order": []},
-        {"condition_order": [Condition.SINGLE_PROMPT, Condition.STAGED_SINGLE_AGENT]},
-        {"condition_order": [Condition.SINGLE_PROMPT] * 3},
-    ):
-        with pytest.raises(ValidationError):
-            comparison_manifest(**overrides)
+
+def test_run_history_item_displays_running_as_interrupted() -> None:
+    item = RunHistoryItem(
+        run_id="run-001",
+        source_filename="sample.pdf",
+        run_type=RunType.SINGLE_PROMPT,
+        status=RunStatus.RUNNING,
+        provider="ollama",
+        model="gemma4",
+        started_at=datetime.now(UTC),
+        completed_at=None,
+    )
+
+    assert item.display_status == "Interrupted"
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(RunStatus.COMPLETED, "Completed"), (RunStatus.FAILED, "Failed")],
+)
+def test_run_history_item_title_cases_terminal_statuses(
+    status: RunStatus, expected: str
+) -> None:
+    item = RunHistoryItem(
+        run_id="run-001",
+        source_filename="sample.pdf",
+        run_type=RunType.SINGLE_PROMPT,
+        status=status,
+        provider="ollama",
+        model="gemma4",
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+    )
+
+    assert item.display_status == expected
+
+
+def test_package_exports_run_type_without_comparison_models() -> None:
+    assert brd_srs_testgen.RunType is RunType
+    assert not hasattr(brd_srs_testgen, "Condition")
+    assert not hasattr(models, "Condition")
+    assert not hasattr(models, "ConditionManifest")
+    assert not hasattr(models, "ComparisonManifest")

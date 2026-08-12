@@ -1,9 +1,15 @@
+from datetime import UTC, datetime
+
 from brd_srs_testgen.models import (
     ArtifactBundle,
     DocumentChunk,
     Requirement,
     RequirementPriority,
     RequirementType,
+    RunManifest,
+    RunResult,
+    RunStatus,
+    RunType,
     Scenario,
     ScenarioType,
     SourceReference,
@@ -11,6 +17,7 @@ from brd_srs_testgen.models import (
     TestPriority,
     TestStep,
 )
+from brd_srs_testgen.validation import build_rtm, compute_metrics, validate_bundle
 
 
 def chunk() -> DocumentChunk:
@@ -70,4 +77,46 @@ def bundle() -> ArtifactBundle:
     )
     return ArtifactBundle(
         requirements=[requirement], scenarios=[scenario], test_cases=[test_case]
+    )
+
+
+def completed_run(
+    run_id: str = "20260812T120000000000Z-ecac9f035813-12345678",
+    run_type: RunType = RunType.SINGLE_PROMPT,
+) -> RunResult:
+    now = datetime.now(UTC)
+    artifacts = bundle()
+    validation = validate_bundle(artifacts, [chunk()])
+    metrics = compute_metrics(
+        artifacts,
+        validation,
+        input_tokens=10,
+        output_tokens=20,
+        charged_tokens=30,
+        latency_seconds=0.1,
+        retries=0,
+        schema_repairs=0,
+        semantic_revisions=0,
+        budget_exhausted=False,
+    )
+    return RunResult(
+        manifest=RunManifest(
+            run_id=run_id,
+            source_filename="sample.pdf",
+            document_hash="a" * 64,
+            run_type=run_type,
+            status=RunStatus.COMPLETED,
+            provider="ollama",
+            model="gemma4",
+            temperature=0,
+            token_ceiling=100_000,
+            prompt_version="research-core-v1",
+            schema_version="research-core-v1",
+            started_at=now,
+            completed_at=now,
+        ),
+        bundle=artifacts,
+        validation=validation,
+        rtm=build_rtm(artifacts),
+        metrics=metrics,
     )
