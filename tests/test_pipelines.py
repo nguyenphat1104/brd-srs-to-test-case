@@ -9,7 +9,6 @@ from brd_srs_testgen.models import (
     ArtifactBundle,
     GeneratedCases,
     RequirementBatch,
-    ReviewIssue,
     ReviewResult,
     ScenarioBatch,
     TestCaseBatch as ModelTestCaseBatch,
@@ -48,7 +47,7 @@ class CentralProvider:
         content = messages[-1]["content"]
         with self.lock:
             self.calls.append((messages, schema, max_output_tokens))
-        if schema is RequirementBatch:
+        if issubclass(schema, RequirementBatch):
             value = RequirementBatch(
                 requirements=(
                     self.artifacts.requirements
@@ -56,7 +55,7 @@ class CentralProvider:
                     else []
                 )
             )
-        elif schema is GeneratedCases:
+        elif issubclass(schema, GeneratedCases):
             assigned = '"requirements":[]' not in content.replace(" ", "")
             value = GeneratedCases(
                 scenarios=self.artifacts.scenarios if assigned else [],
@@ -86,9 +85,22 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
     ]
     assert len(worker_calls) == 3
     assert all(len(call[0]) == 1 for call in worker_calls)
+    assert all(
+        call[1].model_json_schema()["properties"]["requirements"]["maxItems"] == 20
+        for call in worker_calls
+    )
     assert sum("p0001-c001" not in call[0][0]["content"] for call in worker_calls) == 2
-    case_calls = [call for call in provider.calls if call[1] is GeneratedCases]
+    case_calls = [call for call in provider.calls if issubclass(call[1], GeneratedCases)]
     assert len(case_calls) == 3
+    assert all(
+        call[1].model_json_schema()["properties"]["scenarios"]["maxItems"] == 8
+        and call[1].model_json_schema()["properties"]["test_cases"]["maxItems"] == 8
+        for call in case_calls
+    )
+    reconcile_call = next(
+        call for call in provider.calls if "CANDIDATES JSON" in call[0][0]["content"]
+    )
+    assert reconcile_call[2] == 8_000
     assert sum(
         '"requirements":[]' in call[0][0]["content"].replace(" ", "")
         for call in case_calls
@@ -389,9 +401,9 @@ class MergeProvider:
         content = messages[-1]["content"]
         with self.lock:
             self.calls.append((messages, schema, max_output_tokens))
-        if schema is RequirementBatch and "CANDIDATES" in content:
+        if issubclass(schema, RequirementBatch) and "CANDIDATES" in content:
             value = RequirementBatch(requirements=self.requirements)
-        elif schema is RequirementBatch:
+        elif issubclass(schema, RequirementBatch):
             worker = next(
                 index
                 for index in range(3)
@@ -404,7 +416,7 @@ class MergeProvider:
                     )
                 ]
             )
-        elif schema is GeneratedCases:
+        elif issubclass(schema, GeneratedCases):
             worker = next(
                 index
                 for index in range(3)
@@ -465,36 +477,6 @@ def test_centralized_merge_preserves_all_worker_outputs() -> None:
     ]
 
 
-class RejectingCentralProvider(CentralProvider):
-    def generate(self, messages, schema, *, max_output_tokens):
-        result = super().generate(
-            messages, schema, max_output_tokens=max_output_tokens
-        )
-        if schema is ReviewResult:
-            return GenerationResult(
-                value=ReviewResult(accepted=False),
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                latency_seconds=result.latency_seconds,
-            )
-        return result
-
-
-def test_rejected_centralized_review_causes_one_standalone_revision() -> None:
-    provider = RejectingCentralProvider()
-    context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
-
-    result = run_centralized_multi_agent(context, [chunk()])
-
-    assert result == bundle()
-    assert context.semantic_revisions == 1
-    revision_calls = [call for call in provider.calls if call[1] is ArtifactBundle]
-    assert len(revision_calls) == 1
-    assert len(revision_calls[0][0]) == 1
-    assert "<<<BEGIN ARTIFACT JSON DATA>>>" in revision_calls[0][0][0]["content"]
-    assert "<<<BEGIN PDF EVIDENCE DATA>>>" in revision_calls[0][0][0]["content"]
-
-
 class ScriptedProvider:
     model = "test-model"
 
@@ -517,10 +499,6 @@ class ScriptedProvider:
         )
 
 
-def accepted() -> ReviewResult:
-    return ReviewResult(accepted=True)
-
-
 def test_single_prompt_returns_one_bundle() -> None:
     provider = ScriptedProvider([bundle()])
     context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
@@ -529,18 +507,16 @@ def test_single_prompt_returns_one_bundle() -> None:
 
     assert result.test_cases[0].test_case_id == "TC-001"
     assert len(provider.calls) == 1
+    assert provider.calls[0][2] == 16_000
 
 
-def test_staged_condition_preserves_sequential_history() -> None:
+def test_staged_condition_passes_validated_artifacts_between_steps() -> None:
     artifacts = bundle()
     provider = ScriptedProvider(
         [
             RequirementBatch(requirements=artifacts.requirements),
-            accepted(),
             ScenarioBatch(scenarios=artifacts.scenarios),
-            accepted(),
             ModelTestCaseBatch(test_cases=artifacts.test_cases),
-            accepted(),
         ]
     )
     context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
@@ -548,7 +524,14 @@ def test_staged_condition_preserves_sequential_history() -> None:
     result = run_staged_single_agent(context, [chunk()])
 
     assert result == artifacts
-    assert len(provider.calls[2][0]) > len(provider.calls[0][0])
+    assert len(provider.calls) == 3
+    assert all(len(messages) == 1 for messages, _schema, _limit in provider.calls)
+    assert RequirementBatch(requirements=artifacts.requirements).model_dump_json() in (
+        provider.calls[1][0][0]["content"]
+    )
+    assert ScenarioBatch(scenarios=artifacts.scenarios).model_dump_json() in (
+        provider.calls[2][0][0]["content"]
+    )
 
 
 def test_transport_failure_retries_twice_at_most() -> None:
@@ -585,11 +568,8 @@ def test_staged_requests_carry_evidence_once() -> None:
     provider = ScriptedProvider(
         [
             RequirementBatch(requirements=artifacts.requirements),
-            accepted(),
             ScenarioBatch(scenarios=artifacts.scenarios),
-            accepted(),
             ModelTestCaseBatch(test_cases=artifacts.test_cases),
-            accepted(),
         ]
     )
 
@@ -601,7 +581,7 @@ def test_staged_requests_carry_evidence_once() -> None:
     assert [
         sum(message["content"].count(marker) for message in messages)
         for messages, _schema, _limit in provider.calls
-    ] == [1] * 6
+    ] == [1] * 3
 
 
 def test_embedded_evidence_is_delimited_untrusted_data() -> None:
@@ -646,116 +626,22 @@ def test_schema_repair_preserves_raw_output_as_assistant_turn() -> None:
     assert raw not in repair_messages[-1]["content"]
 
 
-def test_rejected_review_appends_review_and_one_revision() -> None:
+def test_staged_condition_skips_speculative_model_reviews() -> None:
     artifacts = bundle()
-    original = RequirementBatch(requirements=artifacts.requirements)
-    revised = RequirementBatch(
-        requirements=[
-            artifacts.requirements[0].model_copy(update={"title": "Revised title"})
-        ]
-    )
-    rejected = ReviewResult(
-        accepted=False,
-        issues=[ReviewIssue(artifact_id="REQ-001", reason="Clarify the title.")],
-    )
-    provider = ScriptedProvider(
-        [
-            original,
-            rejected,
-            revised,
-            ScenarioBatch(scenarios=artifacts.scenarios),
-            accepted(),
-            ModelTestCaseBatch(test_cases=artifacts.test_cases),
-            accepted(),
-        ]
-    )
-    context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
-
-    result = run_staged_single_agent(context, [chunk()])
-
-    assert result.requirements == revised.requirements
-    assert context.semantic_revisions == 1
-    assert len(provider.calls) == 7
-    assert [message["role"] for message in provider.calls[2][0]] == [
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-        "user",
-    ]
-    assert [message["role"] for message in provider.calls[3][0]] == [
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-        "user",
-    ]
-    assert json.loads(provider.calls[3][0][-2]["content"]) == revised.model_dump(
-        mode="json"
-    )
-    scenario_history = "\n".join(
-        message["content"] for message in provider.calls[3][0]
-    )
-    original_json = json.dumps(original.model_dump(mode="json"), ensure_ascii=False)
-    revised_json = json.dumps(revised.model_dump(mode="json"), ensure_ascii=False)
-    assert revised_json in scenario_history
-    assert original_json not in scenario_history
-    assert scenario_history.count("<<<BEGIN PDF EVIDENCE DATA>>>") == 1
-
-
-def test_accepted_review_is_authoritative_with_nonempty_issues() -> None:
-    artifacts = bundle()
-    requirements = RequirementBatch(requirements=artifacts.requirements)
-    review = ReviewResult(
-        accepted=True,
-        issues=[ReviewIssue(artifact_id="REQ-001", reason="Advisory only.")],
-    )
-    provider = ScriptedProvider(
-        [
-            requirements,
-            review,
-            ScenarioBatch(scenarios=artifacts.scenarios),
-            accepted(),
-            ModelTestCaseBatch(test_cases=artifacts.test_cases),
-            accepted(),
-        ]
-    )
-    context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
-
-    result = run_staged_single_agent(context, [chunk()])
-
-    assert result.requirements == requirements.requirements
-    assert context.semantic_revisions == 0
-    assert len(provider.calls) == 6
-
-
-def test_rejected_review_is_authoritative_with_empty_issues() -> None:
-    artifacts = bundle()
-    revised = RequirementBatch(
-        requirements=[
-            artifacts.requirements[0].model_copy(update={"title": "Revised anyway"})
-        ]
-    )
     provider = ScriptedProvider(
         [
             RequirementBatch(requirements=artifacts.requirements),
-            ReviewResult(accepted=False),
-            revised,
             ScenarioBatch(scenarios=artifacts.scenarios),
-            accepted(),
             ModelTestCaseBatch(test_cases=artifacts.test_cases),
-            accepted(),
         ]
     )
     context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
 
     result = run_staged_single_agent(context, [chunk()])
 
-    assert result.requirements == revised.requirements
-    assert context.semantic_revisions == 1
-    assert len(provider.calls) == 7
+    assert result == artifacts
+    assert context.semantic_revisions == 0
+    assert len(provider.calls) == 3
 
 
 def test_non_retryable_failure_is_not_retried() -> None:
@@ -787,18 +673,22 @@ def test_third_transient_failure_raises_after_two_retries() -> None:
     assert delays == [1, 2]
 
 
-def test_second_malformed_response_raises_after_one_repair() -> None:
+def test_third_malformed_response_raises_after_two_repairs() -> None:
     provider = ScriptedProvider(
-        [StructuredOutputError("bad"), StructuredOutputError("still bad")]
+        [
+            StructuredOutputError("bad"),
+            StructuredOutputError("still bad"),
+            StructuredOutputError("third bad"),
+        ]
     )
     context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
 
     with pytest.raises(StructuredOutputError) as raised:
         run_single_prompt(context, [chunk()])
 
-    assert raised.value.raw_text == "still bad"
-    assert len(provider.calls) == 2
-    assert context.schema_repairs == 1
+    assert raised.value.raw_text == "third bad"
+    assert len(provider.calls) == 3
+    assert context.schema_repairs == 2
     assert context.retries == 0
 
 

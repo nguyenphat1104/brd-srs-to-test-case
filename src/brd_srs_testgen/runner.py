@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 from collections.abc import Callable
@@ -11,13 +12,16 @@ from uuid import uuid4
 
 import google.genai as genai
 
-from .documents import DocumentError, parse_pdf
+from .documents import DocumentError, canonicalize_source_references, parse_pdf
 from .models import (
     ArtifactBundle,
     ComparisonManifest,
     Condition,
     ConditionManifest,
+    CoverageRepair,
     FailureCategory,
+    ReviewIssue,
+    ReviewResult,
     RTMRow,
     RunMetrics,
     RunStatus,
@@ -35,6 +39,7 @@ from .providers import (
     BudgetExceeded,
     BudgetLedger,
     GeminiProvider,
+    LMStudioProvider,
     OllamaProvider,
     ProviderError,
     StructuredOutputError,
@@ -64,9 +69,10 @@ class ProviderSettings:
     def validate(self) -> None:
         if not isinstance(self.provider, str) or self.provider not in {
             "gemini",
+            "lm_studio",
             "ollama",
         }:
-            raise ValueError("Provider must be gemini or ollama.")
+            raise ValueError("Provider must be gemini, LM Studio, or ollama.")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("Model must not be blank.")
         if (
@@ -79,18 +85,21 @@ class ProviderSettings:
             raise ValueError("API key must be a string.")
         if self.provider == "gemini" and not self.api_key.strip():
             raise ValueError("Gemini API key is required.")
-        if self.provider == "ollama":
+        if self.provider in {"lm_studio", "ollama"}:
+            provider_name = "LM Studio" if self.provider == "lm_studio" else "Ollama"
             if not isinstance(self.base_url, str) or any(
                 character.isspace() for character in self.base_url
             ):
-                raise ValueError("Ollama base URL must be an HTTP(S) URL.")
+                raise ValueError(
+                    f"{provider_name} base URL must be an HTTP(S) URL."
+                )
             try:
                 parsed = urlsplit(self.base_url)
                 hostname = parsed.hostname
                 parsed.port
             except (TypeError, ValueError) as error:
                 raise ValueError(
-                    "Ollama base URL must be an HTTP(S) URL."
+                    f"{provider_name} base URL must be an HTTP(S) URL."
                 ) from error
             if (
                 parsed.scheme not in {"http", "https"}
@@ -101,7 +110,8 @@ class ProviderSettings:
                 or "#" in self.base_url
             ):
                 raise ValueError(
-                    "Ollama base URL cannot contain credentials, query, or fragment."
+                    f"{provider_name} base URL cannot contain credentials, "
+                    "query, or fragment."
                 )
 
 
@@ -163,6 +173,13 @@ def _make_provider(
     if settings.provider == "gemini":
         return GeminiProvider(
             genai.Client(api_key=settings.api_key), settings.model, ledger
+        )
+    if settings.provider == "lm_studio":
+        return LMStudioProvider(
+            settings.base_url,
+            settings.model,
+            ledger,
+            api_key=settings.api_key,
         )
     return OllamaProvider(settings.base_url, settings.model, ledger)
 
@@ -280,6 +297,99 @@ def _notify(progress: Progress, condition: Condition | None, message: str) -> No
         pass
 
 
+def _repair_coverage(
+    context: PipelineContext,
+    bundle: ArtifactBundle,
+    uncovered_requirement_ids: list[str],
+) -> ArtifactBundle:
+    requirements = [
+        {
+            "requirement_id": item.requirement_id,
+            "title": item.title,
+            "description": item.description,
+            "module": item.module,
+        }
+        for item in bundle.requirements
+        if item.requirement_id in uncovered_requirement_ids
+    ]
+    scenarios = [
+        {
+            "scenario_id": item.scenario_id,
+            "title": item.title,
+            "objective": item.objective,
+            "requirement_ids": item.requirement_ids,
+        }
+        for item in bundle.scenarios
+    ]
+    test_cases = [
+        {
+            "test_case_id": item.test_case_id,
+            "scenario_id": item.scenario_id,
+            "title": item.title,
+            "requirement_ids": item.requirement_ids,
+        }
+        for item in bundle.test_cases
+    ]
+    context.semantic_revisions += 1
+    repair = context.generate(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "Return one coverage assignment for each uncovered requirement. "
+                    "Use only IDs in these catalogs. Choose the existing scenario and "
+                    "that scenario's existing test case that most directly cover the "
+                    "requirement. Do not create artifacts or IDs.\n"
+                    f"UNCOVERED REQUIREMENTS:\n{json.dumps(requirements, ensure_ascii=False)}\n"
+                    f"SCENARIOS:\n{json.dumps(scenarios, ensure_ascii=False)}\n"
+                    f"TEST CASES:\n{json.dumps(test_cases, ensure_ascii=False)}"
+                ),
+            }
+        ],
+        CoverageRepair,
+        max_output_tokens=2_000,
+    )
+    scenario_links = {
+        item.scenario_id: list(item.requirement_ids) for item in bundle.scenarios
+    }
+    test_links = {
+        item.test_case_id: list(item.requirement_ids) for item in bundle.test_cases
+    }
+    scenarios_by_id = {item.scenario_id: item for item in bundle.scenarios}
+    tests_by_id = {item.test_case_id: item for item in bundle.test_cases}
+    uncovered = set(uncovered_requirement_ids)
+    for assignment in repair.assignments:
+        scenario = scenarios_by_id.get(assignment.scenario_id)
+        test_case = tests_by_id.get(assignment.test_case_id)
+        if (
+            assignment.requirement_id not in uncovered
+            or scenario is None
+            or test_case is None
+            or test_case.scenario_id != scenario.scenario_id
+        ):
+            continue
+        if assignment.requirement_id not in scenario_links[scenario.scenario_id]:
+            scenario_links[scenario.scenario_id].append(assignment.requirement_id)
+        if assignment.requirement_id not in test_links[test_case.test_case_id]:
+            test_links[test_case.test_case_id].append(assignment.requirement_id)
+    return bundle.model_copy(
+        update={
+            "scenarios": [
+                item.model_copy(
+                    update={"requirement_ids": scenario_links[item.scenario_id]}
+                )
+                for item in bundle.scenarios
+            ],
+            "test_cases": [
+                item.model_copy(
+                    update={"requirement_ids": test_links[item.test_case_id]}
+                )
+                for item in bundle.test_cases
+            ],
+        }
+    )
+
+
 def run_comparison(
     pdf_bytes: bytes,
     settings: ProviderSettings,
@@ -370,8 +480,38 @@ def run_comparison(
                     "Provider model must match the comparison model."
                 )
             context = PipelineContext(provider=provider)
-            bundle = PIPELINES[condition](context, chunks)
+            bundle = canonicalize_source_references(
+                PIPELINES[condition](context, chunks), chunks
+            )
             validation = validate_bundle(bundle, chunks)
+            if validation.issues and all(
+                issue.code == "uncovered_requirement" for issue in validation.issues
+            ):
+                bundle = _repair_coverage(
+                    context, bundle, validation.uncovered_requirement_ids
+                )
+                validation = validate_bundle(bundle, chunks)
+            if not validation.valid:
+                bundle = context.revise(
+                    [],
+                    "artifact bundle",
+                    bundle,
+                    ReviewResult(
+                        accepted=False,
+                        issues=[
+                            ReviewIssue(
+                                artifact_id=issue.artifact_id,
+                                reason=f"{issue.code}: {issue.message}",
+                            )
+                            for issue in validation.issues
+                        ],
+                    ),
+                    chunks,
+                    ArtifactBundle,
+                    16_000,
+                )
+                bundle = canonicalize_source_references(bundle, chunks)
+                validation = validate_bundle(bundle, chunks)
             rtm = build_rtm(bundle)
             latency = time.perf_counter() - started
             metrics = compute_metrics(

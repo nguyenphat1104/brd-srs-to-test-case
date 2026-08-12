@@ -1,7 +1,7 @@
-import os
 import streamlit as st
-import google.generativeai as genai
 from pypdf import PdfReader
+
+from llm_provider import generate_with_ollama
 
 # Cài đặt giao diện trang Streamlit
 st.set_page_config(page_title="SRS to Requirement Model AI", page_icon="📋", layout="wide")
@@ -9,9 +9,18 @@ st.set_page_config(page_title="SRS to Requirement Model AI", page_icon="📋", l
 st.title("📋 Chuyển đổi SRS PDF thành Requirement Model")
 st.write("Tải lên tài liệu SRS (PDF) của bạn để Gemini phân tích và trích xuất thành Mô hình Yêu cầu có cấu trúc.")
 
-# Nhập Gemini API Key qua thanh sidebar
+# Chọn provider qua thanh sidebar
 st.sidebar.header("Cấu hình API")
-api_key_input = st.sidebar.text_input("Nhập Google Gemini API Key:", type="password")
+provider = st.sidebar.selectbox("LLM provider", ("Gemini", "Local Gemma 4 (Ollama)"))
+api_key_input = ""
+ollama_model = "gemma4"
+ollama_url = "http://localhost:11434"
+if provider == "Gemini":
+    api_key_input = st.sidebar.text_input("Nhập Google Gemini API Key:", type="password")
+else:
+    st.sidebar.caption("Khởi động Ollama bằng `ollama serve`, sau đó chạy `ollama pull gemma4`.")
+    ollama_model = st.sidebar.text_input("Ollama model", value=ollama_model)
+    ollama_url = st.sidebar.text_input("Ollama URL", value=ollama_url)
 
 # Hàm trích xuất text từ tệp PDF tải lên
 def extract_text_from_pdf(pdf_file):
@@ -24,11 +33,7 @@ def extract_text_from_pdf(pdf_file):
     return text
 
 # Hàm gọi Gemini để phân tích SRS và tạo Requirement Model
-def generate_requirement_model(srs_text, api_key):
-    genai.configure(api_key=api_key)
-    # Sử dụng mô hình Gemini hỗ trợ văn bản nhanh và mạnh
-    model = genai.GenerativeModel("gemini-3.5-flash")
-    
+def generate_requirement_model(srs_text, provider, api_key, ollama_model, ollama_url):
     prompt = f"""
     Bạn là một kỹ sư hệ thống và chuyên gia phân tích nghiệp vụ cao cấp.
     Dựa vào nội dung tài liệu SRS (Software Requirements Specification) dưới đây, hãy phân tích và tạo ra một Mô hình Yêu cầu (Requirement Model) hoàn chỉnh.
@@ -44,8 +49,12 @@ def generate_requirement_model(srs_text, api_key):
     {srs_text}
     """
     
-    response = model.generate_content(prompt)
-    return response.text
+    if provider == "Gemini":
+        import google.generativeai as genai
+
+        genai.configure(api_key=api_key)
+        return genai.GenerativeModel("gemini-3.5-flash").generate_content(prompt).text
+    return generate_with_ollama(prompt, ollama_model, ollama_url)
 
 # Khu vực xử lý giao diện chính
 uploaded_file = st.file_uploader("Chọn file SRS định dạng PDF", type=["pdf"])
@@ -54,10 +63,10 @@ if uploaded_file is not None:
     st.success("Đã tải lên tệp PDF thành công!")
     
     if st.button("Bắt đầu phân tích & Tạo Requirement Model"):
-        if not api_key_input:
+        if provider == "Gemini" and not api_key_input:
             st.error("Vui lòng nhập Google Gemini API Key ở thanh bên trái (Sidebar).")
         else:
-            with st.spinner("Đang đọc file PDF và yêu cầu Gemini xử lý..."):
+            with st.spinner("Đang đọc file PDF và yêu cầu LLM xử lý..."):
                 try:
                     # Trích xuất văn bản
                     srs_content = extract_text_from_pdf(uploaded_file)
@@ -65,8 +74,9 @@ if uploaded_file is not None:
                     if not srs_content.strip():
                         st.warning("Không thể đọc được nội dung văn bản từ PDF này. File có thể là ảnh quét (scanned).")
                     else:
-                        # Gọi Gemini API
-                        result_model = generate_requirement_model(srs_content, api_key_input)
+                        result_model = generate_requirement_model(
+                            srs_content, provider, api_key_input, ollama_model, ollama_url
+                        )
                         
                         st.subheader("🎯 Kết quả: Requirement Model")
                         st.markdown(result_model)

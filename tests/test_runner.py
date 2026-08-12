@@ -14,6 +14,8 @@ from brd_srs_testgen.models import (
     ComparisonManifest,
     Condition,
     ConditionManifest,
+    CoverageAssignment,
+    CoverageRepair,
     GeneratedCases,
     RequirementBatch,
     ReviewResult,
@@ -67,7 +69,7 @@ class CentralProvider:
     def generate(self, messages, schema, *, max_output_tokens):
         content = messages[-1]["content"]
         with self.lock:
-            if schema is RequirementBatch:
+            if issubclass(schema, RequirementBatch):
                 value = RequirementBatch(
                     requirements=(
                         self.artifacts.requirements
@@ -75,7 +77,7 @@ class CentralProvider:
                         else []
                     )
                 )
-            elif schema is GeneratedCases:
+            elif issubclass(schema, GeneratedCases):
                 assigned = '"requirements":[]' not in content.replace(" ", "")
                 value = GeneratedCases(
                     scenarios=self.artifacts.scenarios if assigned else [],
@@ -86,10 +88,6 @@ class CentralProvider:
             else:
                 raise AssertionError(f"Unexpected schema: {schema}")
         return _result(schema.model_validate(value.model_dump(mode="json")))
-
-
-def accepted() -> ReviewResult:
-    return ReviewResult(accepted=True)
 
 
 def provider_factory(*, fail_single: bool = False):
@@ -108,11 +106,8 @@ def provider_factory(*, fail_single: bool = False):
                 ledger,
                 [
                     RequirementBatch(requirements=artifacts.requirements),
-                    accepted(),
                     ScenarioBatch(scenarios=artifacts.scenarios),
-                    accepted(),
                     ModelTestCaseBatch(test_cases=artifacts.test_cases),
-                    accepted(),
                 ],
             )
         return CentralProvider(ledger)
@@ -329,7 +324,7 @@ class InvalidCentralProvider(CentralProvider):
             messages, schema, max_output_tokens=max_output_tokens
         )
         if (
-            schema is RequirementBatch
+            issubclass(schema, RequirementBatch)
             and "WORKER REQUIREMENT EXTRACTION 1/3" in messages[-1]["content"]
             and result.value.requirements
         ):
@@ -493,7 +488,7 @@ def test_terminal_event_retains_failed_validation_report(
         update={
             "source_references": [
                 artifacts.requirements[0].source_references[0].model_copy(
-                    update={"chunk_id": "missing-chunk"}
+                    update={"excerpt": "invented evidence"}
                 )
             ]
         }
@@ -503,7 +498,7 @@ def test_terminal_event_retains_failed_validation_report(
 
     def factory(condition, ledger):
         if condition is Condition.SINGLE_PROMPT:
-            return ScriptedProvider(ledger, [invalid])
+            return ScriptedProvider(ledger, [invalid, invalid])
         return base_factory(condition, ledger)
 
     store = RunStore(tmp_path)
@@ -519,6 +514,80 @@ def test_terminal_event_retains_failed_validation_report(
     assert event["validation"] == single.validation.model_dump(mode="json")
     assert event["failure_category"] == "semantic_validation"
     assert event["failure_message"] == "1 deterministic validation issues."
+    assert single.metrics.semantic_revisions == 1
+
+
+def test_failed_validation_gets_one_deterministic_repair(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    artifacts = bundle()
+    reference = artifacts.requirements[0].source_references[0].model_copy(
+        update={"excerpt": "invented evidence"}
+    )
+    invalid = artifacts.model_copy(
+        update={
+            "requirements": [
+                artifacts.requirements[0].model_copy(
+                    update={"source_references": [reference]}
+                )
+            ]
+        }
+    )
+    base_factory = provider_factory()
+
+    def factory(condition, ledger):
+        if condition is Condition.SINGLE_PROMPT:
+            return ScriptedProvider(ledger, [invalid, artifacts])
+        return base_factory(condition, ledger)
+
+    result = run_comparison(
+        b"pdf", settings(), store=RunStore(tmp_path), provider_factory=factory
+    )
+    single = result.conditions[Condition.SINGLE_PROMPT]
+
+    assert single.manifest.status is RunStatus.COMPLETED
+    assert single.validation.valid is True
+    assert single.metrics.semantic_revisions == 1
+
+
+def test_uncovered_requirement_gets_link_only_repair(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    artifacts = bundle()
+    uncovered = artifacts.requirements[0].model_copy(
+        update={
+            "requirement_id": "REQ-002",
+            "title": "Second requirement",
+            "description": "The same scenario also covers this requirement.",
+        }
+    )
+    invalid = artifacts.model_copy(
+        update={"requirements": [*artifacts.requirements, uncovered]}
+    )
+    repair = CoverageRepair(
+        assignments=[
+            CoverageAssignment(
+                requirement_id="REQ-002",
+                scenario_id=artifacts.scenarios[0].scenario_id,
+                test_case_id=artifacts.test_cases[0].test_case_id,
+            )
+        ]
+    )
+    base_factory = provider_factory()
+
+    def factory(condition, ledger):
+        if condition is Condition.SINGLE_PROMPT:
+            return ScriptedProvider(ledger, [invalid, repair])
+        return base_factory(condition, ledger)
+
+    result = run_comparison(
+        b"pdf", settings(), store=RunStore(tmp_path), provider_factory=factory
+    )
+    single = result.conditions[Condition.SINGLE_PROMPT]
+
+    assert single.manifest.status is RunStatus.COMPLETED
+    assert single.validation.valid is True
+    assert "REQ-002" in single.bundle.scenarios[0].requirement_ids
+    assert "REQ-002" in single.bundle.test_cases[0].requirement_ids
+    assert single.metrics.semantic_revisions == 1
 
 
 def test_progress_callback_exceptions_never_change_the_run(tmp_path, monkeypatch) -> None:
@@ -557,6 +626,22 @@ def test_parse_failure_emits_terminal_progress(tmp_path, monkeypatch) -> None:
     )
 
     assert trace == [(None, "Parsing PDF"), (None, "Failed")]
+
+
+def test_lm_studio_settings_create_authenticated_provider() -> None:
+    configured = ProviderSettings(
+        provider="lm_studio",
+        model="local-model",
+        token_ceiling=100_000,
+        api_key="local-token",
+        base_url="http://localhost:1234/v1",
+    )
+
+    configured.validate()
+    provider = runner._make_provider(configured, BudgetLedger(100_000))
+
+    assert isinstance(provider, providers_module.LMStudioProvider)
+    assert provider.api_key == "local-token"
 
 
 @pytest.mark.parametrize(

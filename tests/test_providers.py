@@ -15,9 +15,11 @@ from brd_srs_testgen.providers import (
     BudgetExceeded,
     BudgetLedger,
     GeminiProvider,
+    LMStudioProvider,
     OllamaProvider,
     ProviderError,
     StructuredOutputError,
+    list_lm_studio_models,
 )
 
 
@@ -294,6 +296,9 @@ def test_providers_reject_invalid_max_before_adapter_action(
         BudgetLedger(limit=100),
     )
     ollama = OllamaProvider("http://localhost:11434", "gemma4", BudgetLedger(100))
+    lm_studio = LMStudioProvider(
+        "http://localhost:1234/v1", "local-model", BudgetLedger(100)
+    )
     messages = [{"role": "user", "content": "Extract requirements"}]
 
     with pytest.raises(ValueError, match="positive integer"):
@@ -301,6 +306,10 @@ def test_providers_reject_invalid_max_before_adapter_action(
     with patch("brd_srs_testgen.providers.urlopen") as opened:
         with pytest.raises(ValueError, match="positive integer"):
             ollama.generate(messages, RequirementBatch, max_output_tokens=max_output_tokens)
+        with pytest.raises(ValueError, match="positive integer"):
+            lm_studio.generate(
+                messages, RequirementBatch, max_output_tokens=max_output_tokens
+            )
 
     models.count_tokens.assert_not_called()
     opened.assert_not_called()
@@ -333,6 +342,62 @@ def test_ollama_posts_schema_and_reads_token_counts() -> None:
     assert payload["format"]["type"] == "object"
     assert result.total_tokens == 12
     assert ledger.used == 12
+
+
+def test_lm_studio_posts_openai_schema_auth_and_reads_usage() -> None:
+    response = io.BytesIO(
+        json.dumps(
+            {
+                "choices": [
+                    {"message": {"content": '{"requirements": []}'}}
+                ],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 4},
+            }
+        ).encode()
+    )
+    ledger = BudgetLedger(limit=10_000)
+    provider = LMStudioProvider(
+        "http://localhost:1234/v1/",
+        "local-model",
+        ledger,
+        api_key="local-token",
+    )
+
+    with patch("brd_srs_testgen.providers.urlopen", return_value=response) as opened:
+        result = provider.generate(
+            [{"role": "user", "content": "Extract requirements"}],
+            RequirementBatch,
+            max_output_tokens=40,
+        )
+
+    request = opened.call_args.args[0]
+    payload = json.loads(request.data)
+    assert request.full_url == "http://localhost:1234/v1/chat/completions"
+    assert request.get_header("Authorization") == "Bearer local-token"
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"]["strict"] is True
+    assert payload["reasoning_effort"] == "none"
+    assert payload["max_tokens"] == 40
+    assert result.total_tokens == 12
+    assert ledger.used == 12
+
+
+def test_lm_studio_lists_models_with_auth() -> None:
+    response = io.BytesIO(
+        json.dumps(
+            {"data": [{"id": "gemma-3-12b"}, {"id": "gemma-3-4b"}]}
+        ).encode()
+    )
+
+    with patch("brd_srs_testgen.providers.urlopen", return_value=response) as opened:
+        models = list_lm_studio_models(
+            "http://localhost:1234/v1", "local-token"
+        )
+
+    request = opened.call_args.args[0]
+    assert request.full_url == "http://localhost:1234/v1/models"
+    assert request.get_header("Authorization") == "Bearer local-token"
+    assert models == ["gemma-3-12b", "gemma-3-4b"]
 
 
 def test_invalid_json_is_charged_before_schema_error() -> None:

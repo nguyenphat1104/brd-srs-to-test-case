@@ -247,6 +247,54 @@ def _ollama_url(base_url: str) -> str:
     return url
 
 
+def _lm_studio_url(base_url: str, endpoint: str) -> str:
+    url = f"{base_url.rstrip('/')}/{endpoint}"
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or any(char.isspace() for char in parsed.netloc)
+    ):
+        raise ValueError("Invalid LM Studio URL.")
+    return url
+
+
+def list_lm_studio_models(
+    base_url: str, api_key: str = "", *, timeout: int = 10
+) -> list[str]:
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        request = Request(
+            _lm_studio_url(base_url, "models"),
+            headers=headers,
+            method="GET",
+        )
+        with urlopen(request, timeout=timeout) as response:
+            result = json.load(response)
+        models = sorted(
+            {
+                item["id"]
+                for item in result["data"]
+                if isinstance(item, dict)
+                and isinstance(item.get("id"), str)
+                and item["id"].strip()
+            }
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ProviderError(
+            "LM Studio returned an invalid model list.",
+            code=None,
+            retryable=False,
+        ) from error
+    except Exception as error:
+        raise _provider_error(error) from error
+    if not models:
+        raise ProviderError(
+            "LM Studio returned no available models.", code=None, retryable=False
+        )
+    return models
+
+
 class GeminiProvider:
     def __init__(self, client, model: str, ledger: BudgetLedger) -> None:
         self.client = client
@@ -434,6 +482,136 @@ class OllamaProvider:
             self.ledger.settle(reservation, reservation.tokens)
             raise ProviderError(
                 "Ollama returned an incomplete response.", code=None, retryable=False
+            ) from error
+
+        self.ledger.settle(reservation, input_tokens + output_tokens)
+        try:
+            value = schema.model_validate_json(raw_text)
+        except Exception as error:
+            raise StructuredOutputError(
+                raw_text,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_seconds=time.perf_counter() - started,
+            ) from error
+        return GenerationResult(
+            value=value,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_seconds=time.perf_counter() - started,
+        )
+
+
+class LMStudioProvider:
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        ledger: BudgetLedger,
+        *,
+        api_key: str = "",
+        timeout: int = 600,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.ledger = ledger
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def generate(
+        self,
+        messages: Messages,
+        schema: type[T],
+        *,
+        max_output_tokens: int,
+    ) -> GenerationResult[T]:
+        max_output_tokens = _max_output_tokens(max_output_tokens)
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema.__name__,
+                    "strict": True,
+                    "schema": schema.model_json_schema(),
+                },
+            },
+            "temperature": 0.0,
+            "reasoning_effort": "none",
+            "max_tokens": max_output_tokens,
+            "stream": False,
+        }
+        encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        try:
+            request = Request(
+                _lm_studio_url(self.base_url, "chat/completions"),
+                data=encoded,
+                headers=headers,
+                method="POST",
+            )
+        except (TypeError, ValueError) as error:
+            raise ProviderError(
+                "Invalid LM Studio URL.", code=None, retryable=False
+            ) from error
+
+        # ponytail: approximate preflight count; use a model tokenizer if it blocks valid runs.
+        input_estimate = max(1, (len(encoded) + 3) // 4)
+        reservation = self.ledger.reserve(input_estimate + max_output_tokens)
+        started = time.perf_counter()
+        try:
+            response = urlopen(request, timeout=self.timeout)
+        except ValueError as error:
+            self.ledger.cancel(reservation)
+            raise ProviderError(
+                "Invalid LM Studio URL.", code=None, retryable=False
+            ) from error
+        except HTTPError as error:
+            self.ledger.settle(reservation, reservation.tokens)
+            raise ProviderError(
+                str(error),
+                code=error.code,
+                retryable=error.code in RETRYABLE_CODES,
+                timed_out=error.code in TIMEOUT_CODES,
+            ) from error
+        except URLError as error:
+            self.ledger.settle(reservation, reservation.tokens)
+            raise ProviderError(
+                str(error),
+                code=None,
+                retryable=_url_error_retryable(error),
+                timed_out=_is_timeout(error.reason),
+            ) from error
+        except (TimeoutError, ConnectionError) as error:
+            self.ledger.settle(reservation, reservation.tokens)
+            raise ProviderError(
+                str(error),
+                code=None,
+                retryable=True,
+                timed_out=_is_timeout(error),
+            ) from error
+        except Exception as error:
+            self.ledger.settle(reservation, reservation.tokens)
+            raise ProviderError(str(error), code=None, retryable=False) from error
+
+        try:
+            with response:
+                result = json.load(response)
+            usage = result["usage"]
+            input_tokens = _token_count(usage["prompt_tokens"], "Input token count")
+            output_tokens = _token_count(
+                usage["completion_tokens"], "Output token count"
+            )
+            raw_text = result["choices"][0]["message"]["content"]
+        except (IndexError, KeyError, TypeError, ValueError) as error:
+            self.ledger.settle(reservation, reservation.tokens)
+            raise ProviderError(
+                "LM Studio returned an incomplete response.",
+                code=None,
+                retryable=False,
             ) from error
 
         self.ledger.settle(reservation, input_tokens + output_tokens)

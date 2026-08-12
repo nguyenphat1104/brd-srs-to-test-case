@@ -137,6 +137,16 @@ class GeneratedCases(StrictModel):
     test_cases: list[TestCase]
 
 
+class CoverageAssignment(StrictModel):
+    requirement_id: str = Field(pattern=r"^REQ-\d{3,}$")
+    scenario_id: str = Field(pattern=r"^SCN-\d{3,}$")
+    test_case_id: str = Field(pattern=r"^TC-\d{3,}$")
+
+
+class CoverageRepair(StrictModel):
+    assignments: list[CoverageAssignment] = Field(min_length=1)
+
+
 class ReviewIssue(StrictModel):
     artifact_id: str
     reason: str

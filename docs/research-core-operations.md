@@ -18,7 +18,7 @@ Use a small, non-sensitive, text-extractable PDF. Keep the selected model and to
 
 ### Gemini
 
-1. Select `gemini`, use a supported Gemini model (the default is `gemini-2.5-flash`), and enter its API key.
+1. Select `gemini`, use a supported Gemini model (the default is `gemini-3.6-flash`), and enter its API key.
 2. Upload the PDF, set one token ceiling, and run all three conditions.
 3. Confirm three condition summaries and their requirements, scenarios, test cases, RTM, and complete-bundle downloads.
 
@@ -39,7 +39,15 @@ ollama pull gemma4
 
 Leave Terminal 1 running. Select `ollama`; the local URL and model are editable (defaults: `http://localhost:11434` and `gemma4`). Run the same PDF with the same ceiling. Confirm isolated condition failures are shown when applicable, charged tokens when supplied (otherwise reported input plus output tokens), and all downloads. Ollama requests disable thinking output.
 
-Do not put credentials in a URL's userinfo or query string, and do not put secrets in the PDF. The UI masks the Gemini key and redacts known secrets from errors.
+### LM Studio
+
+Start the local server from LM Studio's Developer tab and load a model. Select
+`LM Studio` and keep the default OpenAI-compatible base URL
+(`http://localhost:1234/v1`). If authentication is enabled, enter an API token
+created in LM Studio Server Settings, select **Load available models**, then
+choose the loaded model from the dropdown.
+
+Do not put credentials in a URL's userinfo or query string, and do not put secrets in the PDF. The UI masks Gemini and LM Studio credentials and redacts known secrets from errors.
 
 ## Persisted runs
 
@@ -58,7 +66,7 @@ Terminal conditions and completed comparisons are immutable. Each finalization f
 
 ## Failures and recovery
 
-The reported categories are parsing, configuration, provider rejection, transport exhaustion, timeout, budget exhaustion, schema failure, and semantic validation. A condition failure does not prevent the remaining conditions from running. Correct the configuration, model availability, or PDF and rerun; this produces a new ID. For budget exhaustion, raise the per-condition ceiling or use a smaller input within the comparison protocol. For transport exhaustion or timeout, restore connectivity, the provider, or the Ollama server, then rerun. Unexpected internal defects fail loudly; fix the code and rerun to a new ID, retaining any stranded `RUNNING` directory for diagnosis.
+The reported categories are parsing, configuration, provider rejection, transport exhaustion, timeout, budget exhaustion, schema failure, and semantic validation. A condition failure does not prevent the remaining conditions from running. Correct the configuration, model availability, or PDF and rerun; this produces a new ID. For budget exhaustion, raise the per-condition ceiling or use a smaller input within the comparison protocol. For transport exhaustion or timeout, restore connectivity, the provider, or the local model server, then rerun. Unexpected internal defects fail loudly; fix the code and rerun to a new ID, retaining any stranded `RUNNING` directory for diagnosis.
 
 ## Offline verification
 
