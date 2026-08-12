@@ -1,43 +1,76 @@
-import json
+import hashlib
 import threading
 from collections import deque
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
 import brd_srs_testgen.providers as providers_module
-import brd_srs_testgen.storage as storage_module
 from brd_srs_testgen import runner
 from brd_srs_testgen.documents import DocumentError
 from brd_srs_testgen.models import (
     ArtifactBundle,
-    ComparisonManifest,
-    Condition,
-    ConditionManifest,
     CoverageAssignment,
     CoverageRepair,
+    FailureCategory,
     GeneratedCases,
     RequirementBatch,
     ReviewResult,
     RunStatus,
-    ScenarioBatch,
-    TestCaseBatch as ModelTestCaseBatch,
+    RunType,
 )
+from brd_srs_testgen.pipelines import PipelineOutputError
 from brd_srs_testgen.providers import (
     BudgetLedger,
     GenerationResult,
     ProviderError,
+    StructuredOutputError,
 )
-from brd_srs_testgen.runner import ProviderSettings, run_comparison
-from brd_srs_testgen.storage import ImmutableArtifactError, RunStore, StorageError
+from brd_srs_testgen.runner import ProviderSettings, run_generation
 from tests.factories import bundle, chunk
 
 
-def _result(value):
+class RecordingRepository:
+    def __init__(self, fail_at=None) -> None:
+        self.fail_at = fail_at
+        self.calls = []
+        self.created = []
+        self.saved = []
+        self.events = []
+        self.finalized = []
+
+    def _fail(self, method) -> None:
+        if self.fail_at == method:
+            raise RuntimeError(f"{method} failed")
+
+    def create_run(self, manifest) -> None:
+        self.calls.append(("create_run", manifest))
+        self.created.append(manifest)
+        self._fail("create_run")
+
+    def save_chunks(self, run_id, chunks) -> None:
+        items = list(chunks)
+        self.calls.append(("save_chunks", run_id, items))
+        self.saved.append((run_id, items))
+        self._fail("save_chunks")
+
+    def append_event(self, run_id, stage, occurred_at=None) -> None:
+        self.calls.append(("append_event", run_id, stage, occurred_at))
+        self.events.append((run_id, stage, occurred_at))
+        self._fail("append_event")
+
+    def finalize(self, result) -> None:
+        self.calls.append(("finalize", result))
+        self.finalized.append(result)
+        self._fail("finalize")
+
+
+def _result(value, *, input_tokens=1, output_tokens=1):
     return GenerationResult(
         value=value,
-        input_tokens=1,
-        output_tokens=1,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
         latency_seconds=0.01,
     )
 
@@ -56,6 +89,26 @@ class ScriptedProvider:
         if isinstance(response, Exception):
             raise response
         return _result(schema.model_validate(response.model_dump(mode="json")))
+
+
+class ChargedProvider(ScriptedProvider):
+    def generate(self, messages, schema, *, max_output_tokens):
+        result = super().generate(messages, schema, max_output_tokens=max_output_tokens)
+        reservation = self.ledger.reserve(7)
+        self.ledger.settle(reservation, 7)
+        return result
+
+
+class BudgetFailingProvider:
+    model = "test-model"
+
+    def __init__(self, ledger: BudgetLedger) -> None:
+        self.ledger = ledger
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        reservation = self.ledger.reserve(1)
+        self.ledger.settle(reservation, self.ledger.limit + 2)
+        raise AssertionError("BudgetExceeded was not raised")
 
 
 class CentralProvider:
@@ -90,239 +143,9 @@ class CentralProvider:
         return _result(schema.model_validate(value.model_dump(mode="json")))
 
 
-def provider_factory(*, fail_single: bool = False):
-    artifacts = bundle()
-
-    def factory(condition: Condition, ledger: BudgetLedger):
-        if condition is Condition.SINGLE_PROMPT:
-            responses = (
-                [ProviderError("rejected", code=400, retryable=False)]
-                if fail_single
-                else [artifacts]
-            )
-            return ScriptedProvider(ledger, responses)
-        if condition is Condition.STAGED_SINGLE_AGENT:
-            return ScriptedProvider(
-                ledger,
-                [
-                    RequirementBatch(requirements=artifacts.requirements),
-                    ScenarioBatch(scenarios=artifacts.scenarios),
-                    ModelTestCaseBatch(test_cases=artifacts.test_cases),
-                ],
-            )
-        return CentralProvider(ledger)
-
-    return factory
-
-
-def settings() -> ProviderSettings:
-    return ProviderSettings(
-        provider="ollama",
-        model="test-model",
-        token_ceiling=100_000,
-    )
-
-
-def test_comparison_artifacts_require_an_active_existing_comparison(tmp_path) -> None:
-    store = RunStore(tmp_path)
-    manifest = ComparisonManifest(
-        comparison_id="comparison",
-        document_hash="0" * 64,
-        provider="ollama",
-        model="test-model",
-        temperature=0.0,
-        token_ceiling=100_000,
-        condition_order=list(Condition),
-        prompt_version="test",
-        schema_version="test",
-        started_at=datetime.now(UTC),
-    )
-
-    with pytest.raises(StorageError):
-        store.write_comparison_artifact("missing", "failure.json", {})
-    store.create_comparison(manifest, [])
-    path = store.write_comparison_artifact(
-        manifest.comparison_id, "failure.json", {"category": "parsing"}
-    )
-    with pytest.raises(ImmutableArtifactError):
-        store.write_comparison_artifact(
-            manifest.comparison_id, "failure.json", {"category": "other"}
-        )
-    store.update_comparison(
-        manifest.model_copy(update={"completed_at": datetime.now(UTC)})
-    )
-    with pytest.raises(ImmutableArtifactError):
-        store.write_comparison_artifact(
-            manifest.comparison_id, "late.json", {}
-        )
-
-    assert json.loads(path.read_text()) == {"category": "parsing"}
-    assert not (store.comparison_dir(manifest.comparison_id) / "late.json").exists()
-
-
-@pytest.mark.parametrize(
-    "reserved_name",
-    ["manifest.json", "chunks.json", "conditions", ".runstore.lock", ".tmp-artifact"],
-)
-def test_comparison_artifacts_reject_storage_owned_names_before_mutation(
-    tmp_path, monkeypatch, reserved_name
-) -> None:
-    store = RunStore(tmp_path)
-    manifest = ComparisonManifest(
-        comparison_id="comparison",
-        document_hash="0" * 64,
-        provider="ollama",
-        model="test-model",
-        temperature=0.0,
-        token_ceiling=100_000,
-        condition_order=list(Condition),
-        prompt_version="test",
-        schema_version="test",
-        started_at=datetime.now(UTC),
-    )
-    directory = store.create_comparison(manifest, [])
-    original = {
-        path.name: path.read_bytes() for path in directory.iterdir()
-    }
-    mutation = store._mutation
-
-    def reject_mutation(**_kwargs):
-        raise AssertionError("reserved names must be rejected before mutation")
-
-    monkeypatch.setattr(store, "_mutation", reject_mutation)
-    with pytest.raises(StorageError):
-        store.write_comparison_artifact(
-            manifest.comparison_id, reserved_name, {"corrupt": True}
-        )
-    monkeypatch.setattr(store, "_mutation", mutation)
-
-    assert {path.name: path.read_bytes() for path in directory.iterdir()} == original
-    store.write_comparison_artifact(
-        manifest.comparison_id, "failure.json", {"category": "parsing"}
-    )
-    store.start_condition(
-        manifest.comparison_id,
-        ConditionManifest(
-            condition=Condition.SINGLE_PROMPT,
-            status=RunStatus.RUNNING,
-            provider="ollama",
-            model="test-model",
-            temperature=0.0,
-            token_ceiling=100_000,
-            started_at=datetime.now(UTC),
-        ),
-    )
-
-    assert (directory / "failure.json").exists()
-    assert store.condition_dir(
-        manifest.comparison_id, Condition.SINGLE_PROMPT
-    ).is_dir()
-
-
-def test_comparison_runs_and_persists_all_conditions(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    store = RunStore(tmp_path)
-
-    result = run_comparison(
-        b"pdf",
-        settings(),
-        store=store,
-        provider_factory=provider_factory(),
-    )
-
-    assert list(result.conditions) == list(Condition)
-    assert all(
-        item.manifest.status is RunStatus.COMPLETED
-        for item in result.conditions.values()
-    )
-    assert (
-        store.condition_dir(
-            result.manifest.comparison_id, Condition.SINGLE_PROMPT
-        )
-        / "rtm.json"
-    ).exists()
-
-
-def test_one_failed_condition_does_not_stop_the_others(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-
-    result = run_comparison(
-        b"pdf",
-        settings(),
-        store=RunStore(tmp_path),
-        provider_factory=provider_factory(fail_single=True),
-    )
-
-    assert result.conditions[Condition.SINGLE_PROMPT].manifest.status is RunStatus.FAILED
-    assert (
-        result.conditions[Condition.SINGLE_PROMPT].manifest.failure_category.value
-        == "provider_rejection"
-    )
-    assert all(
-        result.conditions[condition].manifest.status is RunStatus.COMPLETED
-        for condition in (
-            Condition.STAGED_SINGLE_AGENT,
-            Condition.CENTRALIZED_MULTI_AGENT,
-        )
-    )
-
-
-def test_parsing_failure_is_persisted(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(
-        runner,
-        "parse_pdf",
-        lambda _data: (_ for _ in ()).throw(DocumentError("unreadable")),
-    )
-    store = RunStore(tmp_path)
-
-    result = run_comparison(b"pdf", settings(), store=store)
-
-    assert result.failure_category == "parsing"
-    assert result.conditions == {}
-    assert (
-        store.comparison_dir(result.manifest.comparison_id) / "failure.json"
-    ).exists()
-
-
-class ChargedProvider(ScriptedProvider):
-    def generate(self, messages, schema, *, max_output_tokens):
-        result = super().generate(
-            messages, schema, max_output_tokens=max_output_tokens
-        )
-        reservation = self.ledger.reserve(7)
-        self.ledger.settle(reservation, 7)
-        return result
-
-
-class BudgetFailingProvider:
-    model = "test-model"
-
-    def __init__(self, ledger: BudgetLedger) -> None:
-        self.ledger = ledger
-
-    def generate(self, messages, schema, *, max_output_tokens):
-        reservation = self.ledger.reserve(1)
-        self.ledger.settle(reservation, self.ledger.limit + 2)
-        raise AssertionError("BudgetExceeded was not raised")
-
-
-class TimeoutProvider:
-    model = "test-model"
-
-    def __init__(self, ledger: BudgetLedger) -> None:
-        self.ledger = ledger
-
-    def generate(self, messages, schema, *, max_output_tokens):
-        raise ProviderError(
-            "request timed out", code=None, retryable=True, timed_out=True
-        )
-
-
 class InvalidCentralProvider(CentralProvider):
     def generate(self, messages, schema, *, max_output_tokens):
-        result = super().generate(
-            messages, schema, max_output_tokens=max_output_tokens
-        )
+        result = super().generate(messages, schema, max_output_tokens=max_output_tokens)
         if (
             issubclass(schema, RequirementBatch)
             and "WORKER REQUIREMENT EXTRACTION 1/3" in messages[-1]["content"]
@@ -335,222 +158,499 @@ class InvalidCentralProvider(CentralProvider):
         return result
 
 
-def _persisted_condition(store, result, condition: Condition):
-    directory = store.condition_dir(result.manifest.comparison_id, condition)
-    metrics = json.loads((directory / "metrics.json").read_text())
-    event = json.loads((directory / "events.jsonl").read_text().splitlines()[-1])
-    return metrics, event
+def settings(**overrides) -> ProviderSettings:
+    values = {
+        "provider": "ollama",
+        "model": "test-model",
+        "token_ceiling": 100_000,
+    }
+    values.update(overrides)
+    return ProviderSettings(**values)
 
 
-def test_charged_tokens_match_metrics_download_persistence_and_event(
-    tmp_path, monkeypatch
-) -> None:
+def _successful_run(
+    monkeypatch,
+    *,
+    run_type=RunType.SINGLE_PROMPT,
+    source_filename="sample.pdf",
+    pdf_bytes=b"pdf",
+    repository=None,
+    progress=None,
+):
+    repository = repository or RecordingRepository()
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    base_factory = provider_factory()
-
-    def factory(condition, ledger):
-        if condition is Condition.SINGLE_PROMPT:
-            return ChargedProvider(ledger, [bundle()])
-        return base_factory(condition, ledger)
-
-    store = RunStore(tmp_path)
-    result = run_comparison(
-        b"pdf", settings(), store=store, provider_factory=factory
+    monkeypatch.setitem(runner.PIPELINES, run_type, lambda _context, _chunks: bundle())
+    result = run_generation(
+        pdf_bytes,
+        source_filename,
+        run_type,
+        settings(),
+        repository=repository,
+        progress=progress,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
     )
-    single = result.conditions[Condition.SINGLE_PROMPT]
-    persisted, event = _persisted_condition(
-        store, result, Condition.SINGLE_PROMPT
-    )
-
-    assert single.metrics.charged_tokens == 7
-    assert single.download_bundle()["metrics"] == persisted
-    assert persisted["charged_tokens"] == event["charged_tokens"] == 7
-    assert persisted["input_tokens"] == persisted["output_tokens"] == 1
-    assert event["provider"] == "ollama"
-    assert event["model"] == "test-model"
-    assert event["temperature"] == 0.0
-    assert event["token_ceiling"] == 100_000
-    assert event["validation"] == single.validation.model_dump(mode="json")
-    assert event["failure_category"] is None
-    assert event["failure_message"] is None
+    return result, repository
 
 
-def test_budget_failure_keeps_charged_tokens_without_reported_usage(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("run_type", list(RunType))
+def test_only_the_selected_pipeline_runs_and_run_type_is_persisted(
+    monkeypatch, run_type
 ) -> None:
+    called = []
+    seen_factory = []
+    artifacts = bundle()
+    repository = RecordingRepository()
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    base_factory = provider_factory()
+    for candidate in RunType:
+        monkeypatch.setitem(
+            runner.PIPELINES,
+            candidate,
+            lambda _context, _chunks, candidate=candidate: (
+                called.append(candidate) or artifacts
+            ),
+        )
 
-    def factory(condition, ledger):
-        if condition is Condition.SINGLE_PROMPT:
-            return BudgetFailingProvider(ledger)
-        return base_factory(condition, ledger)
+    def factory(selected, ledger):
+        seen_factory.append((selected, ledger))
+        return ScriptedProvider(ledger, [])
 
-    store = RunStore(tmp_path)
-    result = run_comparison(
-        b"pdf", settings(), store=store, provider_factory=factory
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        run_type,
+        settings(),
+        repository=repository,
+        provider_factory=factory,
     )
-    single = result.conditions[Condition.SINGLE_PROMPT]
-    persisted, event = _persisted_condition(
-        store, result, Condition.SINGLE_PROMPT
-    )
 
-    assert single.manifest.failure_category.value == "budget_exhaustion"
-    assert single.metrics.input_tokens == single.metrics.output_tokens == 0
-    assert single.metrics.charged_tokens == settings().token_ceiling + 2
-    assert single.download_bundle()["metrics"] == persisted
-    assert persisted["charged_tokens"] == event["charged_tokens"]
-    assert event["provider"] == "ollama"
-    assert event["model"] == "test-model"
-    assert event["validation"] is None
-    assert event["failure_category"] == "budget_exhaustion"
-    assert event["failure_message"]
+    assert called == [run_type]
+    assert [selected for selected, _ledger in seen_factory] == [run_type]
+    assert result.manifest.run_type is run_type
+    assert repository.created[0].run_type is run_type
+    assert repository.finalized == [result]
 
 
-def test_exhausted_provider_timeout_is_persisted_as_timeout(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    ("source_filename", "expected"),
+    [
+        ("/private/uploads/spec.pdf", "spec.pdf"),
+        (r"C:\Users\alice\private\spec.pdf", "spec.pdf"),
+        ("spec.pdf", "spec.pdf"),
+        ("", "document.pdf"),
+        (".", "document.pdf"),
+        ("..", "document.pdf"),
+        ("../../", "document.pdf"),
+        ("/", "document.pdf"),
+        ("   ", "document.pdf"),
+    ],
+)
+def test_source_filename_is_a_safe_display_basename_and_hash_is_correct(
+    monkeypatch, source_filename, expected
 ) -> None:
+    pdf_bytes = b"private PDF bytes"
+
+    result, repository = _successful_run(
+        monkeypatch, source_filename=source_filename, pdf_bytes=pdf_bytes
+    )
+
+    assert result.manifest.source_filename == expected
+    assert repository.created[0].source_filename == expected
+    assert result.manifest.document_hash == hashlib.sha256(pdf_bytes).hexdigest()
+
+
+def test_settings_are_validated_before_any_run_is_created(monkeypatch) -> None:
+    repository = RecordingRepository()
+    monkeypatch.setattr(
+        runner,
+        "parse_pdf",
+        lambda _data: (_ for _ in ()).throw(AssertionError("parse must not run")),
+    )
+
+    with pytest.raises(ValueError, match="Model must not be blank"):
+        run_generation(
+            b"pdf",
+            "sample.pdf",
+            RunType.SINGLE_PROMPT,
+            settings(model=""),
+            repository=repository,
+        )
+
+    assert repository.calls == []
+
+
+def test_running_record_and_started_event_precede_parse_and_provider(
+    monkeypatch,
+) -> None:
+    repository = RecordingRepository()
+    trace = []
+
+    def parse(_data):
+        assert repository.created[0].status is RunStatus.RUNNING
+        assert [call[0] for call in repository.calls] == [
+            "create_run",
+            "append_event",
+        ]
+        assert repository.events[0][1] == "started"
+        return [chunk()]
+
+    def factory(selected, ledger):
+        assert selected is RunType.SINGLE_PROMPT
+        assert repository.saved == [(repository.created[0].run_id, [chunk()])]
+        assert [event[1] for event in repository.events] == ["started", "parsed"]
+        return ScriptedProvider(ledger, [])
+
+    monkeypatch.setattr(runner, "parse_pdf", parse)
+    monkeypatch.setitem(
+        runner.PIPELINES, RunType.SINGLE_PROMPT, lambda _context, _chunks: bundle()
+    )
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=factory,
+        progress=trace.append,
+    )
+
+    assert result.manifest.status is RunStatus.COMPLETED
+    assert trace[0] == "Preparing document"
+    assert trace[-1] == "Completed"
+
+
+def test_parsing_failure_is_finalized_without_generated_parts(monkeypatch) -> None:
+    secret = "gemini-super-secret"
+    configured = settings(provider="gemini", api_key=secret)
+    repository = RecordingRepository()
+    trace = []
+    monkeypatch.setattr(
+        runner,
+        "parse_pdf",
+        lambda _data: (_ for _ in ()).throw(
+            DocumentError(f"unreadable api_key={secret}")
+        ),
+    )
+
+    result = run_generation(
+        b"private PDF bytes",
+        "/private/uploads/spec.pdf",
+        RunType.SINGLE_PROMPT,
+        configured,
+        repository=repository,
+        progress=trace.append,
+    )
+
+    assert result.manifest.status is RunStatus.FAILED
+    assert result.manifest.failure_category is FailureCategory.PARSING
+    assert result.manifest.failure_message == "unreadable api_key=[REDACTED]"
+    assert result.bundle is result.validation is result.metrics is None
+    assert result.rtm == []
+    assert repository.finalized[0] is result
+    assert repository.saved == []
+    assert [event[1] for event in repository.events] == ["started"]
+    assert trace == ["Preparing document", "Failed"]
+
+
+def test_success_finalizes_the_bundle_validation_rtm_and_metrics(monkeypatch) -> None:
+    repository = RecordingRepository()
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    base_factory = provider_factory()
 
-    def factory(condition, ledger):
-        if condition is Condition.SINGLE_PROMPT:
-            return TimeoutProvider(ledger)
-        return base_factory(condition, ledger)
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ChargedProvider(ledger, [bundle()]),
+    )
 
-    def timeout_pipeline(context, _chunks):
+    assert result.manifest.status is RunStatus.COMPLETED
+    assert result.bundle == bundle()
+    assert result.validation.valid is True
+    assert result.rtm[0].covered is True
+    assert result.metrics.completion is True
+    assert result.metrics.input_tokens == result.metrics.output_tokens == 1
+    assert result.metrics.charged_tokens == 7
+    assert result.download_bundle()["metrics"] == result.metrics.model_dump(mode="json")
+    assert repository.finalized[0] is result
+
+
+@pytest.mark.parametrize(
+    ("errors", "category", "retries", "schema_repairs", "message"),
+    [
+        (
+            [ProviderError("rejected", code=400, retryable=False)],
+            FailureCategory.PROVIDER_REJECTION,
+            0,
+            0,
+            "rejected",
+        ),
+        (
+            [ProviderError("network down", code=503, retryable=True)] * 3,
+            FailureCategory.TRANSPORT_EXHAUSTION,
+            2,
+            0,
+            "network down",
+        ),
+        (
+            [
+                ProviderError(
+                    "request timed out", code=None, retryable=True, timed_out=True
+                )
+            ]
+            * 3,
+            FailureCategory.TIMEOUT,
+            2,
+            0,
+            "request timed out",
+        ),
+        (
+            [
+                StructuredOutputError(
+                    "not json", input_tokens=2, output_tokens=3, latency_seconds=0.01
+                )
+            ]
+            * 3,
+            FailureCategory.SCHEMA_FAILURE,
+            0,
+            2,
+            "Provider returned invalid structured output.",
+        ),
+    ],
+)
+def test_provider_failures_keep_category_message_retry_and_repair_counts(
+    monkeypatch, errors, category, retries, schema_repairs, message
+) -> None:
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def generate(context, _chunks):
         context.sleep = lambda _seconds: None
         return context.generate([], ArtifactBundle, max_output_tokens=1)
 
+    monkeypatch.setitem(runner.PIPELINES, RunType.SINGLE_PROMPT, generate)
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, errors),
+    )
+
+    assert result.manifest.status is RunStatus.FAILED
+    assert result.manifest.failure_category is category
+    assert result.manifest.failure_message == message
+    assert result.bundle is result.validation is None
+    assert result.rtm == []
+    assert result.metrics.retries == retries
+    assert result.metrics.schema_repairs == schema_repairs
+    assert repository.finalized[0] is result
+
+
+def test_budget_failure_keeps_charged_tokens(monkeypatch) -> None:
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
     monkeypatch.setitem(
-        runner.PIPELINES, Condition.SINGLE_PROMPT, timeout_pipeline
-    )
-    store = RunStore(tmp_path)
-
-    result = run_comparison(
-        b"pdf", settings(), store=store, provider_factory=factory
-    )
-    single = result.conditions[Condition.SINGLE_PROMPT]
-    _metrics, event = _persisted_condition(
-        store, result, Condition.SINGLE_PROMPT
+        runner.PIPELINES,
+        RunType.SINGLE_PROMPT,
+        lambda context, _chunks: context.generate(
+            [], ArtifactBundle, max_output_tokens=1
+        ),
     )
 
-    assert single.manifest.failure_category.value == "timeout"
-    assert single.metrics.retries == 2
-    assert event["failure_category"] == "timeout"
-    assert event["failure_message"] == "request timed out"
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: BudgetFailingProvider(ledger),
+    )
+
+    assert result.manifest.failure_category is FailureCategory.BUDGET_EXHAUSTION
+    assert result.metrics.input_tokens == result.metrics.output_tokens == 0
+    assert result.metrics.charged_tokens == settings().token_ceiling + 2
+    assert result.metrics.budget_exhausted is True
 
 
-def test_actual_ollama_timeout_survives_budget_blocked_retry(
-    tmp_path, monkeypatch
+def test_pipeline_output_failure_is_semantic_and_has_empty_metrics(monkeypatch) -> None:
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES,
+        RunType.SINGLE_PROMPT,
+        lambda _context, _chunks: (_ for _ in ()).throw(
+            PipelineOutputError("invalid worker output")
+        ),
+    )
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+    )
+
+    assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
+    assert result.manifest.failure_message == "invalid worker output"
+    assert result.metrics.completion is False
+
+
+def test_provider_factory_errors_are_safe_configuration_failures(monkeypatch) -> None:
+    secret = "gemini-super-secret"
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def reject_factory(_run_type, _ledger):
+        raise ValueError(f"api_key={secret} token=secondary password=tertiary")
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(provider="gemini", api_key=secret),
+        repository=repository,
+        provider_factory=reject_factory,
+    )
+
+    assert result.manifest.failure_category is FailureCategory.CONFIGURATION
+    assert result.manifest.failure_message == (
+        "api_key=[REDACTED] token=[REDACTED] password=[REDACTED]"
+    )
+    assert result.metrics is not None
+    assert repository.finalized == [result]
+
+
+@pytest.mark.parametrize("error_type", [AssertionError, TypeError, AttributeError])
+def test_provider_factory_programming_defects_leave_the_run_interrupted(
+    monkeypatch, error_type
 ) -> None:
-    evidence = chunk().model_copy(
-        update={"text": f"{chunk().text} {'x' * 40_000}"}
-    )
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [evidence])
-    for condition in (
-        Condition.STAGED_SINGLE_AGENT,
-        Condition.CENTRALIZED_MULTI_AGENT,
-    ):
-        monkeypatch.setitem(
-            runner.PIPELINES, condition, lambda _context, _chunks: bundle()
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def defective_factory(_run_type, _ledger):
+        raise error_type("factory defect")
+
+    with pytest.raises(error_type, match="factory defect"):
+        run_generation(
+            b"pdf",
+            "sample.pdf",
+            RunType.SINGLE_PROMPT,
+            settings(),
+            repository=repository,
+            provider_factory=defective_factory,
         )
-    calls = 0
 
-    def timeout(*_args, **_kwargs):
-        nonlocal calls
-        calls += 1
-        raise TimeoutError("ollama timed out")
+    assert repository.created[0].status is RunStatus.RUNNING
+    assert repository.finalized == []
+    assert [event[1] for event in repository.events] == ["started", "parsed"]
 
-    monkeypatch.setattr(providers_module, "urlopen", timeout)
-    store = RunStore(tmp_path)
 
-    result = run_comparison(b"pdf", settings(), store=store)
-    single = result.conditions[Condition.SINGLE_PROMPT]
-    _metrics, event = _persisted_condition(
-        store, result, Condition.SINGLE_PROMPT
+@pytest.mark.parametrize("mismatch", ["ledger", "model"])
+def test_provider_must_use_the_run_ledger_and_model(monkeypatch, mismatch) -> None:
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def factory(_run_type, ledger):
+        provider = ScriptedProvider(ledger, [])
+        if mismatch == "ledger":
+            provider.ledger = BudgetLedger(100_000)
+        else:
+            provider.model = "wrong-model"
+        return provider
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.STAGED_SINGLE_AGENT,
+        settings(),
+        repository=repository,
+        provider_factory=factory,
     )
 
-    assert calls == 1
-    assert single.manifest.failure_category.value == "timeout"
-    assert single.metrics.charged_tokens > 30_000
-    assert single.metrics.budget_exhausted is False
-    assert event["failure_category"] == "timeout"
-    assert event["failure_message"] == "ollama timed out"
+    assert result.manifest.failure_category is FailureCategory.CONFIGURATION
+    assert result.metrics.charged_tokens == 0
 
 
-def test_terminal_event_retains_failed_validation_report(
-    tmp_path, monkeypatch
+def test_failed_validation_retains_normalized_artifacts_and_metrics(
+    monkeypatch,
 ) -> None:
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
     artifacts = bundle()
-    requirement = artifacts.requirements[0].model_copy(
-        update={
-            "source_references": [
-                artifacts.requirements[0].source_references[0].model_copy(
-                    update={"excerpt": "invented evidence"}
-                )
-            ]
-        }
-    )
-    invalid = artifacts.model_copy(update={"requirements": [requirement]})
-    base_factory = provider_factory()
-
-    def factory(condition, ledger):
-        if condition is Condition.SINGLE_PROMPT:
-            return ScriptedProvider(ledger, [invalid, invalid])
-        return base_factory(condition, ledger)
-
-    store = RunStore(tmp_path)
-    result = run_comparison(
-        b"pdf", settings(), store=store, provider_factory=factory
-    )
-    single = result.conditions[Condition.SINGLE_PROMPT]
-    _metrics, event = _persisted_condition(
-        store, result, Condition.SINGLE_PROMPT
-    )
-
-    assert single.validation.valid is False
-    assert event["validation"] == single.validation.model_dump(mode="json")
-    assert event["failure_category"] == "semantic_validation"
-    assert event["failure_message"] == "1 deterministic validation issues."
-    assert single.metrics.semantic_revisions == 1
-
-
-def test_failed_validation_gets_one_deterministic_repair(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    artifacts = bundle()
-    reference = artifacts.requirements[0].source_references[0].model_copy(
+    invalid_reference = artifacts.requirements[0].source_references[0].model_copy(
         update={"excerpt": "invented evidence"}
     )
     invalid = artifacts.model_copy(
         update={
             "requirements": [
                 artifacts.requirements[0].model_copy(
-                    update={"source_references": [reference]}
+                    update={"source_references": [invalid_reference]}
                 )
             ]
         }
     )
-    base_factory = provider_factory()
-
-    def factory(condition, ledger):
-        if condition is Condition.SINGLE_PROMPT:
-            return ScriptedProvider(ledger, [invalid, artifacts])
-        return base_factory(condition, ledger)
-
-    result = run_comparison(
-        b"pdf", settings(), store=RunStore(tmp_path), provider_factory=factory
-    )
-    single = result.conditions[Condition.SINGLE_PROMPT]
-
-    assert single.manifest.status is RunStatus.COMPLETED
-    assert single.validation.valid is True
-    assert single.metrics.semantic_revisions == 1
-
-
-def test_uncovered_requirement_gets_link_only_repair(tmp_path, monkeypatch) -> None:
+    repository = RecordingRepository()
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(
+            ledger, [invalid, invalid]
+        ),
+    )
+
+    assert result.manifest.status is RunStatus.FAILED
+    assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
+    assert result.manifest.failure_message == "1 deterministic validation issues."
+    assert result.bundle == invalid
+    assert result.validation.valid is False
+    assert result.rtm
+    assert result.metrics.semantic_revisions == 1
+    assert repository.finalized[0] is result
+
+
+def test_failed_validation_gets_one_semantic_revision(monkeypatch) -> None:
+    artifacts = bundle()
+    invalid_reference = artifacts.requirements[0].source_references[0].model_copy(
+        update={"excerpt": "invented evidence"}
+    )
+    invalid = artifacts.model_copy(
+        update={
+            "requirements": [
+                artifacts.requirements[0].model_copy(
+                    update={"source_references": [invalid_reference]}
+                )
+            ]
+        }
+    )
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(
+            ledger, [invalid, artifacts]
+        ),
+    )
+
+    assert result.manifest.status is RunStatus.COMPLETED
+    assert result.validation.valid is True
+    assert result.metrics.semantic_revisions == 1
+
+
+def test_uncovered_requirement_gets_link_only_repair(monkeypatch) -> None:
     artifacts = bundle()
     uncovered = artifacts.requirements[0].model_copy(
         update={
@@ -571,68 +671,211 @@ def test_uncovered_requirement_gets_link_only_repair(tmp_path, monkeypatch) -> N
             )
         ]
     )
-    base_factory = provider_factory()
-
-    def factory(condition, ledger):
-        if condition is Condition.SINGLE_PROMPT:
-            return ScriptedProvider(ledger, [invalid, repair])
-        return base_factory(condition, ledger)
-
-    result = run_comparison(
-        b"pdf", settings(), store=RunStore(tmp_path), provider_factory=factory
-    )
-    single = result.conditions[Condition.SINGLE_PROMPT]
-
-    assert single.manifest.status is RunStatus.COMPLETED
-    assert single.validation.valid is True
-    assert "REQ-002" in single.bundle.scenarios[0].requirement_ids
-    assert "REQ-002" in single.bundle.test_cases[0].requirement_ids
-    assert single.metrics.semantic_revisions == 1
-
-
-def test_progress_callback_exceptions_never_change_the_run(tmp_path, monkeypatch) -> None:
+    repository = RecordingRepository()
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
 
-    def broken_progress(_condition, _message):
-        raise RuntimeError("observer broke")
-
-    result = run_comparison(
+    result = run_generation(
         b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
         settings(),
-        store=RunStore(tmp_path),
-        provider_factory=provider_factory(),
-        progress=broken_progress,
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(
+            ledger, [invalid, repair]
+        ),
     )
 
-    assert all(
-        condition.manifest.status is RunStatus.COMPLETED
-        for condition in result.conditions.values()
-    )
+    assert result.manifest.status is RunStatus.COMPLETED
+    assert result.validation.valid is True
+    assert "REQ-002" in result.bundle.scenarios[0].requirement_ids
+    assert "REQ-002" in result.bundle.test_cases[0].requirement_ids
+    assert result.metrics.semantic_revisions == 1
 
 
-def test_parse_failure_emits_terminal_progress(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(
-        runner,
-        "parse_pdf",
-        lambda _data: (_ for _ in ()).throw(DocumentError("unreadable")),
+def test_invalid_central_worker_output_is_semantic_failure(monkeypatch) -> None:
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.CENTRALIZED_MULTI_AGENT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: InvalidCentralProvider(ledger),
     )
+
+    assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
+    assert "outside worker 1 range" in result.manifest.failure_message
+
+
+def test_actual_ollama_timeout_survives_budget_blocked_retry(monkeypatch) -> None:
+    evidence = chunk().model_copy(update={"text": f"{chunk().text} {'x' * 40_000}"})
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [evidence])
+    calls = 0
+
+    def timeout(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise TimeoutError("ollama timed out")
+
+    monkeypatch.setattr(providers_module, "urlopen", timeout)
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+    )
+
+    assert calls == 1
+    assert result.manifest.failure_category is FailureCategory.TIMEOUT
+    assert result.manifest.failure_message == "ollama timed out"
+    assert result.metrics.charged_tokens > 30_000
+    assert result.metrics.budget_exhausted is False
+
+
+def test_unexpected_internal_failure_is_re_raised_without_finalizing(
+    monkeypatch,
+) -> None:
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES,
+        RunType.SINGLE_PROMPT,
+        lambda _context, _chunks: (_ for _ in ()).throw(
+            AssertionError("programming defect")
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="programming defect"):
+        run_generation(
+            b"pdf",
+            "sample.pdf",
+            RunType.SINGLE_PROMPT,
+            settings(),
+            repository=repository,
+            provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+        )
+
+    assert repository.created[0].status is RunStatus.RUNNING
+    assert repository.finalized == []
+    assert [event[1] for event in repository.events] == ["started", "parsed"]
+
+
+def test_repository_finalization_errors_are_not_swallowed(monkeypatch) -> None:
+    class FailingRepository(RecordingRepository):
+        def finalize(self, result) -> None:
+            super().finalize(result)
+            raise RuntimeError("database write failed")
+
+    repository = FailingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES, RunType.SINGLE_PROMPT, lambda _context, _chunks: bundle()
+    )
+
+    with pytest.raises(RuntimeError, match="database write failed"):
+        run_generation(
+            b"pdf",
+            "sample.pdf",
+            RunType.SINGLE_PROMPT,
+            settings(),
+            repository=repository,
+            provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+        )
+
+
+@pytest.mark.parametrize(
+    ("fail_at", "expected_calls"),
+    [
+        ("create_run", ["create_run"]),
+        ("append_event", ["create_run", "append_event"]),
+        ("save_chunks", ["create_run", "append_event", "save_chunks"]),
+    ],
+)
+def test_repository_setup_failures_propagate_without_finalization(
+    monkeypatch, fail_at, expected_calls
+) -> None:
+    repository = RecordingRepository(fail_at=fail_at)
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    with pytest.raises(RuntimeError, match=rf"{fail_at} failed"):
+        run_generation(
+            b"pdf",
+            "sample.pdf",
+            RunType.SINGLE_PROMPT,
+            settings(),
+            repository=repository,
+        )
+
+    assert [call[0] for call in repository.calls] == expected_calls
+    assert repository.created[0].status is RunStatus.RUNNING
+    assert repository.finalized == []
+
+
+def test_progress_is_a_single_string_and_observer_errors_are_ignored(
+    monkeypatch,
+) -> None:
     trace = []
 
-    run_comparison(
-        b"pdf",
-        settings(),
-        store=RunStore(tmp_path),
-        progress=lambda condition, message: trace.append((condition, message)),
-    )
+    def progress(message):
+        trace.append(message)
+        if message == "Generating artifacts":
+            raise RuntimeError("observer broke")
 
-    assert trace == [(None, "Parsing PDF"), (None, "Failed")]
+    result, _repository = _successful_run(monkeypatch, progress=progress)
+
+    assert result.manifest.status is RunStatus.COMPLETED
+    assert trace == ["Preparing document", "Generating artifacts", "Completed"]
+    assert all(isinstance(message, str) for message in trace)
+
+
+def test_credentials_pdf_bytes_and_source_paths_are_not_persisted(monkeypatch) -> None:
+    secret = "gemini-super-secret"
+    pdf_marker = "PRIVATE-PDF-CONTENT"
+    source_path = r"C:\TOP-SECRET-UPLOADS\spec.pdf"
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def reject_factory(_run_type, _ledger):
+        raise ValueError(f"api_key={secret} token=secondary")
+
+    result = run_generation(
+        pdf_marker.encode(),
+        source_path,
+        RunType.SINGLE_PROMPT,
+        settings(provider="gemini", api_key=secret),
+        repository=repository,
+        provider_factory=reject_factory,
+    )
+    def persisted_value(value):
+        if hasattr(value, "model_dump"):
+            return value.model_dump(mode="json")
+        if isinstance(value, (list, tuple)):
+            return [persisted_value(item) for item in value]
+        return value
+
+    persisted_arguments = [
+        repr(persisted_value(argument))
+        for _method, *arguments in repository.calls
+        for argument in arguments
+    ]
+
+    assert result.manifest.source_filename == "spec.pdf"
+    assert persisted_arguments
+    assert all(secret not in value for value in persisted_arguments)
+    assert all("secondary" not in value for value in persisted_arguments)
+    assert all(pdf_marker not in value for value in persisted_arguments)
+    assert all("TOP-SECRET-UPLOADS" not in value for value in persisted_arguments)
 
 
 def test_lm_studio_settings_create_authenticated_provider() -> None:
-    configured = ProviderSettings(
+    configured = settings(
         provider="lm_studio",
         model="local-model",
-        token_ceiling=100_000,
         api_key="local-token",
         base_url="http://localhost:1234/v1",
     )
@@ -657,32 +900,19 @@ def test_lm_studio_settings_create_authenticated_provider() -> None:
         123,
     ],
 )
-def test_ollama_credential_bearing_urls_fail_before_persistence(
-    tmp_path, base_url
-) -> None:
-    configured = ProviderSettings(
-        provider="ollama",
-        model="test-model",
-        token_ceiling=100_000,
-        base_url=base_url,
-    )
+def test_credential_bearing_urls_fail_before_persistence(base_url) -> None:
+    repository = RecordingRepository()
 
     with pytest.raises(ValueError):
-        run_comparison(b"pdf", configured, store=RunStore(tmp_path))
+        run_generation(
+            b"pdf",
+            "sample.pdf",
+            RunType.SINGLE_PROMPT,
+            settings(base_url=base_url),
+            repository=repository,
+        )
 
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_ollama_credentials_are_not_exposed_by_settings_repr() -> None:
-    configured = ProviderSettings(
-        provider="ollama",
-        model="test-model",
-        token_ceiling=100_000,
-        base_url="http://user:secret@host",
-    )
-
-    assert "user" not in repr(configured)
-    assert "secret" not in repr(configured)
+    assert repository.calls == []
 
 
 @pytest.mark.parametrize(
@@ -695,176 +925,50 @@ def test_ollama_credentials_are_not_exposed_by_settings_repr() -> None:
     ],
 )
 def test_provider_settings_reject_wrong_types(overrides) -> None:
-    values = {
-        "provider": "ollama",
-        "model": "test-model",
-        "token_ceiling": 100_000,
-    }
-    values.update(overrides)
-
     with pytest.raises(ValueError):
-        ProviderSettings(**values).validate()
+        settings(**overrides).validate()
 
 
-def test_provider_secrets_are_redacted_from_condition_files(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    secret = "gemini-super-secret"
-    configured = ProviderSettings(
-        provider="gemini",
-        model="test-model",
-        token_ceiling=100_000,
-        api_key=secret,
-    )
-    base_factory = provider_factory()
-
-    def factory(condition, ledger):
-        if condition is Condition.SINGLE_PROMPT:
-            raise ValueError(f"api_key={secret} token=secondary password=tertiary")
-        return base_factory(condition, ledger)
-
-    run_comparison(
-        b"pdf", configured, store=RunStore(tmp_path), provider_factory=factory
-    )
-    persisted = "\n".join(
-        path.read_text() for path in tmp_path.rglob("*") if path.is_file()
-    )
-
-    assert secret not in persisted
-    assert "secondary" not in persisted
-    assert "tertiary" not in persisted
-
-
-@pytest.mark.parametrize("mismatch", ["shared_ledger", "wrong_model"])
-def test_injected_provider_integrity_failure_is_isolated(
-    tmp_path, monkeypatch, mismatch
-) -> None:
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    base_factory = provider_factory()
-    first_ledger = None
-
-    def factory(condition, ledger):
-        nonlocal first_ledger
-        provider = base_factory(condition, ledger)
-        if condition is Condition.SINGLE_PROMPT:
-            first_ledger = ledger
-        elif condition is Condition.STAGED_SINGLE_AGENT:
-            if mismatch == "shared_ledger":
-                provider.ledger = first_ledger
-            else:
-                provider.model = "wrong-model"
-        return provider
-
-    result = run_comparison(
-        b"pdf", settings(), store=RunStore(tmp_path), provider_factory=factory
-    )
-
-    assert (
-        result.conditions[Condition.STAGED_SINGLE_AGENT].manifest.failure_category.value
-        == "configuration"
-    )
-    assert (
-        result.conditions[Condition.CENTRALIZED_MULTI_AGENT].manifest.status
-        is RunStatus.COMPLETED
-    )
-
-
-def test_invalid_central_worker_output_is_semantic_failure(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    base_factory = provider_factory()
-
-    def factory(condition, ledger):
-        if condition is Condition.CENTRALIZED_MULTI_AGENT:
-            return InvalidCentralProvider(ledger)
-        return base_factory(condition, ledger)
-
-    result = run_comparison(
-        b"pdf", settings(), store=RunStore(tmp_path), provider_factory=factory
-    )
-
-    assert (
-        result.conditions[
-            Condition.CENTRALIZED_MULTI_AGENT
-        ].manifest.failure_category.value
-        == "semantic_validation"
-    )
-
-
-def test_unexpected_pipeline_defect_is_re_raised(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-
-    def defect(_context, _chunks):
-        raise AssertionError("programming defect")
-
-    monkeypatch.setitem(runner.PIPELINES, Condition.SINGLE_PROMPT, defect)
-    store = RunStore(tmp_path)
-
-    with pytest.raises(AssertionError, match="programming defect"):
-        run_comparison(
-            b"pdf",
-            settings(),
-            store=store,
-            provider_factory=provider_factory(),
-        )
-
-    comparison = next(path for path in tmp_path.iterdir() if path.is_dir())
-    condition = comparison / "conditions" / Condition.SINGLE_PROMPT
-    assert json.loads((condition / "manifest.json").read_text())["status"] == "running"
-    assert {path.name for path in condition.iterdir()} == {
-        "manifest.json",
-        "events.jsonl",
-    }
-
-
-def test_runner_finalization_failure_rolls_back_and_stops(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    original_write = storage_module._atomic_text
-    failed = False
-
-    def fail_midway(path, text):
-        nonlocal failed
-        if path.name == "scenarios.json" and not failed:
-            failed = True
-            raise OSError("injected finalization failure")
-        original_write(path, text)
-
-    monkeypatch.setattr(storage_module, "_atomic_text", fail_midway)
-    store = RunStore(tmp_path)
-
-    with pytest.raises(OSError, match="injected finalization failure"):
-        run_comparison(
-            b"pdf",
-            settings(),
-            store=store,
-            provider_factory=provider_factory(),
-        )
-
-    comparison = next(path for path in tmp_path.iterdir() if path.is_dir())
-    conditions = comparison / "conditions"
-    single = conditions / Condition.SINGLE_PROMPT
-    assert (
-        json.loads((single / "manifest.json").read_text())["status"] == "running"
-    )
-    assert [
-        json.loads(line)["stage"]
-        for line in (single / "events.jsonl").read_text().splitlines()
-    ] == ["started"]
-    assert {path.name for path in single.iterdir()} == {
-        "manifest.json",
-        "events.jsonl",
-    }
-    assert not (conditions / Condition.STAGED_SINGLE_AGENT).exists()
-
-
-def test_comparison_ids_are_unique_with_frozen_time(monkeypatch) -> None:
+def test_run_ids_are_unique_with_frozen_time(monkeypatch) -> None:
     class FrozenDateTime:
         @classmethod
         def now(cls, _timezone):
             return datetime(2026, 8, 11, tzinfo=UTC)
 
     monkeypatch.setattr(runner, "datetime", FrozenDateTime)
+    uuids = iter(
+        [SimpleNamespace(hex="1" * 32), SimpleNamespace(hex="2" * 32)]
+    )
+    monkeypatch.setattr(runner, "uuid4", lambda: next(uuids))
 
-    first = runner._comparison_id("a" * 64)
-    second = runner._comparison_id("a" * 64)
+    first = runner._run_id("a" * 64)
+    second = runner._run_id("a" * 64)
 
-    assert first != second
-    assert first.startswith("20260811T000000000000Z-aaaaaaaaaaaa-")
+    assert first == "20260811T000000000000Z-aaaaaaaaaaaa-11111111"
+    assert second == "20260811T000000000000Z-aaaaaaaaaaaa-22222222"
+
+
+def test_rerunning_the_same_document_creates_a_new_run_id(monkeypatch) -> None:
+    repository = RecordingRepository()
+    uuids = iter(
+        [SimpleNamespace(hex="1" * 32), SimpleNamespace(hex="2" * 32)]
+    )
+    monkeypatch.setattr(runner, "uuid4", lambda: next(uuids))
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES, RunType.SINGLE_PROMPT, lambda _context, _chunks: bundle()
+    )
+    kwargs = {
+        "repository": repository,
+        "provider_factory": lambda _run_type, ledger: ScriptedProvider(ledger, []),
+    }
+
+    first = run_generation(
+        b"pdf", "sample.pdf", RunType.SINGLE_PROMPT, settings(), **kwargs
+    )
+    second = run_generation(
+        b"pdf", "sample.pdf", RunType.SINGLE_PROMPT, settings(), **kwargs
+    )
+
+    assert first.manifest.run_id != second.manifest.run_id
+    assert len(repository.created) == 2

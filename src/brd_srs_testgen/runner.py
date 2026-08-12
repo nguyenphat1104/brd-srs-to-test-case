@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
 
@@ -15,16 +16,16 @@ import google.genai as genai
 from .documents import DocumentError, canonicalize_source_references, parse_pdf
 from .models import (
     ArtifactBundle,
-    ComparisonManifest,
-    Condition,
-    ConditionManifest,
     CoverageRepair,
     FailureCategory,
     ReviewIssue,
     ReviewResult,
     RTMRow,
+    RunManifest,
     RunMetrics,
+    RunResult,
     RunStatus,
+    RunType,
     ValidationReport,
 )
 from .pipelines import (
@@ -45,13 +46,13 @@ from .providers import (
     StructuredOutputError,
     StructuredProvider,
 )
-from .storage import RunStore
+from .storage import RunRepository
 from .validation import build_rtm, compute_metrics, validate_bundle
 
 
 SCHEMA_VERSION = "research-core-v1"
-ProviderFactory = Callable[[Condition, BudgetLedger], StructuredProvider]
-Progress = Callable[[Condition | None, str], None]
+ProviderFactory = Callable[[RunType, BudgetLedger], StructuredProvider]
+Progress = Callable[[str], None]
 
 
 class ConfigurationError(RuntimeError):
@@ -115,54 +116,11 @@ class ProviderSettings:
                 )
 
 
-@dataclass(frozen=True)
-class ConditionResult:
-    manifest: ConditionManifest
-    bundle: ArtifactBundle | None
-    validation: ValidationReport | None
-    rtm: list[RTMRow]
-    metrics: RunMetrics
-
-    def download_bundle(self) -> dict:
-        bundle = self.bundle
-        return {
-            "manifest": self.manifest.model_dump(mode="json"),
-            "requirements": (
-                [item.model_dump(mode="json") for item in bundle.requirements]
-                if bundle
-                else []
-            ),
-            "scenarios": (
-                [item.model_dump(mode="json") for item in bundle.scenarios]
-                if bundle
-                else []
-            ),
-            "test_cases": (
-                [item.model_dump(mode="json") for item in bundle.test_cases]
-                if bundle
-                else []
-            ),
-            "validation": (
-                self.validation.model_dump(mode="json") if self.validation else None
-            ),
-            "rtm": [item.model_dump(mode="json") for item in self.rtm],
-            "metrics": self.metrics.model_dump(mode="json"),
-        }
+def _now() -> datetime:
+    return datetime.now(UTC)
 
 
-@dataclass(frozen=True)
-class ComparisonResult:
-    manifest: ComparisonManifest
-    conditions: dict[Condition, ConditionResult]
-    failure_category: FailureCategory | None = None
-    failure_message: str | None = None
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def _comparison_id(document_hash: str) -> str:
+def _run_id(document_hash: str) -> str:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     return f"{timestamp}-{document_hash[:12]}-{uuid4().hex[:8]}"
 
@@ -240,30 +198,10 @@ def _failure_category(error: Exception) -> FailureCategory | None:
 
 
 PIPELINES = {
-    Condition.SINGLE_PROMPT: run_single_prompt,
-    Condition.STAGED_SINGLE_AGENT: run_staged_single_agent,
-    Condition.CENTRALIZED_MULTI_AGENT: run_centralized_multi_agent,
+    RunType.SINGLE_PROMPT: run_single_prompt,
+    RunType.STAGED_SINGLE_AGENT: run_staged_single_agent,
+    RunType.CENTRALIZED_MULTI_AGENT: run_centralized_multi_agent,
 }
-
-
-def _bundle_artifacts(
-    bundle: ArtifactBundle,
-    validation: ValidationReport,
-    rtm: list[RTMRow],
-    metrics: RunMetrics,
-) -> dict[str, object]:
-    return {
-        "requirements.json": [
-            item.model_dump(mode="json") for item in bundle.requirements
-        ],
-        "scenarios.json": [item.model_dump(mode="json") for item in bundle.scenarios],
-        "test_cases.json": [
-            item.model_dump(mode="json") for item in bundle.test_cases
-        ],
-        "validation.json": validation.model_dump(mode="json"),
-        "rtm.json": [item.model_dump(mode="json") for item in rtm],
-        "metrics.json": metrics.model_dump(mode="json"),
-    }
 
 
 def _safe_message(error: Exception, settings: ProviderSettings) -> str:
@@ -290,9 +228,11 @@ def _safe_message(error: Exception, settings: ProviderSettings) -> str:
     )
 
 
-def _notify(progress: Progress, condition: Condition | None, message: str) -> None:
+def _notify(progress: Progress | None, message: str) -> None:
+    if progress is None:
+        return
     try:
-        progress(condition, message)
+        progress(message)
     except Exception:
         pass
 
@@ -390,229 +330,176 @@ def _repair_coverage(
     )
 
 
-def run_comparison(
+def run_generation(
     pdf_bytes: bytes,
+    source_filename: str,
+    run_type: RunType,
     settings: ProviderSettings,
-    store: RunStore | None = None,
-    provider_factory: ProviderFactory | None = None,
+    *,
+    repository: RunRepository,
     progress: Progress | None = None,
-) -> ComparisonResult:
+    provider_factory: ProviderFactory | None = None,
+) -> RunResult:
     settings.validate()
-    store = store or RunStore()
-    provider_factory = provider_factory or (
-        lambda _condition, ledger: _make_provider(settings, ledger)
+    display_name = (
+        PurePosixPath(source_filename.replace("\\", "/")).name.strip()
+        if isinstance(source_filename, str)
+        else ""
     )
-    progress = progress or (lambda _condition, _message: None)
+    if display_name in {"", ".", ".."} or any(
+        ord(character) < 32 for character in display_name
+    ):
+        display_name = "document.pdf"
+
     document_hash = hashlib.sha256(pdf_bytes).hexdigest()
-    manifest = ComparisonManifest(
-        comparison_id=_comparison_id(document_hash),
+    manifest = RunManifest(
+        run_id=_run_id(document_hash),
+        source_filename=display_name,
         document_hash=document_hash,
+        run_type=run_type,
+        status=RunStatus.RUNNING,
         provider=settings.provider,
         model=settings.model,
         temperature=0.0,
         token_ceiling=settings.token_ceiling,
-        condition_order=list(Condition),
         prompt_version=PROMPT_VERSION,
         schema_version=SCHEMA_VERSION,
         started_at=_now(),
     )
+    repository.create_run(manifest)
+    repository.append_event(manifest.run_id, "started")
+    _notify(progress, "Preparing document")
 
-    _notify(progress, None, "Parsing PDF")
     try:
         chunks = parse_pdf(pdf_bytes)
     except DocumentError as error:
-        message = _safe_message(error, settings)
-        store.create_comparison(manifest, [])
-        store.write_comparison_artifact(
-            manifest.comparison_id,
-            "failure.json",
-            {"category": FailureCategory.PARSING.value, "message": message},
-        )
         manifest = manifest.model_copy(
-            update={"completed_at": datetime.fromisoformat(_now())}
+            update={
+                "status": RunStatus.FAILED,
+                "completed_at": _now(),
+                "failure_category": FailureCategory.PARSING,
+                "failure_message": _safe_message(error, settings),
+            }
         )
-        store.update_comparison(manifest)
-        _notify(progress, None, "Failed")
-        return ComparisonResult(
-            manifest=manifest,
-            conditions={},
-            failure_category=FailureCategory.PARSING,
-            failure_message=message,
-        )
+        result = RunResult(manifest=manifest)
+        repository.finalize(result)
+        _notify(progress, "Failed")
+        return result
 
-    store.create_comparison(manifest, chunks)
-    results: dict[Condition, ConditionResult] = {}
-    for condition in manifest.condition_order:
-        _notify(progress, condition, "Starting")
-        condition_manifest = ConditionManifest(
-            condition=condition,
-            status=RunStatus.RUNNING,
-            provider=settings.provider,
-            model=settings.model,
-            temperature=0.0,
-            token_ceiling=settings.token_ceiling,
-            started_at=_now(),
-        )
-        store.start_condition(manifest.comparison_id, condition_manifest)
-        store.append_event(
-            manifest.comparison_id,
-            condition,
-            {"timestamp": _now(), "stage": "started"},
-        )
+    repository.save_chunks(manifest.run_id, chunks)
+    repository.append_event(manifest.run_id, "parsed")
+    _notify(progress, "Generating artifacts")
 
-        ledger = BudgetLedger(settings.token_ceiling)
-        context: PipelineContext | None = None
-        bundle: ArtifactBundle | None = None
-        validation: ValidationReport | None = None
-        rtm: list[RTMRow] = []
-        started = time.perf_counter()
+    provider_factory = provider_factory or (
+        lambda _run_type, ledger: _make_provider(settings, ledger)
+    )
+    ledger = BudgetLedger(settings.token_ceiling)
+    context: PipelineContext | None = None
+    bundle: ArtifactBundle | None = None
+    validation: ValidationReport | None = None
+    rtm: list[RTMRow] = []
+    started = time.perf_counter()
+    try:
         try:
-            try:
-                provider = provider_factory(condition, ledger)
-            except Exception as error:
-                raise ConfigurationError(str(error)) from error
-            if getattr(provider, "ledger", None) is not ledger:
-                raise ConfigurationError(
-                    "Provider must use the condition budget ledger."
-                )
-            if getattr(provider, "model", None) != settings.model:
-                raise ConfigurationError(
-                    "Provider model must match the comparison model."
-                )
-            context = PipelineContext(provider=provider)
-            bundle = canonicalize_source_references(
-                PIPELINES[condition](context, chunks), chunks
+            provider = provider_factory(run_type, ledger)
+        except ValueError as error:
+            raise ConfigurationError(str(error)) from error
+        if getattr(provider, "ledger", None) is not ledger:
+            raise ConfigurationError("Provider must use the run budget ledger.")
+        if getattr(provider, "model", None) != settings.model:
+            raise ConfigurationError("Provider model must match the run model.")
+
+        context = PipelineContext(provider=provider)
+        bundle = canonicalize_source_references(
+            PIPELINES[run_type](context, chunks), chunks
+        )
+        validation = validate_bundle(bundle, chunks)
+        if validation.issues and all(
+            issue.code == "uncovered_requirement" for issue in validation.issues
+        ):
+            bundle = _repair_coverage(
+                context, bundle, validation.uncovered_requirement_ids
             )
             validation = validate_bundle(bundle, chunks)
-            if validation.issues and all(
-                issue.code == "uncovered_requirement" for issue in validation.issues
-            ):
-                bundle = _repair_coverage(
-                    context, bundle, validation.uncovered_requirement_ids
-                )
-                validation = validate_bundle(bundle, chunks)
-            if not validation.valid:
-                bundle = context.revise(
-                    [],
-                    "artifact bundle",
-                    bundle,
-                    ReviewResult(
-                        accepted=False,
-                        issues=[
-                            ReviewIssue(
-                                artifact_id=issue.artifact_id,
-                                reason=f"{issue.code}: {issue.message}",
-                            )
-                            for issue in validation.issues
-                        ],
-                    ),
-                    chunks,
-                    ArtifactBundle,
-                    16_000,
-                )
-                bundle = canonicalize_source_references(bundle, chunks)
-                validation = validate_bundle(bundle, chunks)
-            rtm = build_rtm(bundle)
-            latency = time.perf_counter() - started
-            metrics = compute_metrics(
+        if not validation.valid:
+            bundle = context.revise(
+                [],
+                "artifact bundle",
                 bundle,
-                validation,
-                input_tokens=context.input_tokens,
-                output_tokens=context.output_tokens,
-                charged_tokens=context.charged_tokens,
-                latency_seconds=latency,
-                retries=context.retries,
-                schema_repairs=context.schema_repairs,
-                semantic_revisions=context.semantic_revisions,
-                budget_exhausted=False,
+                ReviewResult(
+                    accepted=False,
+                    issues=[
+                        ReviewIssue(
+                            artifact_id=issue.artifact_id,
+                            reason=f"{issue.code}: {issue.message}",
+                        )
+                        for issue in validation.issues
+                    ],
+                ),
+                chunks,
+                ArtifactBundle,
+                16_000,
             )
-            if validation.valid:
-                condition_manifest = condition_manifest.model_copy(
-                    update={
-                        "status": RunStatus.COMPLETED,
-                        "completed_at": datetime.fromisoformat(_now()),
-                    }
-                )
-            else:
-                condition_manifest = condition_manifest.model_copy(
-                    update={
-                        "status": RunStatus.FAILED,
-                        "completed_at": datetime.fromisoformat(_now()),
-                        "failure_category": FailureCategory.SEMANTIC_VALIDATION,
-                        "failure_message": (
-                            f"{len(validation.issues)} deterministic validation issues."
-                        ),
-                    }
-                )
-        except Exception as error:
-            category = _failure_category(error)
-            if category is None:
-                raise
-            metrics = _empty_metrics(
-                context,
-                latency_seconds=time.perf_counter() - started,
-                budget_exhausted=category is FailureCategory.BUDGET_EXHAUSTION,
-                charged_tokens=ledger.used,
+            bundle = canonicalize_source_references(bundle, chunks)
+            validation = validate_bundle(bundle, chunks)
+
+        rtm = build_rtm(bundle)
+        metrics = compute_metrics(
+            bundle,
+            validation,
+            input_tokens=context.input_tokens,
+            output_tokens=context.output_tokens,
+            charged_tokens=context.charged_tokens,
+            latency_seconds=time.perf_counter() - started,
+            retries=context.retries,
+            schema_repairs=context.schema_repairs,
+            semantic_revisions=context.semantic_revisions,
+            budget_exhausted=False,
+        )
+        if validation.valid:
+            manifest = manifest.model_copy(
+                update={"status": RunStatus.COMPLETED, "completed_at": _now()}
             )
-            bundle = None
-            validation = None
-            rtm = []
-            condition_manifest = condition_manifest.model_copy(
+        else:
+            manifest = manifest.model_copy(
                 update={
                     "status": RunStatus.FAILED,
-                    "completed_at": datetime.fromisoformat(_now()),
-                    "failure_category": category,
-                    "failure_message": _safe_message(error, settings),
+                    "completed_at": _now(),
+                    "failure_category": FailureCategory.SEMANTIC_VALIDATION,
+                    "failure_message": (
+                        f"{len(validation.issues)} deterministic validation issues."
+                    ),
                 }
             )
+    except Exception as error:
+        category = _failure_category(error)
+        if category is None:
+            raise
+        metrics = _empty_metrics(
+            context,
+            latency_seconds=time.perf_counter() - started,
+            budget_exhausted=category is FailureCategory.BUDGET_EXHAUSTION,
+            charged_tokens=ledger.used,
+        )
+        bundle = None
+        validation = None
+        rtm = []
+        manifest = manifest.model_copy(
+            update={
+                "status": RunStatus.FAILED,
+                "completed_at": _now(),
+                "failure_category": category,
+                "failure_message": _safe_message(error, settings),
+            }
+        )
 
-        artifacts = (
-            {"metrics.json": metrics.model_dump(mode="json")}
-            if bundle is None
-            else _bundle_artifacts(bundle, validation, rtm, metrics)
-        )
-        finished_event = {
-            "timestamp": _now(),
-            "stage": "finished",
-            "status": condition_manifest.status.value,
-            "provider": condition_manifest.provider,
-            "model": condition_manifest.model,
-            "temperature": condition_manifest.temperature,
-            "token_ceiling": condition_manifest.token_ceiling,
-            "input_tokens": metrics.input_tokens,
-            "output_tokens": metrics.output_tokens,
-            "retries": metrics.retries,
-            "schema_repairs": metrics.schema_repairs,
-            "semantic_revisions": metrics.semantic_revisions,
-            "charged_tokens": metrics.charged_tokens,
-            "validation": (
-                validation.model_dump(mode="json") if validation else None
-            ),
-            "failure_category": (
-                condition_manifest.failure_category.value
-                if condition_manifest.failure_category
-                else None
-            ),
-            "failure_message": condition_manifest.failure_message,
-        }
-        store.finalize_condition(
-            manifest.comparison_id,
-            condition_manifest,
-            artifacts,
-            finished_event,
-        )
-        results[condition] = ConditionResult(
-            manifest=condition_manifest,
-            bundle=bundle,
-            validation=validation,
-            rtm=rtm,
-            metrics=metrics,
-        )
-        _notify(progress, condition, condition_manifest.status.value.title())
-
-    manifest = manifest.model_copy(
-        update={"completed_at": datetime.fromisoformat(_now())}
+    result = RunResult(
+        manifest=manifest,
+        bundle=bundle,
+        validation=validation,
+        rtm=rtm,
+        metrics=metrics,
     )
-    store.update_comparison(manifest)
-    _notify(progress, None, "Complete")
-    return ComparisonResult(manifest=manifest, conditions=results)
+    repository.finalize(result)
+    _notify(progress, manifest.status.value.title())
+    return result
