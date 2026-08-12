@@ -71,142 +71,150 @@ CREATE TABLE IF NOT EXISTS run_metrics (
     budget_exhausted boolean NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS artifact_bundles (
+    run_id text PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS requirements (
     run_id text NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    position integer NOT NULL CHECK (position > 0),
     requirement_id text NOT NULL CHECK (requirement_id ~ '^REQ-[0-9]{3,}$'),
     title text NOT NULL CHECK (title <> ''),
     description text NOT NULL CHECK (description <> ''),
     requirement_type text NOT NULL CHECK (requirement_type IN ('functional', 'non_functional', 'business')),
     module text NOT NULL CHECK (module <> ''),
     priority text NOT NULL CHECK (priority IN ('high', 'medium', 'low')),
-    PRIMARY KEY (run_id, requirement_id)
+    PRIMARY KEY (run_id, position)
 );
 
 CREATE TABLE IF NOT EXISTS requirement_ambiguities (
     run_id text NOT NULL,
-    requirement_id text NOT NULL,
+    requirement_position integer NOT NULL CHECK (requirement_position > 0),
     position integer NOT NULL CHECK (position > 0),
     value text NOT NULL,
-    PRIMARY KEY (run_id, requirement_id, position),
-    FOREIGN KEY (run_id, requirement_id) REFERENCES requirements(run_id, requirement_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, requirement_position, position),
+    FOREIGN KEY (run_id, requirement_position) REFERENCES requirements(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS requirement_dependencies (
     run_id text NOT NULL,
-    requirement_id text NOT NULL,
+    requirement_position integer NOT NULL CHECK (requirement_position > 0),
     position integer NOT NULL CHECK (position > 0),
     dependency_id text NOT NULL,
-    PRIMARY KEY (run_id, requirement_id, position),
-    FOREIGN KEY (run_id, requirement_id) REFERENCES requirements(run_id, requirement_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, requirement_position, position),
+    FOREIGN KEY (run_id, requirement_position) REFERENCES requirements(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS requirement_sources (
     run_id text NOT NULL,
-    requirement_id text NOT NULL,
+    requirement_position integer NOT NULL CHECK (requirement_position > 0),
     position integer NOT NULL CHECK (position > 0),
     chunk_id text NOT NULL CHECK (chunk_id <> ''),
     page_number integer NOT NULL CHECK (page_number > 0),
     section text NOT NULL,
     excerpt text NOT NULL CHECK (excerpt <> ''),
-    PRIMARY KEY (run_id, requirement_id, position),
-    FOREIGN KEY (run_id, requirement_id) REFERENCES requirements(run_id, requirement_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, requirement_position, position),
+    FOREIGN KEY (run_id, requirement_position) REFERENCES requirements(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS scenarios (
     run_id text NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    position integer NOT NULL CHECK (position > 0),
     scenario_id text NOT NULL CHECK (scenario_id ~ '^SCN-[0-9]{3,}$'),
     title text NOT NULL CHECK (title <> ''),
     objective text NOT NULL CHECK (objective <> ''),
     scenario_type text NOT NULL CHECK (scenario_type IN ('positive', 'negative', 'boundary', 'edge', 'state_transition')),
-    PRIMARY KEY (run_id, scenario_id)
+    PRIMARY KEY (run_id, position)
 );
 
 CREATE TABLE IF NOT EXISTS scenario_preconditions (
     run_id text NOT NULL,
-    scenario_id text NOT NULL,
+    scenario_position integer NOT NULL CHECK (scenario_position > 0),
     position integer NOT NULL CHECK (position > 0),
     value text NOT NULL,
-    PRIMARY KEY (run_id, scenario_id, position),
-    FOREIGN KEY (run_id, scenario_id) REFERENCES scenarios(run_id, scenario_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, scenario_position, position),
+    FOREIGN KEY (run_id, scenario_position) REFERENCES scenarios(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS scenario_requirements (
     run_id text NOT NULL,
-    scenario_id text NOT NULL,
+    scenario_position integer NOT NULL CHECK (scenario_position > 0),
     position integer NOT NULL CHECK (position > 0),
     requirement_id text NOT NULL,
-    PRIMARY KEY (run_id, scenario_id, position),
-    FOREIGN KEY (run_id, scenario_id) REFERENCES scenarios(run_id, scenario_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, scenario_position, position),
+    FOREIGN KEY (run_id, scenario_position) REFERENCES scenarios(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS scenario_sources (
     run_id text NOT NULL,
-    scenario_id text NOT NULL,
+    scenario_position integer NOT NULL CHECK (scenario_position > 0),
     position integer NOT NULL CHECK (position > 0),
     chunk_id text NOT NULL CHECK (chunk_id <> ''),
     page_number integer NOT NULL CHECK (page_number > 0),
     section text NOT NULL,
     excerpt text NOT NULL CHECK (excerpt <> ''),
-    PRIMARY KEY (run_id, scenario_id, position),
-    FOREIGN KEY (run_id, scenario_id) REFERENCES scenarios(run_id, scenario_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, scenario_position, position),
+    FOREIGN KEY (run_id, scenario_position) REFERENCES scenarios(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS test_cases (
     run_id text NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    position integer NOT NULL CHECK (position > 0),
     test_case_id text NOT NULL CHECK (test_case_id ~ '^TC-[0-9]{3,}$'),
     scenario_id text NOT NULL CHECK (scenario_id ~ '^SCN-[0-9]{3,}$'),
     title text NOT NULL CHECK (title <> ''),
     priority text NOT NULL CHECK (priority IN ('P1', 'P2', 'P3')),
-    PRIMARY KEY (run_id, test_case_id)
+    PRIMARY KEY (run_id, position)
 );
 
 CREATE TABLE IF NOT EXISTS test_case_preconditions (
     run_id text NOT NULL,
-    test_case_id text NOT NULL,
+    test_case_position integer NOT NULL CHECK (test_case_position > 0),
     position integer NOT NULL CHECK (position > 0),
     value text NOT NULL,
-    PRIMARY KEY (run_id, test_case_id, position),
-    FOREIGN KEY (run_id, test_case_id) REFERENCES test_cases(run_id, test_case_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, test_case_position, position),
+    FOREIGN KEY (run_id, test_case_position) REFERENCES test_cases(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS test_case_requirements (
     run_id text NOT NULL,
-    test_case_id text NOT NULL,
+    test_case_position integer NOT NULL CHECK (test_case_position > 0),
     position integer NOT NULL CHECK (position > 0),
     requirement_id text NOT NULL,
-    PRIMARY KEY (run_id, test_case_id, position),
-    FOREIGN KEY (run_id, test_case_id) REFERENCES test_cases(run_id, test_case_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, test_case_position, position),
+    FOREIGN KEY (run_id, test_case_position) REFERENCES test_cases(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS test_case_data (
     run_id text NOT NULL,
-    test_case_id text NOT NULL,
+    test_case_position integer NOT NULL CHECK (test_case_position > 0),
     key text NOT NULL,
     value jsonb NOT NULL,
-    PRIMARY KEY (run_id, test_case_id, key),
-    FOREIGN KEY (run_id, test_case_id) REFERENCES test_cases(run_id, test_case_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, test_case_position, key),
+    FOREIGN KEY (run_id, test_case_position) REFERENCES test_cases(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS test_steps (
     run_id text NOT NULL,
-    test_case_id text NOT NULL,
+    test_case_position integer NOT NULL CHECK (test_case_position > 0),
+    position integer NOT NULL CHECK (position > 0),
     step_number integer NOT NULL CHECK (step_number > 0),
     action text NOT NULL CHECK (action <> ''),
     expected_result text NOT NULL CHECK (expected_result <> ''),
-    PRIMARY KEY (run_id, test_case_id, step_number),
-    FOREIGN KEY (run_id, test_case_id) REFERENCES test_cases(run_id, test_case_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, test_case_position, position),
+    FOREIGN KEY (run_id, test_case_position) REFERENCES test_cases(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS test_case_sources (
     run_id text NOT NULL,
-    test_case_id text NOT NULL,
+    test_case_position integer NOT NULL CHECK (test_case_position > 0),
     position integer NOT NULL CHECK (position > 0),
     chunk_id text NOT NULL CHECK (chunk_id <> ''),
     page_number integer NOT NULL CHECK (page_number > 0),
     section text NOT NULL,
     excerpt text NOT NULL CHECK (excerpt <> ''),
-    PRIMARY KEY (run_id, test_case_id, position),
-    FOREIGN KEY (run_id, test_case_id) REFERENCES test_cases(run_id, test_case_id) ON DELETE CASCADE
+    PRIMARY KEY (run_id, test_case_position, position),
+    FOREIGN KEY (run_id, test_case_position) REFERENCES test_cases(run_id, position) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS validation_reports (
