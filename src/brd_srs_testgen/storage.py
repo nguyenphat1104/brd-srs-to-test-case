@@ -1,430 +1,164 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-import fcntl
-import json
-import os
+from datetime import UTC, datetime
 from pathlib import Path
-import shutil
-import tempfile
-import threading
-from typing import Any, Iterator
+from typing import Iterable
 
-from .models import (
-    ComparisonManifest,
-    Condition,
-    ConditionManifest,
-    DocumentChunk,
-    RunStatus,
-)
+import psycopg
+from psycopg.rows import dict_row
+
+from .models import DocumentChunk, RunHistoryItem, RunManifest, RunStatus
 
 
 class StorageError(RuntimeError):
     pass
 
 
-class ImmutableArtifactError(StorageError):
+class ImmutableRunError(StorageError):
     pass
 
 
-_MUTATION_LOCK = threading.RLock()
+class RunRepository:
+    def __init__(self, database_url: str) -> None:
+        if not database_url or not database_url.strip():
+            raise StorageError("DATABASE_URL is required.")
+        self.database_url = database_url
 
+    def _connect(self) -> psycopg.Connection:
+        return psycopg.connect(self.database_url, row_factory=dict_row)
 
-def _component(value: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError("Path must be a single normal component.")
-    path = Path(value)
-    if (
-        not value
-        or value in {".", ".."}
-        or "/" in value
-        or "\\" in value
-        or path.is_absolute()
-        or len(path.parts) != 1
-    ):
-        raise ValueError("Path must be a single normal component.")
-    return value
-
-
-def _fsync_directory(directory: Path) -> None:
-    descriptor = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _atomic_text(path: Path, text: str) -> None:
-    if not path.parent.is_dir():
-        raise StorageError("Artifact parent directory does not exist.")
-    if path.is_symlink():
-        raise StorageError("Artifact path cannot be a symlink.")
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".tmp-", dir=path.parent)
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, path)
-        _fsync_directory(path.parent)
-    finally:
-        temporary_path.unlink(missing_ok=True)
-
-
-def _atomic_json(path: Path, value: Any) -> None:
-    _atomic_text(path, _json_text(value))
-
-
-def _json_text(value: Any) -> str:
-    return (
-        json.dumps(
-            value, allow_nan=False, ensure_ascii=False, indent=2, sort_keys=True
-        )
-        + "\n"
-    )
-
-
-class RunStore:
-    def __init__(self, root: str | Path = "runs") -> None:
-        self.root = Path(root)
-
-    def comparison_dir(self, comparison_id: str) -> Path:
-        return self.root / _component(comparison_id)
-
-    def condition_dir(self, comparison_id: str, condition: Condition) -> Path:
-        return self.comparison_dir(comparison_id) / "conditions" / condition.value
-
-    @contextmanager
-    def _mutation(self, *, create_root: bool = False) -> Iterator[None]:
-        with _MUTATION_LOCK:
-            if create_root:
-                self.root.mkdir(parents=True, exist_ok=True)
-            elif not self.root.is_dir():
-                raise StorageError("Run-store root directory does not exist.")
-            lock_path = self.root / ".runstore.lock"
-            if lock_path.is_symlink():
-                raise StorageError("Run-store lock cannot be a symlink.")
-            with lock_path.open("a+") as lock:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-                try:
-                    # ponytail: global serialization; use per-run locks if throughput matters.
-                    yield
-                finally:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-
-    def _assert_no_symlinks(self, path: Path) -> None:
+    def initialize(self) -> None:
         try:
-            relative = path.relative_to(self.root)
-        except ValueError as error:
-            raise StorageError("Run path must remain under the configured root.") from error
-        current = self.root
-        for component in relative.parts:
-            current /= component
-            if current.is_symlink():
-                raise StorageError("Run path cannot contain a symlink.")
+            schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
+            with self._connect() as connection:
+                connection.execute(schema)
+        except (OSError, psycopg.Error) as error:
+            raise StorageError("Database initialization failed.") from error
 
-    def _require_comparison(self, comparison_id: str) -> tuple[Path, Path]:
-        directory = self.comparison_dir(comparison_id)
-        self._assert_no_symlinks(directory)
-        if not directory.is_dir():
-            raise StorageError("Comparison directory does not exist.")
-        manifest = directory / "manifest.json"
-        self._assert_no_symlinks(manifest)
-        if not manifest.is_file():
-            raise StorageError("Comparison manifest does not exist.")
-        return directory, manifest
-
-    def _require_condition(
-        self, comparison_id: str, condition: Condition
-    ) -> tuple[Path, Path]:
-        self._require_comparison(comparison_id)
-        directory = self.condition_dir(comparison_id, condition)
-        self._assert_no_symlinks(directory)
-        if not directory.is_dir():
-            raise StorageError("Condition directory does not exist.")
-        manifest = directory / "manifest.json"
-        self._assert_no_symlinks(manifest)
-        if not manifest.is_file():
-            raise StorageError("Condition manifest does not exist.")
-        return directory, manifest
-
-    def _comparison_manifest(self, comparison_id: str) -> ComparisonManifest:
-        _, path = self._require_comparison(comparison_id)
+    def create_run(self, manifest: RunManifest) -> None:
+        if manifest.status is not RunStatus.RUNNING:
+            raise ImmutableRunError("Runs must start in running state.")
+        fields = tuple(RunManifest.model_fields)
+        values = tuple(getattr(manifest, field) for field in fields)
         try:
-            return ComparisonManifest.model_validate_json(path.read_text(encoding="utf-8"))
-        except ValueError as error:
-            raise StorageError("Comparison manifest is invalid.") from error
-
-    def _condition_manifest(
-        self, comparison_id: str, condition: Condition
-    ) -> ConditionManifest:
-        _, path = self._require_condition(comparison_id, condition)
-        try:
-            return ConditionManifest.model_validate_json(path.read_text(encoding="utf-8"))
-        except ValueError as error:
-            raise StorageError("Condition manifest is invalid.") from error
-
-    def _validated_comparison(
-        self, manifest: ComparisonManifest
-    ) -> ComparisonManifest:
-        try:
-            return ComparisonManifest.model_validate(manifest.model_dump(mode="json"))
-        except ValueError as error:
-            raise StorageError("Comparison manifest is invalid.") from error
-
-    def _validated_condition(self, manifest: ConditionManifest) -> ConditionManifest:
-        try:
-            return ConditionManifest.model_validate(manifest.model_dump(mode="json"))
-        except ValueError as error:
-            raise StorageError("Condition manifest is invalid.") from error
-
-    def _terminal_condition(
-        self, current: ConditionManifest, manifest: ConditionManifest
-    ) -> ConditionManifest:
-        updated = self._validated_condition(manifest)
-        if any(
-            getattr(updated, field) != getattr(current, field)
-            for field in (
-                "condition",
-                "provider",
-                "model",
-                "temperature",
-                "token_ceiling",
-                "started_at",
-            )
-        ):
-            raise ImmutableArtifactError("Condition configuration cannot be updated.")
-        if updated.status not in {RunStatus.COMPLETED, RunStatus.FAILED}:
-            raise ImmutableArtifactError("Condition updates must be terminal.")
-        return updated
-
-    def _cleanup_created(self, directory: Path) -> None:
-        self._assert_no_symlinks(directory)
-        shutil.rmtree(directory)
-
-    def create_comparison(
-        self, manifest: ComparisonManifest, chunks: list[DocumentChunk]
-    ) -> Path:
-        validated = self._validated_comparison(manifest)
-        if validated.completed_at is not None:
-            raise ImmutableArtifactError("Comparisons must start unfinished.")
-        directory = self.comparison_dir(validated.comparison_id)
-        with self._mutation(create_root=True):
-            self._assert_no_symlinks(directory)
-            try:
-                directory.mkdir(parents=True, exist_ok=False)
-            except FileExistsError as error:
-                raise ImmutableArtifactError("Comparison already exists.") from error
-            try:
-                _atomic_json(directory / "manifest.json", validated.model_dump(mode="json"))
-                _atomic_json(
-                    directory / "chunks.json",
-                    [chunk.model_dump(mode="json") for chunk in chunks],
+            with self._connect() as connection:
+                connection.execute(
+                    f"INSERT INTO runs ({', '.join(fields)}) VALUES ({', '.join(['%s'] * len(fields))})",
+                    values,
                 )
-            except Exception:
-                self._cleanup_created(directory)
-                raise
-        return directory
+        except psycopg.errors.UniqueViolation as error:
+            raise ImmutableRunError("Run already exists.") from error
+        except psycopg.Error as error:
+            raise StorageError("Database operation failed.") from error
 
-    def update_comparison(self, manifest: ComparisonManifest) -> Path:
-        path = self.comparison_dir(manifest.comparison_id) / "manifest.json"
-        with self._mutation():
-            current = self._comparison_manifest(manifest.comparison_id)
-            if current.completed_at is not None:
-                raise ImmutableArtifactError("Completed comparisons cannot be updated.")
-            updated = self._validated_comparison(manifest)
-            if any(
-                getattr(updated, field) != getattr(current, field)
-                for field in (
-                    "comparison_id",
-                    "document_hash",
-                    "provider",
-                    "model",
-                    "temperature",
-                    "token_ceiling",
-                    "condition_order",
-                    "prompt_version",
-                    "schema_version",
-                    "started_at",
-                )
-            ):
-                raise ImmutableArtifactError("Comparison configuration cannot be updated.")
-            if updated.completed_at is None:
-                raise ImmutableArtifactError("Comparison updates must set completed_at.")
-            self._assert_no_symlinks(path)
-            _atomic_json(path, updated.model_dump(mode="json"))
-        return path
+    @staticmethod
+    def _require_running(connection: psycopg.Connection, run_id: str) -> None:
+        row = connection.execute(
+            "SELECT status FROM runs WHERE run_id = %s FOR UPDATE", (run_id,)
+        ).fetchone()
+        if row is None:
+            raise StorageError("Run does not exist.")
+        if row["status"] != RunStatus.RUNNING:
+            raise ImmutableRunError("Terminal runs are immutable.")
 
-    def start_condition(
-        self, comparison_id: str, manifest: ConditionManifest
-    ) -> Path:
-        validated = self._validated_condition(manifest)
-        if validated.status is not RunStatus.RUNNING:
-            raise ImmutableArtifactError("Conditions must start running.")
-        directory = self.condition_dir(comparison_id, validated.condition)
-        with self._mutation():
-            if self._comparison_manifest(comparison_id).completed_at is not None:
-                raise ImmutableArtifactError("Completed comparisons cannot start conditions.")
-            self._assert_no_symlinks(directory)
-            try:
-                directory.mkdir(parents=True, exist_ok=False)
-            except FileExistsError as error:
-                raise ImmutableArtifactError("Condition already exists.") from error
-            try:
-                _atomic_json(directory / "manifest.json", validated.model_dump(mode="json"))
-            except Exception:
-                self._cleanup_created(directory)
-                raise
-        return directory
+    def save_chunks(self, run_id: str, chunks: Iterable[DocumentChunk]) -> None:
+        items = list(chunks)
+        try:
+            with self._connect() as connection:
+                self._require_running(connection, run_id)
+                if not items:
+                    raise StorageError("Chunks cannot be empty.")
+                if connection.execute(
+                    "SELECT 1 FROM document_chunks WHERE run_id = %s LIMIT 1", (run_id,)
+                ).fetchone():
+                    raise ImmutableRunError("Chunks already exist.")
+                with connection.cursor() as cursor:
+                    cursor.executemany(
+                        "INSERT INTO document_chunks "
+                        "(run_id, chunk_id, page_number, section, text, content_hash) "
+                        "VALUES (%s, %s, %s, %s, %s, %s)",
+                        (
+                            (
+                                run_id,
+                                chunk.chunk_id,
+                                chunk.page_number,
+                                chunk.section,
+                                chunk.text,
+                                chunk.content_hash,
+                            )
+                            for chunk in items
+                        ),
+                    )
+        except StorageError:
+            raise
+        except psycopg.Error as error:
+            raise StorageError("Database operation failed.") from error
 
-    def update_condition(self, comparison_id: str, manifest: ConditionManifest) -> Path:
-        path = self.condition_dir(comparison_id, manifest.condition) / "manifest.json"
-        with self._mutation():
-            if self._comparison_manifest(comparison_id).completed_at is not None:
-                raise ImmutableArtifactError("Completed comparisons cannot update conditions.")
-            current = self._condition_manifest(comparison_id, manifest.condition)
-            if current.status is not RunStatus.RUNNING:
-                raise ImmutableArtifactError("Terminal conditions cannot be updated.")
-            updated = self._terminal_condition(current, manifest)
-            self._assert_no_symlinks(path)
-            _atomic_json(path, updated.model_dump(mode="json"))
-        return path
-
-    def finalize_condition(
-        self,
-        comparison_id: str,
-        manifest: ConditionManifest,
-        artifacts: dict[str, Any],
-        finished_event: Any,
-    ) -> Path:
-        validated = self._validated_condition(manifest)
-        artifact_texts: dict[str, str] = {}
-        normalized_names: set[str] = set()
-        for filename, value in artifacts.items():
-            filename = _component(filename)
-            normalized = filename.casefold()
-            if normalized in {
-                "manifest.json",
-                "events.jsonl",
-                ".runstore.lock",
-            } or normalized.startswith(".tmp-"):
-                raise StorageError("Artifact filename is reserved by the run store.")
-            if normalized in normalized_names:
-                raise StorageError("Artifact filenames must be unique.")
-            normalized_names.add(normalized)
-            artifact_texts[filename] = _json_text(value)
-        event_text = json.dumps(
-            finished_event, allow_nan=False, ensure_ascii=False, sort_keys=True
-        )
-        manifest_text = _json_text(validated.model_dump(mode="json"))
-        directory = self.condition_dir(comparison_id, validated.condition)
-        manifest_path = directory / "manifest.json"
-        events_path = directory / "events.jsonl"
-
-        with self._mutation():
-            if self._comparison_manifest(comparison_id).completed_at is not None:
-                raise ImmutableArtifactError(
-                    "Completed comparisons cannot finalize conditions."
-                )
-            current = self._condition_manifest(comparison_id, validated.condition)
-            if current.status is not RunStatus.RUNNING:
-                raise ImmutableArtifactError("Terminal conditions cannot be finalized.")
-            self._terminal_condition(current, validated)
-            paths = {filename: directory / filename for filename in artifact_texts}
-            for path in [*paths.values(), manifest_path, events_path]:
-                self._assert_no_symlinks(path)
-            for path in paths.values():
-                if path.exists():
-                    raise ImmutableArtifactError("Artifact already exists.")
-
-            original_manifest = manifest_path.read_text(encoding="utf-8")
-            original_events = (
-                events_path.read_text(encoding="utf-8")
-                if events_path.exists()
-                else None
-            )
-            events = original_events or ""
-            if events and not events.endswith("\n"):
-                events += "\n"
-            created: list[Path] = []
-            try:
-                for filename, text in artifact_texts.items():
-                    path = paths[filename]
-                    created.append(path)
-                    _atomic_text(path, text)
-                _atomic_text(events_path, events + event_text + "\n")
-                _atomic_text(manifest_path, manifest_text)
-            except Exception:
-                for path in created:
-                    path.unlink(missing_ok=True)
-                if original_events is None:
-                    events_path.unlink(missing_ok=True)
-                else:
-                    _atomic_text(events_path, original_events)
-                _atomic_text(manifest_path, original_manifest)
-                _fsync_directory(directory)
-                raise
-        return manifest_path
-
-    def write_artifact(
-        self, comparison_id: str, condition: Condition, filename: str, value: Any
-    ) -> Path:
-        filename = _component(filename)
-        path = self.condition_dir(comparison_id, condition) / filename
-        with self._mutation():
-            if self._comparison_manifest(comparison_id).completed_at is not None:
-                raise ImmutableArtifactError("Completed comparisons cannot write artifacts.")
-            if self._condition_manifest(comparison_id, condition).status is not RunStatus.RUNNING:
-                raise ImmutableArtifactError("Terminal conditions cannot write artifacts.")
-            self._assert_no_symlinks(path)
-            if path.exists():
-                raise ImmutableArtifactError("Artifact already exists.")
-            _atomic_json(path, value)
-        return path
-
-    def write_comparison_artifact(
-        self, comparison_id: str, filename: str, value: Any
-    ) -> Path:
-        filename = _component(filename)
-        normalized = filename.casefold()
-        if normalized in {
-            "manifest.json",
-            "chunks.json",
-            "conditions",
-            ".runstore.lock",
-        } or normalized.startswith(".tmp-"):
-            raise StorageError("Artifact filename is reserved by the run store.")
-        path = self.comparison_dir(comparison_id) / filename
-        with self._mutation():
-            directory, _ = self._require_comparison(comparison_id)
-            if self._comparison_manifest(comparison_id).completed_at is not None:
-                raise ImmutableArtifactError(
-                    "Completed comparisons cannot write artifacts."
-                )
-            chunks = directory / "chunks.json"
-            self._assert_no_symlinks(chunks)
-            if not chunks.is_file():
-                raise StorageError("Comparison chunks do not exist.")
-            self._assert_no_symlinks(path)
-            if path.exists():
-                raise ImmutableArtifactError("Artifact already exists.")
-            _atomic_json(path, value)
-        return path
+    def load_chunks(self, run_id: str) -> list[DocumentChunk]:
+        try:
+            with self._connect() as connection:
+                if connection.execute(
+                    "SELECT 1 FROM runs WHERE run_id = %s", (run_id,)
+                ).fetchone() is None:
+                    raise StorageError("Run does not exist.")
+                rows = connection.execute(
+                    "SELECT chunk_id, page_number, section, text, content_hash "
+                    "FROM document_chunks WHERE run_id = %s "
+                    "ORDER BY page_number, chunk_id",
+                    (run_id,),
+                ).fetchall()
+            return [DocumentChunk.model_validate(row, strict=True) for row in rows]
+        except StorageError:
+            raise
+        except psycopg.Error as error:
+            raise StorageError("Database operation failed.") from error
 
     def append_event(
-        self, comparison_id: str, condition: Condition, event: Any
-    ) -> Path:
-        path = self.condition_dir(comparison_id, condition) / "events.jsonl"
-        event_text = json.dumps(event, allow_nan=False, ensure_ascii=False, sort_keys=True)
-        with self._mutation():
-            if self._comparison_manifest(comparison_id).completed_at is not None:
-                raise ImmutableArtifactError("Completed comparisons cannot append events.")
-            if self._condition_manifest(comparison_id, condition).status is not RunStatus.RUNNING:
-                raise ImmutableArtifactError("Terminal conditions cannot append events.")
-            self._assert_no_symlinks(path)
-            existing = path.read_text(encoding="utf-8") if path.exists() else ""
-            if existing and not existing.endswith("\n"):
-                existing += "\n"
-            _atomic_text(path, existing + event_text + "\n")
-        return path
+        self, run_id: str, stage: str, occurred_at: datetime | None = None
+    ) -> None:
+        if not isinstance(stage, str) or not stage.strip():
+            raise StorageError("Event stage is required.")
+        try:
+            with self._connect() as connection:
+                self._require_running(connection, run_id)
+                connection.execute(
+                    "INSERT INTO run_events (run_id, sequence, occurred_at, stage) "
+                    "SELECT %s, COALESCE(MAX(sequence), 0) + 1, %s, %s "
+                    "FROM run_events WHERE run_id = %s",
+                    (run_id, occurred_at or datetime.now(UTC), stage, run_id),
+                )
+        except StorageError:
+            raise
+        except psycopg.Error as error:
+            raise StorageError("Database operation failed.") from error
+
+    def load_events(self, run_id: str) -> list[dict[str, object]]:
+        try:
+            with self._connect() as connection:
+                if connection.execute(
+                    "SELECT 1 FROM runs WHERE run_id = %s", (run_id,)
+                ).fetchone() is None:
+                    raise StorageError("Run does not exist.")
+                return connection.execute(
+                    "SELECT sequence, occurred_at, stage FROM run_events "
+                    "WHERE run_id = %s ORDER BY sequence",
+                    (run_id,),
+                ).fetchall()
+        except StorageError:
+            raise
+        except psycopg.Error as error:
+            raise StorageError("Database operation failed.") from error
+
+    def list_runs(self) -> list[RunHistoryItem]:
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT r.run_id, r.source_filename, r.run_type, r.status, "
+                    "r.provider, r.model, r.started_at, r.completed_at, "
+                    "m.requirement_count, m.scenario_count, m.test_case_count "
+                    "FROM runs r LEFT JOIN run_metrics m USING (run_id) "
+                    "ORDER BY r.started_at DESC, r.run_id DESC"
+                ).fetchall()
+            return [RunHistoryItem.model_validate(row) for row in rows]
+        except psycopg.Error as error:
+            raise StorageError("Database operation failed.") from error
