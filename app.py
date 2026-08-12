@@ -7,14 +7,9 @@ from typing import Any
 
 import streamlit as st
 
-from brd_srs_testgen.models import Condition, FailureCategory, RunStatus
+from brd_srs_testgen.models import FailureCategory, RunResult, RunStatus, RunType
 from brd_srs_testgen.providers import list_lm_studio_models
-from brd_srs_testgen.runner import (
-    ComparisonResult,
-    ConditionResult,
-    ProviderSettings,
-    run_comparison,
-)
+from brd_srs_testgen.runner import ProviderSettings, run_generation
 
 
 GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
@@ -28,16 +23,16 @@ LOCAL_BASE_URLS = {
     "lm_studio": "http://localhost:1234/v1",
     "ollama": "http://localhost:11434",
 }
-CONDITION_COPY = {
-    Condition.SINGLE_PROMPT: (
+RUN_TYPE_COPY = {
+    RunType.SINGLE_PROMPT: (
         "Single prompt",
         "One structured generation call from source document to complete test suite.",
     ),
-    Condition.STAGED_SINGLE_AGENT: (
+    RunType.STAGED_SINGLE_AGENT: (
         "Staged single agent",
         "One agent generates requirements, scenarios, and cases in sequence before deterministic review.",
     ),
-    Condition.CENTRALIZED_MULTI_AGENT: (
+    RunType.CENTRALIZED_MULTI_AGENT: (
         "Centralized multi-agent",
         "A coordinator delegates bounded work to three workers before deterministic review.",
     ),
@@ -344,8 +339,8 @@ def _provider_label(provider: str) -> str:
     return PROVIDER_LABELS[provider]
 
 
-def _condition_label(condition: Condition) -> str:
-    return CONDITION_COPY[condition][0]
+def _run_type_label(run_type: RunType) -> str:
+    return RUN_TYPE_COPY[run_type][0]
 
 
 def _json(value: Any) -> str:
@@ -394,7 +389,7 @@ def _failure_guidance(
         ):
             return (
                 "The selected model is unavailable for this API key. "
-                f"Use {GEMINI_DEFAULT_MODEL} and run the comparison again."
+                f"Use {GEMINI_DEFAULT_MODEL} and generate again."
             )
         if provider == "lm_studio":
             return (
@@ -425,79 +420,107 @@ def _technical_detail(message: str | None) -> str:
     return detail if len(detail) <= 800 else f"{detail[:797]}..."
 
 
-def _failed_count(result: ComparisonResult) -> int:
-    return sum(
-        condition_result is None
-        or condition_result.manifest.status is not RunStatus.COMPLETED
-        for condition in result.manifest.condition_order
-        for condition_result in [result.conditions.get(condition)]
+def _result_status(result: RunResult) -> tuple[str, str]:
+    if result.manifest.status is RunStatus.COMPLETED:
+        return "Generation complete", "complete"
+    if result.manifest.status is RunStatus.FAILED:
+        return "Generation failed", "error"
+    return "Generation interrupted", "error"
+
+
+def _render_sources(sources) -> None:
+    st.markdown("**Source references**")
+    for source in sources:
+        location = f"Page {source.page_number}"
+        if source.section:
+            location += f" · {source.section}"
+        st.markdown(f"- `{source.chunk_id}` · {location} — {source.excerpt}")
+
+
+def _render_bundle(result: RunResult) -> None:
+    bundle = result.bundle
+    if bundle is None:
+        return
+
+    st.markdown("### Generated artifacts")
+    st.markdown("#### Requirements")
+    for requirement in bundle.requirements:
+        with st.expander(f"{requirement.requirement_id} · {requirement.title}"):
+            st.markdown(requirement.description)
+            st.markdown(
+                f"**Type:** {requirement.requirement_type.value.replace('_', ' ').title()}  \n"
+                f"**Priority:** {requirement.priority.value.title()}  \n"
+                f"**Module:** {requirement.module}"
+            )
+            st.markdown(
+                "**Dependency IDs:** "
+                + (", ".join(requirement.dependency_ids) or "None")
+            )
+            st.markdown("**Ambiguities:**")
+            st.markdown(
+                "\n".join(f"- {item}" for item in requirement.ambiguities)
+                or "None"
+            )
+            _render_sources(requirement.source_references)
+
+    st.markdown("#### Scenarios")
+    for scenario in bundle.scenarios:
+        with st.expander(f"{scenario.scenario_id} · {scenario.title}"):
+            st.markdown(scenario.objective)
+            st.markdown(
+                f"**Type:** {scenario.scenario_type.value.replace('_', ' ').title()}  \n"
+                f"**Requirement IDs:** {', '.join(scenario.requirement_ids)}"
+            )
+            st.markdown("**Preconditions:**")
+            st.markdown(
+                "\n".join(f"- {item}" for item in scenario.preconditions) or "None"
+            )
+            _render_sources(scenario.source_references)
+
+    st.markdown("#### Test cases")
+    for test_case in bundle.test_cases:
+        with st.expander(f"{test_case.test_case_id} · {test_case.title}"):
+            st.markdown(
+                f"**Priority:** {test_case.priority.value}  \n"
+                f"**Scenario ID:** {test_case.scenario_id}  \n"
+                f"**Requirement IDs:** {', '.join(test_case.requirement_ids)}"
+            )
+            st.markdown("**Preconditions:**")
+            st.markdown(
+                "\n".join(f"- {item}" for item in test_case.preconditions) or "None"
+            )
+            st.markdown("**Test data**")
+            st.code(_json(test_case.test_data), language="json")
+            st.markdown("**Steps**")
+            st.table(
+                [
+                    {
+                        "Step": step.step_number,
+                        "Action": step.action,
+                        "Expected result": step.expected_result,
+                    }
+                    for step in test_case.steps
+                ]
+            )
+            _render_sources(test_case.source_references)
+
+
+def _render_result(result: RunResult, *, key_prefix: str = "result") -> None:
+    manifest = result.manifest
+    label, state = _result_status(result)
+    with st.status(label, state=state, expanded=False):
+        st.write(
+            f"{_run_type_label(manifest.run_type)} finished with status: "
+            f"{manifest.status.value}."
+        )
+    st.caption(
+        f"{_run_type_label(manifest.run_type)} · {_provider_label(manifest.provider)} · "
+        f"{manifest.model} · {manifest.source_filename} · "
+        f"Temperature {manifest.temperature:g} · "
+        f"Token ceiling {manifest.token_ceiling:,} · Run {manifest.run_id}"
     )
 
-
-def _result_status(result: ComparisonResult) -> tuple[str, str]:
-    if result.failure_category:
-        return "Comparison failed", "error"
-    failed = _failed_count(result)
-    total = len(result.manifest.condition_order)
-    if failed == total:
-        return f"All {total} conditions failed", "error"
-    if failed:
-        noun = "condition" if failed == 1 else "conditions"
-        return f"Finished with {failed} failed {noun}", "error"
-    return "Comparison complete", "complete"
-
-
-def _summary_rows(result: ComparisonResult) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for condition in result.manifest.condition_order:
-        condition_result = result.conditions.get(condition)
-        if condition_result is None:
-            rows.append(
-                {
-                    "Condition": _condition_label(condition),
-                    "Status": "No result",
-                    "Requirements": None,
-                    "Scenarios": None,
-                    "Test cases": None,
-                    "Citation": "—",
-                    "RTM": "—",
-                    "Tokens": None,
-                    "Latency": "—",
-                }
-            )
-            continue
-        manifest = condition_result.manifest
-        metrics = condition_result.metrics
-        completed = manifest.status is RunStatus.COMPLETED
-        tokens = metrics.charged_tokens or metrics.input_tokens + metrics.output_tokens
-        rows.append(
-            {
-                "Condition": _condition_label(condition),
-                "Status": "Completed" if completed else _failure_name(manifest.failure_category),
-                "Requirements": metrics.requirement_count if completed else None,
-                "Scenarios": metrics.scenario_count if completed else None,
-                "Test cases": metrics.test_case_count if completed else None,
-                "Citation": f"{metrics.citation_coverage:.0%}" if completed else "—",
-                "RTM": f"{metrics.rtm_completeness:.0%}" if completed else "—",
-                "Tokens": tokens,
-                "Latency": f"{metrics.latency_seconds:.2f} s",
-            }
-        )
-    return rows
-
-
-def _render_condition(result: ConditionResult) -> None:
-    manifest = result.manifest
-    metrics = result.metrics
-    condition = manifest.condition
-    label, description = CONDITION_COPY[condition]
-    st.markdown(f"### {label}")
-    st.caption(description)
-
-    charged = metrics.charged_tokens
-    token_label = "Charged tokens" if charged else "Reported tokens"
-    token_value = charged or metrics.input_tokens + metrics.output_tokens
-    if manifest.status is not RunStatus.COMPLETED:
+    if manifest.failure_category is not None or manifest.failure_message:
         category = _failure_name(manifest.failure_category)
         st.error(
             f"**{category}.** "
@@ -509,147 +532,86 @@ def _render_condition(result: ConditionResult) -> None:
         )
         with st.expander("Technical details"):
             st.code(_technical_detail(manifest.failure_message), language=None)
-        detail_columns = st.columns(3)
-        detail_columns[0].metric(token_label, f"{token_value:,}")
-        detail_columns[1].metric("Retries", metrics.retries)
-        detail_columns[2].metric("Latency", f"{metrics.latency_seconds:.2f} s")
+    elif manifest.status is RunStatus.COMPLETED:
+        st.success("Completed and validated")
+
+    metrics = result.metrics
+    if metrics is not None:
+        charged = metrics.charged_tokens
+        token_label = "Charged tokens" if charged else "Reported tokens"
+        token_value = charged or metrics.input_tokens + metrics.output_tokens
+        columns = st.columns(4)
+        columns[0].metric("Requirements", metrics.requirement_count)
+        columns[1].metric("Scenarios", metrics.scenario_count)
+        columns[2].metric("Test cases", metrics.test_case_count)
+        columns[3].metric(token_label, f"{token_value:,}")
+        with st.expander("Quality and traceability"):
+            st.table(
+                [
+                    {
+                        "Measure": "Citation coverage",
+                        "Result": f"{metrics.citation_coverage:.0%}",
+                    },
+                    {
+                        "Measure": "Requirement → scenario",
+                        "Result": f"{metrics.requirement_scenario_coverage:.0%}",
+                    },
+                    {
+                        "Measure": "Requirement → test case",
+                        "Result": f"{metrics.requirement_test_case_coverage:.0%}",
+                    },
+                    {
+                        "Measure": "Positive scenario coverage",
+                        "Result": f"{metrics.positive_scenario_coverage:.0%}",
+                    },
+                    {
+                        "Measure": "Non-positive scenario coverage",
+                        "Result": f"{metrics.non_positive_scenario_coverage:.0%}",
+                    },
+                    {
+                        "Measure": "RTM completeness",
+                        "Result": f"{metrics.rtm_completeness:.0%}",
+                    },
+                ]
+            )
+            st.caption(
+                f"Latency {metrics.latency_seconds:.2f} s · "
+                f"{metrics.retries} retries"
+            )
+
+    if manifest.status is not RunStatus.COMPLETED:
         _download(
             "Download diagnostics",
             result.download_bundle(),
-            f"{condition.value}-diagnostics.json",
-            f"{condition.value}-diagnostics",
+            f"{manifest.run_id}-diagnostics.json",
+            f"{key_prefix}-{manifest.run_id}-diagnostics",
         )
-        return
-
-    st.success("Completed and validated")
-    volume_columns = st.columns(4)
-    volume_columns[0].metric("Requirements", metrics.requirement_count)
-    volume_columns[1].metric("Scenarios", metrics.scenario_count)
-    volume_columns[2].metric("Test cases", metrics.test_case_count)
-    volume_columns[3].metric(token_label, f"{token_value:,}")
-
-    st.markdown("#### Quality and traceability")
-    st.table(
-        [
-            {"Measure": "Citation coverage", "Result": f"{metrics.citation_coverage:.0%}"},
-            {
-                "Measure": "Requirement → scenario",
-                "Result": f"{metrics.requirement_scenario_coverage:.0%}",
-            },
-            {
-                "Measure": "Requirement → test case",
-                "Result": f"{metrics.requirement_test_case_coverage:.0%}",
-            },
-            {
-                "Measure": "Positive scenario coverage",
-                "Result": f"{metrics.positive_scenario_coverage:.0%}",
-            },
-            {
-                "Measure": "Non-positive scenario coverage",
-                "Result": f"{metrics.non_positive_scenario_coverage:.0%}",
-            },
-            {"Measure": "RTM completeness", "Result": f"{metrics.rtm_completeness:.0%}"},
-        ]
-    )
-    st.caption(f"Latency {metrics.latency_seconds:.2f} s · {metrics.retries} retries")
-
-    with st.expander("Artifacts and downloads"):
-        bundle_columns = st.columns(2)
-        with bundle_columns[0]:
+    elif result.bundle is not None:
+        download_columns = st.columns(2)
+        with download_columns[0]:
             _download(
-                "Traceability matrix",
+                "Download traceability matrix",
                 [item.model_dump(mode="json") for item in result.rtm],
-                f"{condition.value}-rtm.json",
-                f"{condition.value}-rtm",
+                f"{manifest.run_id}-rtm.json",
+                f"{key_prefix}-{manifest.run_id}-rtm",
             )
-        with bundle_columns[1]:
+        with download_columns[1]:
             _download(
-                "Complete condition bundle",
+                "Download complete bundle",
                 result.download_bundle(),
-                f"{condition.value}-bundle.json",
-                f"{condition.value}-bundle",
+                f"{manifest.run_id}-bundle.json",
+                f"{key_prefix}-{manifest.run_id}-bundle",
             )
 
-
-def _render_result(result: ComparisonResult) -> None:
-    label, state = _result_status(result)
-    with st.status(label, state=state, expanded=False):
-        st.write("The comparison run has finished. Review the summary and condition details below.")
-    st.caption(
-        f"{result.manifest.provider.title()} · {result.manifest.model} · "
-        f"Run {result.manifest.comparison_id}"
-    )
-    if result.failure_category:
-        category = _failure_name(result.failure_category)
-        st.error(
-            f"**{category}.** "
-            + _failure_guidance(
-                result.failure_category,
-                result.failure_message,
-                provider=result.manifest.provider,
-            )
-        )
-        with st.expander("Technical details"):
-            st.code(_technical_detail(result.failure_message), language=None)
-        return
-
-    failed = _failed_count(result)
-    total = len(result.manifest.condition_order)
-    if failed == total:
-        first = next(iter(result.conditions.values()), None)
-        category = first.manifest.failure_category if first else None
-        message = first.manifest.failure_message if first else None
-        st.error(
-            f"**All {total} conditions failed.** "
-            + _failure_guidance(
-                category,
-                message,
-                provider=result.manifest.provider,
-            )
-        )
-    elif failed:
-        noun = "condition" if failed == 1 else "conditions"
-        st.warning(
-            f"{total - failed} of {total} conditions completed; "
-            f"{failed} {noun} failed. Successful artifacts remain available."
-        )
-    else:
-        st.success(f"All {total} conditions completed and passed validation.")
-
-    st.markdown("### At a glance")
-    st.dataframe(
-        _summary_rows(result),
-        hide_index=True,
-        width="stretch",
-    )
-
-    tabs = st.tabs(
-        [_condition_label(condition) for condition in result.manifest.condition_order]
-    )
-    for tab, condition in zip(
-        tabs, result.manifest.condition_order, strict=True
-    ):
-        with tab:
-            condition_result = result.conditions.get(condition)
-            if condition_result is None:
-                st.error("No result was returned for this condition.")
-            else:
-                _render_condition(condition_result)
+    if result.bundle is not None:
+        _render_bundle(result)
 
 
 def _render_empty_state() -> None:
     st.markdown("### No results yet")
     st.caption("Complete the configuration and run steps to populate this workspace.")
-    st.markdown("#### What this comparison produces")
-    columns = st.columns(3)
-    for column, condition in zip(columns, Condition, strict=True):
-        label, description = CONDITION_COPY[condition]
-        with column:
-            with st.container(border=True):
-                st.markdown(f"#### {label}")
-                st.caption(description)
     st.info(
-        "Upload one text-extractable PDF, confirm the provider, and run the fixed three-condition protocol."
+        "Upload one text-extractable PDF, choose one run type, and generate detailed test cases."
     )
 
 
@@ -664,18 +626,18 @@ def main() -> None:
     st.markdown(
         """
         <section class="research-hero">
-            <p class="research-eyebrow">Evidence-led generation study</p>
-            <h1>Compare test-case generation strategies with one controlled run.</h1>
+            <p class="research-eyebrow">Traceable test-case generation</p>
+            <h1>Generate detailed test cases from one controlled run.</h1>
             <p>
                 Turn a text-extractable BRD or SRS into requirements, scenarios,
-                test cases, and a traceability matrix—then compare three fixed
-                generation conditions side by side.
+                test cases, and a traceability matrix with the generation strategy
+                that fits this run.
             </p>
-            <div class="protocol-strip" aria-label="Fixed comparison protocol">
-                <span>3 fixed conditions</span>
+            <div class="protocol-strip" aria-label="Generation protocol">
+                <span>1 selected run type</span>
                 <span>Temperature 0</span>
                 <span>Traceability validation</span>
-                <span>Isolated failures</span>
+                <span>Detailed artifacts</span>
             </div>
         </section>
         """,
@@ -692,18 +654,18 @@ def main() -> None:
     ):
         st.session_state["model"] = _default_model(current_provider)
 
-    existing_result = st.session_state.get("comparison_result")
+    existing_result = st.session_state.get("run_result")
     step_labels = ["1 · Configure", "2 · Run", "3 · Results"]
     configure_tab, run_tab, results_tab = st.tabs(
         step_labels,
         default=(
             step_labels[2]
-            if isinstance(existing_result, ComparisonResult)
+            if isinstance(existing_result, RunResult)
             else step_labels[0]
         ),
         key=(
             "workflow_steps_with_result"
-            if isinstance(existing_result, ComparisonResult)
+            if isinstance(existing_result, RunResult)
             else "workflow_steps_empty"
         ),
     )
@@ -791,7 +753,7 @@ def main() -> None:
                         help=(
                             "OpenAI-compatible base URL, including /v1."
                             if provider == "lm_studio"
-                            else "Start Ollama locally before running the comparison."
+                            else "Start Ollama locally before generating test cases."
                         ),
                         on_change=(
                             _clear_lm_studio_models
@@ -815,16 +777,26 @@ def main() -> None:
 
             with st.expander("Advanced run controls"):
                 token_ceiling = st.number_input(
-                    "Token ceiling per condition",
+                    "Token ceiling",
                     min_value=1000,
                     value=200_000,
                     step=1000,
                     key="token_ceiling",
-                    help="The same ceiling is enforced independently for all three conditions.",
+                    help="Maximum provider tokens charged to this run.",
                 )
-                st.caption(
-                    "Temperature is fixed at 0. The centralized condition uses three workers."
-                )
+                st.caption("Temperature is fixed at 0 for reproducible output.")
+
+            run_type = st.selectbox(
+                "Run type",
+                list(RunType),
+                key="run_type",
+                format_func=_run_type_label,
+                help=(
+                    "Choose one generation strategy for this run. "
+                    "Only the selected strategy executes."
+                ),
+            )
+            st.caption(RUN_TYPE_COPY[run_type][1])
 
     with run_tab:
         with st.container(border=True):
@@ -833,8 +805,8 @@ def main() -> None:
                 <div class="step-heading">
                     <span class="step-index" aria-hidden="true">2</span>
                     <div>
-                        <h2>Add the source and run the protocol</h2>
-                        <p>Upload one text-extractable BRD or SRS, then start all three controlled conditions.</p>
+                        <h2>Add the source and generate</h2>
+                        <p>Upload one text-extractable BRD or SRS, then run the selected strategy.</p>
                     </div>
                 </div>
                 """,
@@ -855,30 +827,32 @@ def main() -> None:
 
             with protocol_column:
                 with st.container(border=True):
-                    st.markdown("#### Fixed protocol")
-                    st.markdown(
-                        "Single prompt  \n"
-                        "Staged single agent  \n"
-                        "Centralized multi-agent"
-                    )
+                    st.markdown("#### Selected run")
+                    st.markdown(f"**{_run_type_label(run_type)}**")
+                    st.caption(RUN_TYPE_COPY[run_type][1])
                     st.caption(
                         f"{_provider_label(provider)} · {model} · "
-                        f"{token_ceiling:,} tokens per condition"
+                        f"{token_ceiling:,} token ceiling"
                     )
 
             run_clicked = st.button(
-                "Run comparison",
+                "Generate test cases",
                 type="primary",
                 key="run",
                 width="stretch",
             )
 
         if run_clicked:
-            st.session_state.pop("comparison_result", None)
+            st.session_state.pop("run_result", None)
             if uploaded is None:
-                st.error("Upload one text-extractable PDF before running the comparison.")
+                st.error("Upload one text-extractable PDF before generating test cases.")
             elif provider == "gemini" and not api_key.strip():
-                st.error("Enter a Gemini API key before running the comparison.")
+                st.error("Enter a Gemini API key before generating test cases.")
+            elif st.session_state.get("_repository") is None:
+                st.error(
+                    "Run history database is unavailable. Start local PostgreSQL "
+                    "and refresh this page before generating test cases."
+                )
             else:
                 settings = ProviderSettings(
                     provider=provider,
@@ -889,17 +863,21 @@ def main() -> None:
                 )
                 try:
                     settings.validate()
-                    with st.status("Preparing comparison", expanded=True) as status:
+                    with st.status("Preparing generation", expanded=True) as status:
 
-                        def progress(condition: Condition | None, message: str) -> None:
-                            name = _condition_label(condition) if condition else "Document"
-                            status.write(f"**{name}** — {message}")
+                        def progress(message: str) -> None:
+                            status.write(message)
 
-                        runner = st.session_state.get("_runner", run_comparison)
+                        runner = st.session_state.get("_runner", run_generation)
                         result = runner(
-                            uploaded.getvalue(), settings, progress=progress
+                            uploaded.getvalue(),
+                            uploaded.name,
+                            run_type,
+                            settings,
+                            repository=st.session_state["_repository"],
+                            progress=progress,
                         )
-                        st.session_state["comparison_result"] = result
+                        st.session_state["run_result"] = result
                         label, state = _result_status(result)
                         status.update(
                             label=label,
@@ -908,7 +886,7 @@ def main() -> None:
                         )
                     st.rerun()
                 except Exception as error:
-                    st.error(f"Comparison failed: {_safe_error(error, settings)}")
+                    st.error(f"Generation failed: {_safe_error(error, settings)}")
 
     with results_tab:
         with st.container(border=True):
@@ -917,25 +895,26 @@ def main() -> None:
                 <div class="step-heading">
                     <span class="step-index" aria-hidden="true">3</span>
                     <div>
-                        <h2>Review quality and export artifacts</h2>
-                        <p>Compare output volume, traceability, cost, and failures before downloading evidence.</p>
+                        <h2>Review and export generated artifacts</h2>
+                        <p>Inspect requirements, scenarios, test cases, traceability, and run diagnostics.</p>
                     </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            result = st.session_state.get("comparison_result")
-            if isinstance(result, ComparisonResult):
+            result = st.session_state.get("run_result")
+            if isinstance(result, RunResult):
                 if (
                     result.manifest.provider != provider
                     or result.manifest.model != model
                     or result.manifest.token_ceiling != token_ceiling
+                    or result.manifest.run_type != run_type
                 ):
                     st.info(
                         "The setup has changed since this result was created. "
-                        "Run the comparison again to refresh it."
+                        "Generate again to refresh it."
                     )
-                _render_result(result)
+                _render_result(result, key_prefix="current")
             else:
                 _render_empty_state()
 
