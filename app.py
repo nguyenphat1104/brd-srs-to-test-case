@@ -7,9 +7,16 @@ from typing import Any
 
 import streamlit as st
 
-from brd_srs_testgen.models import FailureCategory, RunResult, RunStatus, RunType
+from brd_srs_testgen.models import (
+    FailureCategory,
+    RunHistoryItem,
+    RunResult,
+    RunStatus,
+    RunType,
+)
 from brd_srs_testgen.providers import list_lm_studio_models
 from brd_srs_testgen.runner import ProviderSettings, run_generation
+from brd_srs_testgen.storage import RunRepository, StorageError
 
 
 GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
@@ -51,6 +58,23 @@ def _env(name: str) -> str:
         (line[len(prefix) :].strip().strip("'\"") for line in lines if line.startswith(prefix)),
         "",
     )
+
+
+@st.cache_resource
+def _cached_repository(database_url: str) -> RunRepository:
+    repository = RunRepository(database_url)
+    repository.initialize()
+    return repository
+
+
+def _resolve_repository() -> RunRepository:
+    injected = st.session_state.get("_repository")
+    if injected is not None:
+        if st.session_state.get("_initialized_repository") is not injected:
+            injected.initialize()
+            st.session_state["_initialized_repository"] = injected
+        return injected
+    return _cached_repository(_env("DATABASE_URL"))
 
 
 def _apply_theme() -> None:
@@ -437,15 +461,18 @@ def _render_sources(sources) -> None:
         st.markdown(f"- `{source.chunk_id}` · {location} — {source.excerpt}")
 
 
-def _render_bundle(result: RunResult) -> None:
+def _render_bundle(result: RunResult, *, key_prefix: str) -> None:
     bundle = result.bundle
     if bundle is None:
         return
 
     st.markdown("### Generated artifacts")
     st.markdown("#### Requirements")
-    for requirement in bundle.requirements:
-        with st.expander(f"{requirement.requirement_id} · {requirement.title}"):
+    for position, requirement in enumerate(bundle.requirements):
+        with st.expander(
+            f"{requirement.requirement_id} · {requirement.title}",
+            key=f"{key_prefix}-{result.manifest.run_id}-requirement-{position}",
+        ):
             st.markdown(requirement.description)
             st.markdown(
                 f"**Type:** {requirement.requirement_type.value.replace('_', ' ').title()}  \n"
@@ -464,8 +491,11 @@ def _render_bundle(result: RunResult) -> None:
             _render_sources(requirement.source_references)
 
     st.markdown("#### Scenarios")
-    for scenario in bundle.scenarios:
-        with st.expander(f"{scenario.scenario_id} · {scenario.title}"):
+    for position, scenario in enumerate(bundle.scenarios):
+        with st.expander(
+            f"{scenario.scenario_id} · {scenario.title}",
+            key=f"{key_prefix}-{result.manifest.run_id}-scenario-{position}",
+        ):
             st.markdown(scenario.objective)
             st.markdown(
                 f"**Type:** {scenario.scenario_type.value.replace('_', ' ').title()}  \n"
@@ -478,8 +508,11 @@ def _render_bundle(result: RunResult) -> None:
             _render_sources(scenario.source_references)
 
     st.markdown("#### Test cases")
-    for test_case in bundle.test_cases:
-        with st.expander(f"{test_case.test_case_id} · {test_case.title}"):
+    for position, test_case in enumerate(bundle.test_cases):
+        with st.expander(
+            f"{test_case.test_case_id} · {test_case.title}",
+            key=f"{key_prefix}-{result.manifest.run_id}-test-case-{position}",
+        ):
             st.markdown(
                 f"**Priority:** {test_case.priority.value}  \n"
                 f"**Scenario ID:** {test_case.scenario_id}  \n"
@@ -530,7 +563,10 @@ def _render_result(result: RunResult, *, key_prefix: str = "result") -> None:
                 provider=manifest.provider,
             )
         )
-        with st.expander("Technical details"):
+        with st.expander(
+            "Technical details",
+            key=f"{key_prefix}-{manifest.run_id}-technical-details",
+        ):
             st.code(_technical_detail(manifest.failure_message), language=None)
     elif manifest.status is RunStatus.COMPLETED:
         st.success("Completed and validated")
@@ -545,7 +581,10 @@ def _render_result(result: RunResult, *, key_prefix: str = "result") -> None:
         columns[1].metric("Scenarios", metrics.scenario_count)
         columns[2].metric("Test cases", metrics.test_case_count)
         columns[3].metric(token_label, f"{token_value:,}")
-        with st.expander("Quality and traceability"):
+        with st.expander(
+            "Quality and traceability",
+            key=f"{key_prefix}-{manifest.run_id}-quality",
+        ):
             st.table(
                 [
                     {
@@ -604,7 +643,7 @@ def _render_result(result: RunResult, *, key_prefix: str = "result") -> None:
             )
 
     if result.bundle is not None:
-        _render_bundle(result)
+        _render_bundle(result, key_prefix=key_prefix)
 
 
 def _render_empty_state() -> None:
@@ -613,6 +652,70 @@ def _render_empty_state() -> None:
     st.info(
         "Upload one text-extractable PDF, choose one run type, and generate detailed test cases."
     )
+
+
+def _history_label(item: RunHistoryItem) -> str:
+    started = item.started_at.strftime("%Y-%m-%d %H:%M %Z")
+    return (
+        f"{started} · {item.source_filename} · {_run_type_label(item.run_type)} "
+        f"· {item.run_id[-8:]}"
+    )
+
+
+def _render_history(repository: RunRepository) -> None:
+    try:
+        runs = repository.list_runs()
+    except StorageError:
+        st.error(
+            "Saved run history is unavailable. Check PostgreSQL and DATABASE_URL, "
+            "then refresh this page."
+        )
+        return
+    if not runs:
+        st.info("No saved runs yet.")
+        return
+
+    st.table(
+        [
+            {
+                "Started": item.started_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
+                "Source": item.source_filename,
+                "Run type": _run_type_label(item.run_type),
+                "Provider": _provider_label(item.provider),
+                "Model": item.model,
+                "Status": item.display_status,
+                "Requirements": str(item.requirement_count)
+                if item.requirement_count is not None
+                else "—",
+                "Scenarios": str(item.scenario_count)
+                if item.scenario_count is not None
+                else "—",
+                "Test cases": str(item.test_case_count)
+                if item.test_case_count is not None
+                else "—",
+            }
+            for item in runs
+        ]
+    )
+    selected = st.selectbox(
+        "Open saved run",
+        runs,
+        index=None,
+        format_func=_history_label,
+        key="history_run_id",
+        placeholder="Select a saved run",
+    )
+    if selected is None:
+        return
+    try:
+        result = repository.load_run(selected.run_id)
+    except StorageError:
+        st.error(
+            "Saved run could not be opened. Check PostgreSQL and DATABASE_URL, "
+            "then try again."
+        )
+        return
+    _render_result(result, key_prefix="history")
 
 
 def main() -> None:
@@ -644,6 +747,15 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    try:
+        repository = _resolve_repository()
+    except StorageError:
+        st.error(
+            "Run history database is unavailable. Start it with "
+            "`docker compose up -d db`, verify DATABASE_URL, and refresh this page."
+        )
+        st.stop()
+
     current_provider = st.session_state.get("provider", "gemini")
     if (
         "model" not in st.session_state
@@ -655,8 +767,8 @@ def main() -> None:
         st.session_state["model"] = _default_model(current_provider)
 
     existing_result = st.session_state.get("run_result")
-    step_labels = ["1 · Configure", "2 · Run", "3 · Results"]
-    configure_tab, run_tab, results_tab = st.tabs(
+    step_labels = ["1 · Configure", "2 · Run", "3 · Results", "4 · Run history"]
+    configure_tab, run_tab, results_tab, history_tab = st.tabs(
         step_labels,
         default=(
             step_labels[2]
@@ -848,11 +960,6 @@ def main() -> None:
                 st.error("Upload one text-extractable PDF before generating test cases.")
             elif provider == "gemini" and not api_key.strip():
                 st.error("Enter a Gemini API key before generating test cases.")
-            elif st.session_state.get("_repository") is None:
-                st.error(
-                    "Run history database is unavailable. Start local PostgreSQL "
-                    "and refresh this page before generating test cases."
-                )
             else:
                 settings = ProviderSettings(
                     provider=provider,
@@ -874,7 +981,7 @@ def main() -> None:
                             uploaded.name,
                             run_type,
                             settings,
-                            repository=st.session_state["_repository"],
+                            repository=repository,
                             progress=progress,
                         )
                         st.session_state["run_result"] = result
@@ -917,6 +1024,22 @@ def main() -> None:
                 _render_result(result, key_prefix="current")
             else:
                 _render_empty_state()
+
+    with history_tab:
+        with st.container(border=True):
+            st.markdown(
+                """
+                <div class="step-heading">
+                    <span class="step-index" aria-hidden="true">4</span>
+                    <div>
+                        <h2>Browse saved runs</h2>
+                        <p>Compare persisted run settings and open complete generated artifacts.</p>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            _render_history(repository)
 
 
 main()
