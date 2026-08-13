@@ -718,7 +718,9 @@ def _settings_dialog() -> None:
         key="settings_token_ceiling",
     )
     st.warning(
-        "Credentials are stored in this browser's local storage. Use a trusted device."
+        "Credentials are stored in this browser's local storage. "
+        "Scripts running on the same app origin can read stored credentials. "
+        "Use a dedicated browser profile and do not save credentials on a shared machine."
     )
     save_column, cancel_column = st.columns(2)
     save = save_column.button("Save settings", type="primary", width="stretch")

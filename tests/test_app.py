@@ -317,6 +317,10 @@ def test_settings_save_is_explicit_and_activates_after_storage_confirms() -> Non
 
     _element(at.button, "Settings").click()
     at.run()
+    assert (
+        "Scripts running on the same app origin can read stored credentials."
+        in _rendered_text(at)
+    )
     _element(at.text_input, "Model").set_value("gemini-cancelled")
     at.run()
     assert browser.saved == []
