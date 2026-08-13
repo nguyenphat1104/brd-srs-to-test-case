@@ -26,12 +26,14 @@ class FakeRepository:
         self,
         *,
         runs: list[RunHistoryItem] | None = None,
+        run_batches: list[list[RunHistoryItem]] | None = None,
         results: dict[str, RunResult] | None = None,
         initialize_error: StorageError | None = None,
         list_error: StorageError | None = None,
         load_error: StorageError | None = None,
     ) -> None:
         self.runs = runs or []
+        self.run_batches = run_batches
         self.results = results or {}
         self.initialize_error = initialize_error
         self.list_error = list_error
@@ -49,6 +51,10 @@ class FakeRepository:
         self.list_calls += 1
         if self.list_error:
             raise self.list_error
+        if self.run_batches:
+            return self.run_batches[
+                min(self.list_calls - 1, len(self.run_batches) - 1)
+            ]
         return self.runs
 
     def load_run(self, run_id: str) -> RunResult:
@@ -63,11 +69,17 @@ class FakeRepository:
 
 class FakeBrowserSettings:
     def __init__(
-        self, payload=None, error=None, *, confirm_saves: bool = True
+        self,
+        payload=None,
+        error=None,
+        *,
+        confirm_saves: bool = True,
+        loaded: bool = True,
     ) -> None:
         self.payload = payload
         self.error = error
         self.confirm_saves = confirm_saves
+        self.loaded = loaded
         self.pending = None
         self.saved: list[dict[str, object]] = []
 
@@ -88,7 +100,7 @@ class FakeBrowserSettings:
         return BrowserSettingsResult(
             self.payload,
             self.error,
-            loaded=True,
+            loaded=self.loaded,
             revision=revision,
         )
 
@@ -338,12 +350,38 @@ def test_settings_wait_for_matching_browser_confirmation() -> None:
 
     assert at.session_state["app_settings"].model == "gemini-3.6-flash"
     assert at.session_state["settings_save_request"]["model"] == "gemini-3.6-pro"
+    _element(at.button, "Create new run").click()
+    at.run()
+
+    assert at.session_state["view"] == "runs"
+    assert "Saving browser settings…" in _rendered_text(at)
 
     browser.confirm_saves = True
     at.run()
 
     assert at.session_state["app_settings"].model == "gemini-3.6-pro"
     assert "settings_save_request" not in at.session_state
+    _element(at.button, "Create new run").click()
+    at.run()
+    assert at.session_state["view"] == "create"
+
+
+def test_create_waits_for_initial_browser_settings_load() -> None:
+    browser = FakeBrowserSettings(_saved_settings(), loaded=False)
+    at = _app_test(browser=browser)
+    at.run()
+
+    _element(at.button, "Create new run").click()
+    at.run()
+
+    assert at.session_state["view"] == "runs"
+    assert "Browser settings are still loading." in _rendered_text(at)
+
+    browser.loaded = True
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    assert at.session_state["view"] == "create"
 
 
 def test_ollama_settings_use_local_defaults() -> None:
@@ -466,6 +504,34 @@ def test_selecting_a_run_loads_detail_once_and_back_returns_home() -> None:
     _element(at.button, "Back to runs").click()
     at.run()
     assert at.session_state["view"] == "runs"
+
+
+def test_selecting_a_run_uses_the_displayed_row_snapshot() -> None:
+    intended = completed_run(
+        run_id="20260812T120000000000Z-ecac9f035813-aaaaaaaa"
+    )
+    newer = completed_run(
+        run_id="20260812T120000000000Z-ecac9f035813-cccccccc"
+    )
+    repository = FakeRepository(
+        run_batches=[
+            [_history_item(intended)],
+            [_history_item(newer), _history_item(intended)],
+        ],
+        results={
+            intended.manifest.run_id: intended,
+            newer.manifest.run_id: newer,
+        },
+    )
+    at = _app_test(repository)
+    at.run()
+
+    at.session_state["runs-table"] = {"selection": {"rows": [0]}}
+    at.run()
+
+    assert repository.list_calls == 1
+    assert repository.load_calls == [intended.manifest.run_id]
+    assert at.session_state["selected_run_id"] == intended.manifest.run_id
 
 
 def test_browser_storage_error_warns_without_blocking_history() -> None:

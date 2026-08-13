@@ -91,14 +91,11 @@ def _apply_theme() -> None:
         """
         <style>
         :root {
-            --color-primary: #1e293b;
-            --color-on-primary: #ffffff;
             --color-accent: #2563eb;
             --color-background: #f8fafc;
             --color-surface: #ffffff;
             --color-foreground: #0f172a;
             --color-muted: #475569;
-            --color-soft: #eff6ff;
             --color-border: #dbe3ee;
             --color-focus: #1d4ed8;
         }
@@ -557,7 +554,10 @@ def _sync_app_settings() -> None:
     revision = st.session_state.get("settings_revision", 0)
     pending = st.session_state.get("settings_save_request")
     result = sync_browser_settings(save=pending, revision=revision)
-    if not result.loaded or result.revision != revision:
+    st.session_state["browser_settings_loaded"] = (
+        result.loaded and result.revision == revision
+    )
+    if not st.session_state["browser_settings_loaded"]:
         return
     if st.session_state.get("settings_loaded") and pending is None:
         return
@@ -706,6 +706,7 @@ def _go_home() -> None:
     st.session_state.pop("selected_run_id", None)
     st.session_state.pop("selected_run", None)
     st.session_state.pop("runs-table", None)
+    st.session_state.pop("displayed_run_ids", None)
 
 
 def _render_top_nav() -> None:
@@ -715,13 +716,30 @@ def _render_top_nav() -> None:
 
 
 def _request_create() -> None:
-    if _settings_are_ready():
+    if st.session_state.get("settings_save_request") is not None:
+        st.session_state["runs_notice"] = "Saving browser settings…"
+    elif not st.session_state.get("browser_settings_loaded"):
+        st.session_state["runs_notice"] = "Browser settings are still loading."
+    elif _settings_are_ready():
         st.session_state["view"] = "create"
     else:
         _open_settings("create")
 
 
 def _render_runs(repository: RunRepository) -> None:
+    selection = st.session_state.get("runs-table", {})
+    selected_rows = (
+        selection.get("selection", {}).get("rows", [])
+        if hasattr(selection, "get")
+        else []
+    )
+    displayed_run_ids = st.session_state.get("displayed_run_ids", [])
+    if selected_rows and 0 <= selected_rows[0] < len(displayed_run_ids):
+        st.session_state["selected_run_id"] = displayed_run_ids[selected_rows[0]]
+        st.session_state.pop("selected_run", None)
+        st.session_state["view"] = "detail"
+        st.rerun()
+
     st.title("Runs")
     st.caption("Create a run or open a saved result.")
     st.button(
@@ -729,18 +747,23 @@ def _render_runs(repository: RunRepository) -> None:
         type="primary",
         on_click=_request_create,
     )
+    if notice := st.session_state.pop("runs_notice", None):
+        st.info(notice)
     try:
         runs = repository.list_runs()
     except StorageError:
+        st.session_state.pop("displayed_run_ids", None)
         st.error(
             "Saved run history is unavailable. Check PostgreSQL and DATABASE_URL, "
             "then refresh this page."
         )
         return
     if not runs:
+        st.session_state.pop("displayed_run_ids", None)
         st.info("No saved runs yet.")
         return
 
+    st.session_state["displayed_run_ids"] = [item.run_id for item in runs]
     rows = [
         {
             "Started": item.started_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
@@ -755,13 +778,7 @@ def _render_runs(repository: RunRepository) -> None:
         }
         for item in runs
     ]
-    preset = st.session_state.get("runs-table", {})
-    selected_rows = (
-        preset.get("selection", {}).get("rows", [])
-        if hasattr(preset, "get")
-        else []
-    )
-    event = st.dataframe(
+    st.dataframe(
         rows,
         hide_index=True,
         width="stretch",
@@ -769,17 +786,6 @@ def _render_runs(repository: RunRepository) -> None:
         on_select="rerun",
         key="runs-table",
     )
-    if event.selection.rows:
-        selected_rows = event.selection.rows
-    if not selected_rows:
-        return
-    row = selected_rows[0]
-    if not 0 <= row < len(runs):
-        return
-    st.session_state["selected_run_id"] = runs[row].run_id
-    st.session_state.pop("selected_run", None)
-    st.session_state["view"] = "detail"
-    st.rerun()
 
 
 def _render_create() -> None:
