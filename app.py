@@ -555,7 +555,7 @@ def _sync_app_settings() -> None:
     fallback = _fallback_settings()
     st.session_state.setdefault("app_settings", fallback)
     revision = st.session_state.get("settings_revision", 0)
-    pending = st.session_state.get("settings_pending_save")
+    pending = st.session_state.get("settings_save_request")
     result = sync_browser_settings(save=pending, revision=revision)
     if not result.loaded or result.revision != revision:
         return
@@ -568,7 +568,7 @@ def _sync_app_settings() -> None:
             "Browser settings storage is unavailable. Using app defaults for this session.",
         )
         st.session_state["settings_loaded"] = True
-        st.session_state.pop("settings_pending_save", None)
+        st.session_state.pop("settings_save_request", None)
         st.session_state.pop("settings_after_persist", None)
         return
 
@@ -587,7 +587,7 @@ def _sync_app_settings() -> None:
         ):
             st.session_state["view"] = destination
     st.session_state["settings_loaded"] = True
-    st.session_state.pop("settings_pending_save", None)
+    st.session_state.pop("settings_save_request", None)
     st.session_state.pop("settings_after_persist", None)
 
 
@@ -696,7 +696,7 @@ def _settings_dialog() -> None:
     st.session_state["settings_revision"] = (
         st.session_state.get("settings_revision", 0) + 1
     )
-    st.session_state["settings_pending_save"] = settings.model_dump(mode="json")
+    st.session_state["settings_save_request"] = settings.model_dump(mode="json")
     st.session_state["show_settings"] = False
     st.rerun()
 

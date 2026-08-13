@@ -62,15 +62,29 @@ class FakeRepository:
 
 
 class FakeBrowserSettings:
-    def __init__(self, payload=None, error=None) -> None:
+    def __init__(
+        self, payload=None, error=None, *, confirm_saves: bool = True
+    ) -> None:
         self.payload = payload
         self.error = error
+        self.confirm_saves = confirm_saves
+        self.pending = None
         self.saved: list[dict[str, object]] = []
 
     def __call__(self, *, save, revision) -> BrowserSettingsResult:
         if save is not None:
-            self.payload = save
-            self.saved.append(save)
+            if save != self.pending:
+                self.saved.append(save)
+            self.pending = save
+            if not self.confirm_saves:
+                return BrowserSettingsResult(
+                    self.payload,
+                    self.error,
+                    loaded=True,
+                    revision=revision - 1,
+                )
+            self.payload = self.pending
+            self.pending = None
         return BrowserSettingsResult(
             self.payload,
             self.error,
@@ -311,6 +325,42 @@ def test_settings_save_is_explicit_and_activates_after_storage_confirms() -> Non
     assert at.session_state["app_settings"].model == "gemini-saved"
 
 
+def test_settings_wait_for_matching_browser_confirmation() -> None:
+    browser = FakeBrowserSettings(_saved_settings(), confirm_saves=False)
+    at = _app_test(browser=browser)
+    at.run()
+    _element(at.button, "Settings").click()
+    at.run()
+    _element(at.text_input, "Model").set_value("gemini-3.6-pro")
+    at.run()
+    _element(at.button, "Save").click()
+    at.run()
+
+    assert at.session_state["app_settings"].model == "gemini-3.6-flash"
+    assert at.session_state["settings_save_request"]["model"] == "gemini-3.6-pro"
+
+    browser.confirm_saves = True
+    at.run()
+
+    assert at.session_state["app_settings"].model == "gemini-3.6-pro"
+    assert "settings_save_request" not in at.session_state
+
+
+def test_ollama_settings_use_local_defaults() -> None:
+    at = _app_test()
+    at.run()
+    _element(at.button, "Settings").click()
+    at.run()
+
+    _element(at.selectbox, "Provider").set_value("ollama")
+    at.run()
+
+    assert _element(at.text_input, "Model").value == "gemma4"
+    assert _element(at.text_input, "Ollama base URL").value == (
+        "http://localhost:11434"
+    )
+
+
 def test_lm_studio_settings_retain_current_controls(monkeypatch) -> None:
     monkeypatch.setenv("LM_STUDIO_API_TOKEN", "lm-studio-from-env")
     monkeypatch.setenv("LM_STUDIO_BASE_URL", "http://lm-studio:1234/v1")
@@ -501,6 +551,12 @@ def test_renders_detailed_artifact_content_and_downloads() -> None:
     assert not at.exception
     text = _rendered_text(at)
     for expected in (
+        "Staged single agent",
+        "Ollama",
+        "gemma4",
+        "sample.pdf",
+        "Temperature 0",
+        "Token ceiling 100,000",
         "REQ-001 · Authenticate users",
         "Registered customers can securely sign in.",
         "Functional",
@@ -529,6 +585,7 @@ def test_renders_detailed_artifact_content_and_downloads() -> None:
         f"detail-{result.manifest.run_id}-bundle",
     }
     assert _element(at.metric, "Charged tokens").value == "30"
+    assert "Latency 0.10 s · 0 retries" in text
     assert "Positive scenario coverage" in tables
     assert "Non-positive scenario coverage" in tables
 
