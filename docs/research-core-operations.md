@@ -24,19 +24,19 @@ PostgreSQL data remains in the Compose-managed `postgres_data` named volume.
 
 ## Generate and reopen a run
 
-1. Configure a provider, model, credentials, and token ceiling.
-2. Select exactly one run type: `single_prompt`, `staged_single_agent`, or `centralized_multi_agent`.
-3. Upload one text-extractable BRD/SRS PDF and click **Generate test cases**. Only the selected run type executes.
-4. Review the full requirements, scenarios, test cases, steps, expected results, test data, citations, metrics, and downloads in **Results**. Validation details are included in the diagnostics or complete-bundle download.
-5. Open **Run history** to reopen completed or failed runs. A running record left by a stopped process is displayed as **Interrupted** and can also be reopened for its available diagnostics.
+1. Open **Settings** to set the provider, model, applicable credential, base URL, and token ceiling, then explicitly select **Save settings**.
+2. From **Runs**, select **Create new run**.
+3. Select exactly one run type: `single_prompt`, `staged_single_agent`, or `centralized_multi_agent`; upload one text-extractable BRD/SRS PDF; then select **Generate**. Only the chosen type executes.
+4. A completed or failed run opens automatically. Review its test cases first, then supporting requirements and scenarios, metrics, downloads, diagnostics, and immutable configuration snapshot.
+5. Use **Back to runs** and select a row to reopen it. A running record left by a stopped process displays as **Interrupted**.
 
-Each click creates a new run. Correct a problem and generate again rather than modifying a saved run.
+Each **Generate** creates an immutable run. Correct a problem and retry rather than editing a saved run.
 
 ## Persisted data and security boundary
 
-The application stores normalized run data in local PostgreSQL: the source basename and document hash, extracted text chunks, run configuration and lifecycle events, metrics, validation, requirements, scenarios, test cases, citations, and traceability data.
+The application stores normalized safe run data in local PostgreSQL: the source basename and document hash, extracted text chunks, run configuration and lifecycle events, metrics, validation, requirements, scenarios, test cases, citations, and traceability data.
 
-Raw PDF bytes and provider credentials are never stored in PostgreSQL or **Run history**. Credentials configured in `.env` remain in that local disk file; values entered in the UI are transient. Known secrets are redacted from displayed failures. Do not put secrets in the source PDF or in a local-provider URL.
+Raw PDF bytes and provider credentials are never stored in PostgreSQL, downloads, URLs, or run snapshots. **Save settings** stores the active credential in this browser's `localStorage` only when explicitly selected; same-origin scripts can read it. Use a dedicated browser profile and origin, and do not use a shared machine. Known secrets and base URLs are redacted from displayed and persisted failures. Do not put secrets in the source PDF or in a local-provider URL.
 
 The legacy `runs/` directory is ignored and left untouched. There is no import from that filesystem format.
 
@@ -52,13 +52,18 @@ Reported failure categories are parsing, configuration, provider rejection, tran
 
 An unexpected internal exception can leave a running database record. The history UI labels that record **Interrupted** so its saved metadata remains inspectable.
 
-## Live smoke tests (optional)
+## Browser storage smoke test
 
-Use a small, non-sensitive, text-extractable PDF. Select one run type and confirm only that type runs. After generation, verify the detailed result, then reopen the same row from **Run history**.
+1. Start the app and open **Settings**.
+2. Save a non-production credential, model, applicable URL, and token ceiling.
+3. Refresh and confirm the settings are restored.
+4. Create a small run and confirm its dedicated detail page opens.
+5. Confirm the snapshot and downloaded JSON omit the credential and base URL.
+6. Select **Back to Runs**, select the same row, and confirm its test cases reopen.
 
 ### Gemini
 
-Select `gemini`, use a supported model (the current default is `gemini-3.6-flash`), and enter its API key. Generate one selected run and verify its details and downloads.
+In **Settings**, select `gemini`, use a supported model (the current default is `gemini-3.6-flash`), enter its API key, and select **Save settings**. Create one run, then verify its detail page and download.
 
 ### Ollama
 
@@ -74,11 +79,11 @@ In another terminal:
 ollama pull gemma4
 ```
 
-Select `ollama`; the editable defaults are `http://localhost:11434` and `gemma4`. Generate one selected run and verify the result and saved history row. Ollama requests disable thinking output.
+In **Settings**, select `ollama`; the editable defaults are `http://localhost:11434` and `gemma4`. Select **Save settings**, create one run, and verify its detail page and saved **Runs** row. Ollama requests disable thinking output.
 
 ### LM Studio
 
-Start the local server from LM Studio's Developer tab and load a model. Select `LM Studio` and keep the default OpenAI-compatible base URL, `http://localhost:1234/v1`. If authentication is enabled, enter a token created in LM Studio Server Settings. Select **Load available models**, choose the loaded model, generate one selected run, and verify the result and saved history row.
+Start the local server from LM Studio's Developer tab and load a model. In **Settings**, select `LM Studio` and keep the default OpenAI-compatible base URL, `http://localhost:1234/v1`. If authentication is enabled, enter a token created in LM Studio Server Settings. Select **Load available models**, choose the loaded model, select **Save settings**, create one run, and verify its detail page and saved **Runs** row.
 
 ## Offline verification
 
@@ -90,12 +95,12 @@ set -a
 set +a
 env PYTHONPATH=src .venv/bin/python -m pytest -q
 .venv/bin/python -m compileall -q app.py src tests
-env PYTHONPATH=src .venv/bin/python -c "from brd_srs_testgen.runner import run_generation; print('imports ok')"
+env PYTHONPATH=src .venv/bin/python -c "from brd_srs_testgen.browser_settings import AppSettings; from brd_srs_testgen.runner import run_generation; print('imports ok')"
 git diff --check
 git status --short
 ```
 
-The full gate requires all tests to pass and the PostgreSQL storage suite to run with no skips. Compilation must exit successfully, the import check must print `imports ok`, `git diff --check` must be empty, and status must contain only the intended changes before commit.
+The full gate requires all tests to pass and the PostgreSQL storage suite to run with no skips. Compilation must exit successfully, the import check must print `imports ok`, `git diff --check` must be empty, and status must contain only the intended changes before commit. The browser storage smoke test above is manual; it is not an automated verification.
 
 ## First-slice limits
 

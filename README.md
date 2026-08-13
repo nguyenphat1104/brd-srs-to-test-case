@@ -16,7 +16,7 @@ uv pip install --python .venv/bin/python -r requirements.txt
 env PYTHONPATH=src .venv/bin/python -m streamlit run app.py
 ```
 
-Each **Generate test cases** click executes only the selected one of three run types. Results persist in the local PostgreSQL database and can be reopened from **Run history**.
+The home page lists PostgreSQL-backed runs newest first. Use **Settings** to save provider defaults in this browser, then choose **Create new run** to upload one PDF and execute exactly one generation type. Selecting a saved row opens its detailed test cases and immutable configuration snapshot.
 
 ## Existing prototypes
 
