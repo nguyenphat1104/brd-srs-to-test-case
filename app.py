@@ -811,6 +811,12 @@ def _render_create(repository: RunRepository, settings: AppSettings) -> None:
         f"{settings.token_ceiling:,} token ceiling"
     )
     st.button("Edit settings", on_click=_open_settings, args=("create",))
+    if st.session_state.get("settings_save_request") is not None:
+        st.info("Saving browser settings…")
+        return
+    if not st.session_state.get("browser_settings_loaded"):
+        st.info("Browser settings are still loading.")
+        return
     if not st.button(
         "Generate test cases",
         type="primary",

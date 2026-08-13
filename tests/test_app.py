@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from brd_srs_testgen.browser_settings import AppSettings, BrowserSettingsResult
@@ -755,8 +756,20 @@ def test_create_runs_one_selected_type_and_opens_returned_detail() -> None:
     assert "TC-001 · Sign in with valid credentials" in _rendered_text(at)
 
 
-def test_returned_failed_generation_opens_detail_with_diagnostics_only() -> None:
-    result = _failed_run()
+def test_returned_failed_generation_opens_detail_with_diagnostics_only(
+    monkeypatch,
+) -> None:
+    secret = "runner-secret"
+    base_url = "http://private-lm-studio:1234/v1"
+    result = _failed_run("runner stopped: [REDACTED] at [REDACTED]")
+    downloads = {}
+    download_button = st.download_button
+
+    def capture_download(*args, **kwargs):
+        downloads[args[0]] = kwargs["data"]
+        return download_button(*args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", capture_download)
     at = _app_test()
     at.session_state["_runner"] = lambda *args, **kwargs: result
     at.run()
@@ -775,6 +788,14 @@ def test_returned_failed_generation_opens_detail_with_diagnostics_only() -> None
     assert {button.label for button in at.download_button} == {
         "Download diagnostics"
     }
+    text = _rendered_text(at)
+    diagnostics = downloads["Download diagnostics"]
+    assert "[REDACTED]" in text
+    assert "[REDACTED]" in diagnostics
+    assert secret not in text
+    assert base_url not in text
+    assert secret not in diagnostics
+    assert base_url not in diagnostics
 
 
 def test_unexpected_generation_error_stays_in_create_and_redacts_settings() -> None:
@@ -851,6 +872,58 @@ def test_edit_settings_from_create_preserves_upload_and_run_type() -> None:
         "customer-login.pdf"
     )
     assert _element(at.selectbox, "Run type").value is RunType.STAGED_SINGLE_AGENT
+
+
+def test_create_waits_for_settings_save_without_losing_inputs() -> None:
+    browser = FakeBrowserSettings(_saved_settings())
+    calls = 0
+
+    def fake_runner(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+
+    at = _app_test(browser=browser)
+    at.session_state["_runner"] = fake_runner
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.selectbox, "Run type").set_value(
+        RunType.CENTRALIZED_MULTI_AGENT
+    )
+    _element(at.file_uploader, "BRD/SRS PDF").set_value(
+        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
+    )
+    at.run()
+    _element(at.button, "Edit settings").click()
+    at.run()
+    _element(at.text_input, "Model").set_value("gemini-3.6-pro")
+    at.run()
+    browser.confirm_saves = False
+    _element(at.button, "Save").click()
+    at.run()
+
+    assert at.session_state["view"] == "create"
+    assert "Saving browser settings…" in _rendered_text(at)
+    assert not any(button.label == "Generate test cases" for button in at.button)
+    assert calls == 0
+    assert _element(at.file_uploader, "BRD/SRS PDF").value.name == (
+        "customer-login.pdf"
+    )
+    assert _element(at.selectbox, "Run type").value is (
+        RunType.CENTRALIZED_MULTI_AGENT
+    )
+
+    browser.confirm_saves = True
+    at.run()
+
+    assert "Gemini · gemini-3.6-pro · 200,000 token ceiling" in _rendered_text(at)
+    assert _element(at.button, "Generate test cases")
+    assert _element(at.file_uploader, "BRD/SRS PDF").value.name == (
+        "customer-login.pdf"
+    )
+    assert _element(at.selectbox, "Run type").value is (
+        RunType.CENTRALIZED_MULTI_AGENT
+    )
 
 
 def test_missing_upload_stays_in_create_without_calling_runner() -> None:

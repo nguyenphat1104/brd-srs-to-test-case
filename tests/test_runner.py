@@ -321,14 +321,19 @@ def test_running_record_and_started_event_precede_parse_and_provider(
 
 def test_parsing_failure_is_finalized_without_generated_parts(monkeypatch) -> None:
     secret = "gemini-super-secret"
-    configured = settings(provider="gemini", api_key=secret)
+    base_url = "http://private-lm-studio:1234/v1"
+    configured = settings(
+        provider="lm_studio",
+        api_key=secret,
+        base_url=base_url,
+    )
     repository = RecordingRepository()
     trace = []
     monkeypatch.setattr(
         runner,
         "parse_pdf",
         lambda _data: (_ for _ in ()).throw(
-            DocumentError(f"unreadable api_key={secret}")
+            DocumentError(f"unreadable api_key={secret} at {base_url}")
         ),
     )
 
@@ -343,10 +348,16 @@ def test_parsing_failure_is_finalized_without_generated_parts(monkeypatch) -> No
 
     assert result.manifest.status is RunStatus.FAILED
     assert result.manifest.failure_category is FailureCategory.PARSING
-    assert result.manifest.failure_message == "unreadable api_key=[REDACTED]"
+    assert result.manifest.failure_message == (
+        "unreadable api_key=[REDACTED] at [REDACTED]"
+    )
+    assert secret not in result.manifest.failure_message
+    assert base_url not in result.manifest.failure_message
     assert result.bundle is result.validation is result.metrics is None
     assert result.rtm == []
     assert repository.finalized[0] is result
+    assert secret not in repository.finalized[0].manifest.failure_message
+    assert base_url not in repository.finalized[0].manifest.failure_message
     assert repository.saved == []
     assert [event[1] for event in repository.events] == ["started"]
     assert trace == ["Preparing document", "Failed"]

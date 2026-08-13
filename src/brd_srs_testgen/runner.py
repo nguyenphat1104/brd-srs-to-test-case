@@ -206,7 +206,7 @@ PIPELINES = {
 
 def _safe_message(error: Exception, settings: ProviderSettings) -> str:
     message = str(error)
-    secrets = [settings.api_key]
+    secrets = [settings.api_key, settings.base_url]
     try:
         parsed = urlsplit(settings.base_url)
         secrets.extend(
