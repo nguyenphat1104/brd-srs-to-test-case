@@ -1,0 +1,11 @@
+.env
+.git
+.pytest_cache
+.venv
+__pycache__
+*.pyc
+docs
+tests
+app-ba.py
+app-ba-sys-architect.py
+llm_provider.py

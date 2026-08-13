@@ -423,9 +423,10 @@ def test_prefills_provider_credentials_and_preserves_lm_studio_controls(
 ) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-from-env")
     monkeypatch.setenv("LM_STUDIO_API_TOKEN", "lm-studio-from-env")
+    monkeypatch.setenv("LM_STUDIO_BASE_URL", "http://lm-studio:1234/v1")
     at = _app_test()
     at.session_state["_model_loader"] = lambda *_: [
-        "google/gemma-4-26b-a4b-qat"
+        "google/gemma-4-26b-a4b-qat", "qwen/qwen3-4b"
     ]
 
     at.run()
@@ -436,9 +437,13 @@ def test_prefills_provider_credentials_and_preserves_lm_studio_controls(
     assert _element(at.text_input, "LM Studio API token").value == "lm-studio-from-env"
     assert _element(at.selectbox, "Model").value == "google/gemma-4-26b-a4b-qat"
     assert _element(at.text_input, "LM Studio base URL").value == (
-        "http://localhost:1234/v1"
+        "http://lm-studio:1234/v1"
     )
     assert _element(at.button, "Load available models")
+
+    _element(at.selectbox, "Model").set_value("qwen/qwen3-4b")
+    at.run()
+    assert _element(at.selectbox, "Model").value == "qwen/qwen3-4b"
 
 
 def test_provider_change_resets_model_and_keeps_four_step_workflow() -> None:

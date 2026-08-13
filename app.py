@@ -60,6 +60,12 @@ def _env(name: str) -> str:
     )
 
 
+def _base_url(provider: str) -> str:
+    if provider == "lm_studio":
+        return _env("LM_STUDIO_BASE_URL") or LOCAL_BASE_URLS[provider]
+    return LOCAL_BASE_URLS[provider]
+
+
 @st.cache_resource
 def _cached_repository(database_url: str) -> RunRepository:
     repository = RunRepository(database_url)
@@ -325,7 +331,7 @@ def _reset_provider() -> None:
     st.session_state.pop("lm_studio_models", None)
     st.session_state.pop("lm_studio_model_error", None)
     if provider in LOCAL_BASE_URLS:
-        st.session_state["base_url"] = LOCAL_BASE_URLS[provider]
+        st.session_state["base_url"] = _base_url(provider)
     if provider == "lm_studio":
         _refresh_lm_studio_models()
 
@@ -343,7 +349,7 @@ def _refresh_lm_studio_models() -> None:
     try:
         loader = st.session_state.get("_model_loader", list_lm_studio_models)
         models = loader(
-            st.session_state.get("base_url", LOCAL_BASE_URLS["lm_studio"]),
+            st.session_state.get("base_url", _base_url("lm_studio")),
             api_key,
         )
     except Exception as error:
@@ -837,7 +843,7 @@ def main() -> None:
                     )
 
             api_key = ""
-            base_url = LOCAL_BASE_URLS.get(provider, "")
+            base_url = _base_url(provider) if provider in LOCAL_BASE_URLS else ""
             with credential_column:
                 if provider == "gemini":
                     api_key = st.text_input(
