@@ -610,7 +610,7 @@ def test_database_initialization_failure_remains_blocking() -> None:
 def test_completed_detail_renders_test_cases_first_and_snapshot() -> None:
     result = _detailed_run()
     secret = "browser-only-secret"
-    base_url = "http://localhost:11434"
+    base_url = "http://browser-only.invalid:43114"
     at = _app_test(
         browser=FakeBrowserSettings(
             _saved_settings(api_key=secret, base_url=base_url)
