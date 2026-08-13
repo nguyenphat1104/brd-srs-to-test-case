@@ -721,7 +721,7 @@ def _settings_dialog() -> None:
         "Credentials are stored in this browser's local storage. Use a trusted device."
     )
     save_column, cancel_column = st.columns(2)
-    save = save_column.button("Save", type="primary", width="stretch")
+    save = save_column.button("Save settings", type="primary", width="stretch")
     cancel = cancel_column.button("Cancel", width="stretch")
     if cancel:
         st.session_state["show_settings"] = False

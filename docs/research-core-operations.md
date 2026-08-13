@@ -26,11 +26,11 @@ PostgreSQL data remains in the Compose-managed `postgres_data` named volume.
 
 1. Open **Settings** to set the provider, model, applicable credential, base URL, and token ceiling, then explicitly select **Save settings**.
 2. From **Runs**, select **Create new run**.
-3. Select exactly one run type: `single_prompt`, `staged_single_agent`, or `centralized_multi_agent`; upload one text-extractable BRD/SRS PDF; then select **Generate**. Only the chosen type executes.
+3. Select exactly one run type: `single_prompt`, `staged_single_agent`, or `centralized_multi_agent`; upload one text-extractable BRD/SRS PDF; then select **Generate test cases**. Only the chosen type executes.
 4. A completed or failed run opens automatically. Review its test cases first, then supporting requirements and scenarios, metrics, downloads, diagnostics, and immutable configuration snapshot.
 5. Use **Back to runs** and select a row to reopen it. A running record left by a stopped process displays as **Interrupted**.
 
-Each **Generate** creates an immutable run. Correct a problem and retry rather than editing a saved run.
+Each **Generate test cases** creates an immutable run. Correct a problem and retry rather than editing a saved run.
 
 ## Persisted data and security boundary
 
@@ -42,7 +42,7 @@ The legacy `runs/` directory is ignored and left untouched. There is no import f
 
 ## Failures and recovery
 
-Reported failure categories are parsing, configuration, provider rejection, transport exhaustion, timeout, budget exhaustion, schema failure, and semantic validation. Failed and interrupted records remain visible in **Run history**.
+Reported failure categories are parsing, configuration, provider rejection, transport exhaustion, timeout, budget exhaustion, schema failure, and semantic validation. Failed and interrupted records remain visible in **Runs**.
 
 - Parsing: use a text-extractable PDF; scanned image-only PDFs require OCR and are not supported.
 - Configuration or provider rejection: check the selected provider, model access, base URL, and credentials, then generate a new run.
@@ -50,7 +50,7 @@ Reported failure categories are parsing, configuration, provider rejection, tran
 - Budget exhaustion: raise the token ceiling or use a smaller source, then generate a new run.
 - Schema or semantic validation: inspect the saved diagnostics and retry with the corrected provider/model setup.
 
-An unexpected internal exception can leave a running database record. The history UI labels that record **Interrupted** so its saved metadata remains inspectable.
+An unexpected internal exception can leave a running database record. The **Runs** view labels that record **Interrupted** so its saved metadata remains inspectable.
 
 ## Browser storage smoke test
 
@@ -59,7 +59,7 @@ An unexpected internal exception can leave a running database record. The histor
 3. Refresh and confirm the settings are restored.
 4. Create a small run and confirm its dedicated detail page opens.
 5. Confirm the snapshot and downloaded JSON omit the credential and base URL.
-6. Select **Back to Runs**, select the same row, and confirm its test cases reopen.
+6. Select **Back to runs**, select the same row, and confirm its test cases reopen.
 
 ### Gemini
 

@@ -329,7 +329,7 @@ def test_settings_save_is_explicit_and_activates_after_storage_confirms() -> Non
     at.run()
     _element(at.text_input, "Model").set_value("gemini-saved")
     at.run()
-    _element(at.button, "Save").click()
+    _element(at.button, "Save settings").click()
     at.run()
 
     assert browser.saved[-1]["model"] == "gemini-saved"
@@ -345,7 +345,7 @@ def test_settings_wait_for_matching_browser_confirmation() -> None:
     at.run()
     _element(at.text_input, "Model").set_value("gemini-3.6-pro")
     at.run()
-    _element(at.button, "Save").click()
+    _element(at.button, "Save settings").click()
     at.run()
 
     assert at.session_state["app_settings"].model == "gemini-3.6-flash"
@@ -468,7 +468,7 @@ def test_missing_settings_can_be_saved_before_create() -> None:
     at.run()
     _element(at.text_input, "Gemini API key").set_value("new-secret")
     at.run()
-    _element(at.button, "Save").click()
+    _element(at.button, "Save settings").click()
     at.run()
 
     assert at.session_state["view"] == "create"
@@ -924,7 +924,7 @@ def test_edit_settings_from_create_preserves_upload_and_run_type() -> None:
     at.run()
     _element(at.text_input, "Model").set_value("gemini-3.6-pro")
     at.run()
-    _element(at.button, "Save").click()
+    _element(at.button, "Save settings").click()
     at.run()
 
     assert at.session_state["view"] == "create"
@@ -960,7 +960,7 @@ def test_create_waits_for_settings_save_without_losing_inputs() -> None:
     _element(at.text_input, "Model").set_value("gemini-3.6-pro")
     at.run()
     browser.confirm_saves = False
-    _element(at.button, "Save").click()
+    _element(at.button, "Save settings").click()
     at.run()
 
     assert at.session_state["view"] == "create"
