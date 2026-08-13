@@ -19,7 +19,7 @@ from brd_srs_testgen.models import (
     RunType,
 )
 from brd_srs_testgen.providers import list_lm_studio_models
-from brd_srs_testgen.runner import ProviderSettings
+from brd_srs_testgen.runner import ProviderSettings, run_generation
 from brd_srs_testgen.storage import RunRepository, StorageError
 
 
@@ -788,11 +788,11 @@ def _render_runs(repository: RunRepository) -> None:
     )
 
 
-def _render_create() -> None:
+def _render_create(repository: RunRepository, settings: AppSettings) -> None:
     st.button("Back to runs", on_click=_go_home)
     st.title("Create a run")
     st.caption("Add a source document and choose one generation strategy.")
-    st.file_uploader(
+    upload = st.file_uploader(
         "BRD/SRS PDF",
         type=["pdf"],
         key="pdf",
@@ -805,13 +805,51 @@ def _render_create() -> None:
         format_func=_run_type_label,
     )
     st.caption(RUN_TYPE_COPY[run_type][1])
-    settings = st.session_state["app_settings"]
     st.markdown("### App settings")
     st.caption(
         f"{_provider_label(settings.provider)} · {settings.model} · "
         f"{settings.token_ceiling:,} token ceiling"
     )
     st.button("Edit settings", on_click=_open_settings, args=("create",))
+    if not st.button(
+        "Generate test cases",
+        type="primary",
+        key="run",
+        width="stretch",
+    ):
+        return
+    if upload is None:
+        st.error("Upload one text-extractable PDF before generating test cases.")
+        return
+
+    try:
+        provider_settings = settings.provider_settings()
+    except ValueError as error:
+        st.error(str(error))
+        _open_settings(after_save="create")
+        return
+
+    try:
+        with st.status("Preparing generation", expanded=True) as status:
+            runner = st.session_state.get("_runner", run_generation)
+            result = runner(
+                upload.getvalue(),
+                upload.name,
+                run_type,
+                provider_settings,
+                repository=repository,
+                progress=status.write,
+            )
+            label, state = _result_status(result)
+            status.update(label=label, state=state, expanded=state == "error")
+    except Exception as error:
+        st.error(f"Generation failed: {_safe_error(error, provider_settings)}")
+        return
+
+    st.session_state["selected_run_id"] = result.manifest.run_id
+    st.session_state["selected_run"] = result
+    st.session_state["view"] = "detail"
+    st.rerun()
 
 
 def _render_detail(repository: RunRepository) -> None:
@@ -868,7 +906,7 @@ def main() -> None:
     st.session_state.setdefault("view", "runs")
     view = st.session_state["view"]
     if view == "create":
-        _render_create()
+        _render_create(repository, st.session_state["app_settings"])
     elif view == "detail":
         _render_detail(repository)
     else:

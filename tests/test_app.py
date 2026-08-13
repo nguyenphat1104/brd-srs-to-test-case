@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
 from streamlit.testing.v1 import AppTest
 
 from brd_srs_testgen.browser_settings import AppSettings, BrowserSettingsResult
@@ -701,21 +700,209 @@ def test_failed_semantic_result_keeps_artifact_details_and_diagnostics() -> None
     }
 
 
-@pytest.mark.skip(reason="Create flow completed in Task 3")
-def test_runs_one_selected_type_and_passes_the_complete_request() -> None:
-    pass
+def test_create_runs_one_selected_type_and_opens_returned_detail() -> None:
+    repository = FakeRepository()
+    result = _detailed_run()
+    calls = []
+
+    def fake_runner(
+        pdf_bytes,
+        source_filename,
+        run_type,
+        provider_settings,
+        *,
+        repository,
+        progress,
+    ):
+        progress("Generating test cases")
+        calls.append(
+            (
+                pdf_bytes,
+                source_filename,
+                run_type,
+                provider_settings,
+                repository,
+            )
+        )
+        return result
+
+    at = _app_test(repository)
+    at.session_state["_runner"] = fake_runner
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.selectbox, "Run type").set_value(
+        RunType.STAGED_SINGLE_AGENT
+    )
+    _element(at.file_uploader, "BRD/SRS PDF").set_value(
+        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
+    )
+    _element(at.button, "Generate test cases").click()
+    at.run()
+
+    assert len(calls) == 1
+    pdf_bytes, filename, run_type, settings, passed_repository = calls[0]
+    assert pdf_bytes == b"%PDF-1.4\n"
+    assert filename == "customer-login.pdf"
+    assert run_type is RunType.STAGED_SINGLE_AGENT
+    assert settings.model == "gemini-3.6-flash"
+    assert settings.api_key == "browser-secret"
+    assert passed_repository is repository
+    assert repository.load_calls == []
+    assert at.session_state["view"] == "detail"
+    assert at.session_state["selected_run_id"] == result.manifest.run_id
+    assert at.session_state["selected_run"] == result
+    assert "TC-001 · Sign in with valid credentials" in _rendered_text(at)
 
 
-@pytest.mark.skip(reason="Create flow completed in Task 3")
-def test_clears_previous_result_when_a_later_generation_raises() -> None:
-    pass
+def test_returned_failed_generation_opens_detail_with_diagnostics_only() -> None:
+    result = _failed_run()
+    at = _app_test()
+    at.session_state["_runner"] = lambda *args, **kwargs: result
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.file_uploader, "BRD/SRS PDF").set_value(
+        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
+    )
+    _element(at.button, "Generate test cases").click()
+    at.run()
+
+    assert at.session_state["view"] == "detail"
+    assert at.session_state["selected_run_id"] == result.manifest.run_id
+    assert at.session_state["selected_run"] == result
+    assert at.status[0].label == "Generation failed"
+    assert {button.label for button in at.download_button} == {
+        "Download diagnostics"
+    }
 
 
-@pytest.mark.skip(reason="Create flow completed in Task 3")
-def test_clears_previous_result_when_runner_returns_a_failure() -> None:
-    pass
+def test_unexpected_generation_error_stays_in_create_and_redacts_settings() -> None:
+    token = "runner-secret"
+    base_url = "http://private-lm-studio:1234/v1"
+    calls = 0
+
+    def fail_runner(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError(f"runner stopped: {token} {base_url}")
+
+    at = _app_test(
+        browser=FakeBrowserSettings(
+            _saved_settings(
+                provider="lm_studio",
+                model="gemma-4",
+                api_key=token,
+                base_url=base_url,
+            )
+        )
+    )
+    at.session_state["_runner"] = fail_runner
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.selectbox, "Run type").set_value(
+        RunType.CENTRALIZED_MULTI_AGENT
+    )
+    _element(at.file_uploader, "BRD/SRS PDF").set_value(
+        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
+    )
+    _element(at.button, "Generate test cases").click()
+    at.run()
+
+    text = _rendered_text(at)
+    assert calls == 1
+    assert at.session_state["view"] == "create"
+    assert "Generation failed: runner stopped" in text
+    assert token not in text
+    assert base_url not in text
+    assert not at.download_button
+    assert "selected_run" not in at.session_state
+    assert _element(at.file_uploader, "BRD/SRS PDF").value.name == (
+        "customer-login.pdf"
+    )
+    assert _element(at.selectbox, "Run type").value is (
+        RunType.CENTRALIZED_MULTI_AGENT
+    )
 
 
-@pytest.mark.skip(reason="Create flow completed in Task 3")
-def test_redacts_credentials_and_base_url_from_runner_error() -> None:
-    pass
+def test_edit_settings_from_create_preserves_upload_and_run_type() -> None:
+    at = _app_test()
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.selectbox, "Run type").set_value(
+        RunType.STAGED_SINGLE_AGENT
+    )
+    _element(at.file_uploader, "BRD/SRS PDF").set_value(
+        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
+    )
+    at.run()
+    _element(at.button, "Edit settings").click()
+    at.run()
+    _element(at.text_input, "Model").set_value("gemini-3.6-pro")
+    at.run()
+    _element(at.button, "Save").click()
+    at.run()
+
+    assert at.session_state["view"] == "create"
+    assert "Gemini · gemini-3.6-pro · 200,000 token ceiling" in _rendered_text(at)
+    assert _element(at.file_uploader, "BRD/SRS PDF").value.name == (
+        "customer-login.pdf"
+    )
+    assert _element(at.selectbox, "Run type").value is RunType.STAGED_SINGLE_AGENT
+
+
+def test_missing_upload_stays_in_create_without_calling_runner() -> None:
+    calls = 0
+
+    def fake_runner(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+
+    at = _app_test()
+    at.session_state["_runner"] = fake_runner
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.button, "Generate test cases").click()
+    at.run()
+
+    assert calls == 0
+    assert at.session_state["view"] == "create"
+    assert (
+        "Upload one text-extractable PDF before generating test cases."
+        in _rendered_text(at)
+    )
+
+
+def test_invalid_settings_during_create_reopens_settings_without_running() -> None:
+    calls = 0
+
+    def fake_runner(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+
+    at = _app_test()
+    at.session_state["_runner"] = fake_runner
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.file_uploader, "BRD/SRS PDF").set_value(
+        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
+    )
+    at.session_state["app_settings"] = AppSettings.model_construct(
+        provider="gemini",
+        model="gemini-3.6-flash",
+        api_key="",
+        base_url="",
+        token_ceiling=200_000,
+    )
+    _element(at.button, "Generate test cases").click()
+    at.run()
+
+    assert calls == 0
+    assert at.session_state["view"] == "create"
+    assert "Gemini API key is required." in _rendered_text(at)
+    assert at.session_state["settings_after_persist"] == "create"
+    assert _element(at.text_input, "Gemini API key")
