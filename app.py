@@ -7,20 +7,23 @@ from typing import Any
 
 import streamlit as st
 
+from brd_srs_testgen.browser_settings import (
+    AppSettings,
+    parse_settings,
+    sync_browser_settings,
+)
 from brd_srs_testgen.models import (
     FailureCategory,
-    RunHistoryItem,
     RunResult,
     RunStatus,
     RunType,
 )
 from brd_srs_testgen.providers import list_lm_studio_models
-from brd_srs_testgen.runner import ProviderSettings, run_generation
+from brd_srs_testgen.runner import ProviderSettings
 from brd_srs_testgen.storage import RunRepository, StorageError
 
 
 GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
-RETIRED_GEMINI_DEFAULTS = {"gemini-2.5-flash"}
 PROVIDER_LABELS = {
     "gemini": "Gemini",
     "lm_studio": "LM Studio",
@@ -115,52 +118,6 @@ def _apply_theme() -> None:
             padding-top: 2.25rem;
             padding-bottom: 4rem;
         }
-        .research-hero {
-            padding: 2.25rem;
-            margin-bottom: 1.5rem;
-            border: 1px solid var(--color-border);
-            border-radius: 1.25rem;
-            background: linear-gradient(135deg, #ffffff 0%, #f4f8ff 100%);
-            box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
-        }
-        .research-eyebrow {
-            margin: 0 0 0.75rem;
-            color: var(--color-accent);
-            font-size: 0.75rem;
-            font-weight: 700;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-        }
-        .research-hero h1 {
-            max-width: 760px;
-            margin: 0;
-            color: var(--color-foreground);
-            font-size: clamp(2rem, 4vw, 3.35rem);
-            line-height: 1.04;
-            letter-spacing: -0.04em;
-        }
-        .research-hero p {
-            max-width: 720px;
-            margin: 1rem 0 0;
-            color: var(--color-muted);
-            font-size: 1.05rem;
-            line-height: 1.65;
-        }
-        .protocol-strip {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.65rem;
-            margin-top: 1.35rem;
-        }
-        .protocol-strip span {
-            padding: 0.45rem 0.7rem;
-            border: 1px solid #cbdcf8;
-            border-radius: 999px;
-            color: #1e3a5f;
-            background: #f7faff;
-            font-size: 0.82rem;
-            font-weight: 600;
-        }
         [data-testid="stVerticalBlockBorderWrapper"] {
             border-color: var(--color-border);
             border-radius: 1rem;
@@ -213,97 +170,14 @@ def _apply_theme() -> None:
             min-height: 2.75rem;
             min-width: 2.75rem;
         }
-        :is(.st-key-workflow_steps_empty, .st-key-workflow_steps_with_result)
-        :is([role="tablist"], [data-baseweb="tab-list"]) {
-            gap: 0.5rem;
-            padding: 0.4rem;
-            border: 1px solid var(--color-border);
-            border-radius: 1rem;
-            background: #eef2f7;
-            box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.05);
-        }
-        :is(.st-key-workflow_steps_empty, .st-key-workflow_steps_with_result)
-        :is([role="tab"], [data-baseweb="tab"]) {
-            flex: 1 1 0;
-            min-height: 3.5rem;
-            padding-inline: 1rem;
-            border-radius: 0.7rem;
-            color: var(--color-muted);
-            font-weight: 650;
-            transition: color 180ms ease, background 180ms ease,
-                box-shadow 180ms ease;
-        }
-        :is(.st-key-workflow_steps_empty, .st-key-workflow_steps_with_result)
-        [aria-selected="true"] {
-            color: var(--color-accent) !important;
-            background: var(--color-surface);
-            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.1);
-        }
-        :is(.st-key-workflow_steps_empty, .st-key-workflow_steps_with_result)
-        :is(.react-aria-SelectionIndicator, [data-baseweb="tab-highlight"],
-            [data-baseweb="tab-border"]) {
-            display: none;
-        }
-        :is(.st-key-workflow_steps_empty, .st-key-workflow_steps_with_result)
-        :is([role="tabpanel"], [data-baseweb="tab-panel"]) {
-            padding-top: 1.25rem;
-        }
-        .step-heading {
-            display: flex;
-            align-items: flex-start;
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-        }
-        .step-index {
-            display: grid;
-            flex: 0 0 2.75rem;
-            width: 2.75rem;
-            height: 2.75rem;
-            place-items: center;
-            border-radius: 0.8rem;
-            color: var(--color-on-primary);
-            background: var(--color-accent);
-            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.22);
-            font-size: 1rem;
-            font-weight: 800;
-        }
-        .step-heading h2 {
-            margin: 0;
-            color: var(--color-foreground);
-            font-size: 1.35rem;
-            letter-spacing: -0.02em;
-        }
-        .step-heading p {
-            max-width: 700px;
-            margin: 0.3rem 0 0;
-            color: var(--color-muted);
-            line-height: 1.55;
-        }
         button:focus-visible,
-        input:focus-visible,
-        [role="tab"]:focus-visible {
+        input:focus-visible {
             outline: 3px solid var(--color-focus) !important;
             outline-offset: 2px;
         }
         @media (max-width: 640px) {
             [data-testid="stMainBlockContainer"] {
                 padding-top: 1rem;
-            }
-            .research-hero {
-                padding: 1.5rem 1.25rem;
-                border-radius: 1rem;
-            }
-            .research-hero p {
-                font-size: 1rem;
-            }
-            :is(.st-key-workflow_steps_empty, .st-key-workflow_steps_with_result)
-            :is([role="tab"], [data-baseweb="tab"]) {
-                min-height: 3.25rem;
-                padding-inline: 0.45rem;
-                font-size: 0.82rem;
-            }
-            .step-heading {
-                gap: 0.75rem;
             }
         }
         @media (prefers-reduced-motion: reduce) {
@@ -326,43 +200,52 @@ def _default_model(provider: str) -> str:
 
 
 def _reset_provider() -> None:
-    provider = st.session_state["provider"]
-    st.session_state["model"] = _default_model(provider)
+    provider = st.session_state["settings_provider"]
+    st.session_state["settings_model"] = _default_model(provider)
+    st.session_state["settings_api_key"] = (
+        _env("GEMINI_API_KEY")
+        if provider == "gemini"
+        else _env("LM_STUDIO_API_TOKEN") if provider == "lm_studio" else ""
+    )
+    st.session_state["settings_base_url"] = (
+        _base_url(provider) if provider in LOCAL_BASE_URLS else ""
+    )
     st.session_state.pop("lm_studio_models", None)
     st.session_state.pop("lm_studio_model_error", None)
-    if provider in LOCAL_BASE_URLS:
-        st.session_state["base_url"] = _base_url(provider)
-    if provider == "lm_studio":
-        _refresh_lm_studio_models()
 
 
 def _clear_lm_studio_models() -> None:
-    st.session_state["model"] = ""
+    st.session_state["settings_model"] = ""
     st.session_state.pop("lm_studio_models", None)
     st.session_state.pop("lm_studio_model_error", None)
 
 
 def _refresh_lm_studio_models() -> None:
-    api_key = st.session_state.get("lm_studio_api_key", "") or _env(
-        "LM_STUDIO_API_TOKEN"
-    )
+    api_key = st.session_state.get("settings_api_key", "")
     try:
         loader = st.session_state.get("_model_loader", list_lm_studio_models)
         models = loader(
-            st.session_state.get("base_url", _base_url("lm_studio")),
+            st.session_state.get("settings_base_url", _base_url("lm_studio")),
             api_key,
         )
     except Exception as error:
         message = str(error)
-        if api_key:
-            message = message.replace(api_key, "[REDACTED]")
-        st.session_state["model"] = ""
+        for secret in (
+            api_key,
+            st.session_state.get("settings_base_url", ""),
+        ):
+            if secret:
+                message = message.replace(secret, "[REDACTED]")
+        st.session_state["settings_model"] = ""
         st.session_state["lm_studio_models"] = []
         st.session_state["lm_studio_model_error"] = message
     else:
         st.session_state["lm_studio_models"] = models
-        st.session_state["model"] = models[0]
-        st.session_state.pop("lm_studio_model_error", None)
+        st.session_state["settings_model"] = models[0] if models else ""
+        if models:
+            st.session_state.pop("lm_studio_model_error", None)
+        else:
+            st.session_state["lm_studio_model_error"] = "No models were reported."
 
 
 def _provider_label(provider: str) -> str:
@@ -652,23 +535,200 @@ def _render_result(result: RunResult, *, key_prefix: str = "result") -> None:
         _render_bundle(result, key_prefix=key_prefix)
 
 
-def _render_empty_state() -> None:
-    st.markdown("### No results yet")
-    st.caption("Complete the configuration and run steps to populate this workspace.")
-    st.info(
-        "Upload one text-extractable PDF, choose one run type, and generate detailed test cases."
+def _fallback_settings() -> AppSettings:
+    return AppSettings(
+        provider="gemini",
+        model=GEMINI_DEFAULT_MODEL,
+        api_key=_env("GEMINI_API_KEY"),
+        base_url="",
+        token_ceiling=200_000,
     )
 
 
-def _history_label(item: RunHistoryItem) -> str:
-    started = item.started_at.strftime("%Y-%m-%d %H:%M %Z")
-    return (
-        f"{started} · {item.source_filename} · {_run_type_label(item.run_type)} "
-        f"· {item.run_id[-8:]}"
+def _warn_once(key: str, message: str) -> None:
+    if not st.session_state.get(key):
+        st.session_state[key] = True
+        st.session_state["flash_warning"] = message
+
+
+def _sync_app_settings() -> None:
+    fallback = _fallback_settings()
+    st.session_state.setdefault("app_settings", fallback)
+    revision = st.session_state.get("settings_revision", 0)
+    pending = st.session_state.get("settings_pending_save")
+    result = sync_browser_settings(save=pending, revision=revision)
+    if not result.loaded or result.revision != revision:
+        return
+    if st.session_state.get("settings_loaded") and pending is None:
+        return
+
+    if result.error:
+        _warn_once(
+            "browser_storage_warning_shown",
+            "Browser settings storage is unavailable. Using app defaults for this session.",
+        )
+        st.session_state["settings_loaded"] = True
+        st.session_state.pop("settings_pending_save", None)
+        st.session_state.pop("settings_after_persist", None)
+        return
+
+    settings, warning = parse_settings(result.payload, fallback)
+    if warning:
+        _warn_once("invalid_settings_warning_shown", warning)
+    if pending is not None and result.payload != pending:
+        _warn_once(
+            "browser_save_warning_shown",
+            "Browser settings could not be confirmed; the previous settings remain active.",
+        )
+    else:
+        st.session_state["app_settings"] = settings
+        if pending is not None and (
+            destination := st.session_state.get("settings_after_persist")
+        ):
+            st.session_state["view"] = destination
+    st.session_state["settings_loaded"] = True
+    st.session_state.pop("settings_pending_save", None)
+    st.session_state.pop("settings_after_persist", None)
+
+
+def _settings_are_ready() -> bool:
+    try:
+        st.session_state["app_settings"].provider_settings()
+    except ValueError:
+        return False
+    return True
+
+
+def _open_settings(after_save: str | None = None) -> None:
+    settings = st.session_state["app_settings"]
+    st.session_state["settings_provider"] = settings.provider
+    st.session_state["settings_model"] = settings.model
+    st.session_state["settings_api_key"] = settings.api_key
+    st.session_state["settings_base_url"] = settings.base_url
+    st.session_state["settings_token_ceiling"] = settings.token_ceiling
+    st.session_state["show_settings"] = True
+    if after_save is None:
+        st.session_state.pop("settings_after_persist", None)
+    else:
+        st.session_state["settings_after_persist"] = after_save
+
+
+@st.dialog("App settings", width="large")
+def _settings_dialog() -> None:
+    provider = st.selectbox(
+        "Provider",
+        list(PROVIDER_LABELS),
+        key="settings_provider",
+        format_func=_provider_label,
+        on_change=_reset_provider,
     )
+    if provider == "lm_studio":
+        models = st.session_state.get("lm_studio_models", [])
+        st.selectbox(
+            "Model",
+            models,
+            index=0 if models else None,
+            key="settings_model",
+            placeholder="Load models or enter a model ID",
+            accept_new_options=True,
+        )
+        st.text_input(
+            "LM Studio API token",
+            type="password",
+            key="settings_api_key",
+            on_change=_clear_lm_studio_models,
+        )
+    else:
+        st.text_input("Model", key="settings_model")
+        if provider == "gemini":
+            st.text_input(
+                "Gemini API key", type="password", key="settings_api_key"
+            )
+
+    if provider in LOCAL_BASE_URLS:
+        st.text_input(
+            f"{_provider_label(provider)} base URL",
+            key="settings_base_url",
+            on_change=_clear_lm_studio_models if provider == "lm_studio" else None,
+        )
+    if provider == "lm_studio":
+        st.button(
+            "Load available models",
+            on_click=_refresh_lm_studio_models,
+            width="stretch",
+        )
+        if error := st.session_state.get("lm_studio_model_error"):
+            st.error(f"Could not load models: {error}")
+        elif models:
+            st.success(f"Loaded {len(models)} models.")
+
+    st.number_input(
+        "Token ceiling",
+        min_value=1000,
+        step=1000,
+        key="settings_token_ceiling",
+    )
+    st.warning(
+        "Credentials are stored in this browser's local storage. Use a trusted device."
+    )
+    save_column, cancel_column = st.columns(2)
+    save = save_column.button("Save", type="primary", width="stretch")
+    cancel = cancel_column.button("Cancel", width="stretch")
+    if cancel:
+        st.session_state["show_settings"] = False
+        st.session_state.pop("settings_after_persist", None)
+        st.rerun()
+    if not save:
+        return
+
+    try:
+        settings = AppSettings(
+            provider=provider,
+            model=st.session_state["settings_model"],
+            api_key=st.session_state.get("settings_api_key", ""),
+            base_url=st.session_state.get("settings_base_url", ""),
+            token_ceiling=st.session_state["settings_token_ceiling"],
+        )
+        settings.provider_settings()
+    except ValueError as error:
+        st.error(str(error))
+        return
+    st.session_state["settings_revision"] = (
+        st.session_state.get("settings_revision", 0) + 1
+    )
+    st.session_state["settings_pending_save"] = settings.model_dump(mode="json")
+    st.session_state["show_settings"] = False
+    st.rerun()
 
 
-def _render_history(repository: RunRepository) -> None:
+def _go_home() -> None:
+    st.session_state["view"] = "runs"
+    st.session_state.pop("selected_run_id", None)
+    st.session_state.pop("selected_run", None)
+    st.session_state.pop("runs-table", None)
+
+
+def _render_top_nav() -> None:
+    home, _, settings = st.columns([3, 6, 1])
+    home.button("BRD/SRS Test Case", on_click=_go_home)
+    settings.button("Settings", on_click=_open_settings, width="stretch")
+
+
+def _request_create() -> None:
+    if _settings_are_ready():
+        st.session_state["view"] = "create"
+    else:
+        _open_settings("create")
+
+
+def _render_runs(repository: RunRepository) -> None:
+    st.title("Runs")
+    st.caption("Create a run or open a saved result.")
+    st.button(
+        "Create new run",
+        type="primary",
+        on_click=_request_create,
+    )
     try:
         runs = repository.list_runs()
     except StorageError:
@@ -681,77 +741,114 @@ def _render_history(repository: RunRepository) -> None:
         st.info("No saved runs yet.")
         return
 
-    st.table(
-        [
-            {
-                "Started": item.started_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
-                "Source": item.source_filename,
-                "Run type": _run_type_label(item.run_type),
-                "Provider": _provider_label(item.provider),
-                "Model": item.model,
-                "Status": item.display_status,
-                "Requirements": str(item.requirement_count)
-                if item.requirement_count is not None
-                else "—",
-                "Scenarios": str(item.scenario_count)
-                if item.scenario_count is not None
-                else "—",
-                "Test cases": str(item.test_case_count)
-                if item.test_case_count is not None
-                else "—",
-            }
-            for item in runs
-        ]
+    rows = [
+        {
+            "Started": item.started_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            "Source": item.source_filename,
+            "Run type": _run_type_label(item.run_type),
+            "Provider": _provider_label(item.provider),
+            "Model": item.model,
+            "Status": item.display_status,
+            "Test cases": str(item.test_case_count)
+            if item.test_case_count is not None
+            else "—",
+        }
+        for item in runs
+    ]
+    preset = st.session_state.get("runs-table", {})
+    selected_rows = (
+        preset.get("selection", {}).get("rows", [])
+        if hasattr(preset, "get")
+        else []
     )
-    selected = st.selectbox(
-        "Open saved run",
-        runs,
-        index=None,
-        format_func=_history_label,
-        key="history_run_id",
-        placeholder="Select a saved run",
+    event = st.dataframe(
+        rows,
+        hide_index=True,
+        width="stretch",
+        selection_mode="single-row",
+        on_select="rerun",
+        key="runs-table",
     )
-    if selected is None:
+    if event.selection.rows:
+        selected_rows = event.selection.rows
+    if not selected_rows:
         return
-    try:
-        result = repository.load_run(selected.run_id)
-    except StorageError:
-        st.error(
-            "Saved run could not be opened. Check PostgreSQL and DATABASE_URL, "
-            "then try again."
-        )
+    row = selected_rows[0]
+    if not 0 <= row < len(runs):
         return
-    _render_result(result, key_prefix="history")
+    st.session_state["selected_run_id"] = runs[row].run_id
+    st.session_state.pop("selected_run", None)
+    st.session_state["view"] = "detail"
+    st.rerun()
+
+
+def _render_create() -> None:
+    st.button("Back to runs", on_click=_go_home)
+    st.title("Create a run")
+    st.caption("Add a source document and choose one generation strategy.")
+    st.file_uploader(
+        "BRD/SRS PDF",
+        type=["pdf"],
+        key="pdf",
+        help="Use a text-extractable PDF.",
+    )
+    run_type = st.selectbox(
+        "Run type",
+        list(RunType),
+        key="run_type",
+        format_func=_run_type_label,
+    )
+    st.caption(RUN_TYPE_COPY[run_type][1])
+    settings = st.session_state["app_settings"]
+    st.markdown("### App settings")
+    st.caption(
+        f"{_provider_label(settings.provider)} · {settings.model} · "
+        f"{settings.token_ceiling:,} token ceiling"
+    )
+    st.button("Edit settings", on_click=_open_settings, args=("create",))
+
+
+def _render_detail(repository: RunRepository) -> None:
+    st.button("Back to runs", on_click=_go_home)
+    run_id = st.session_state.get("selected_run_id")
+    if not isinstance(run_id, str) or not run_id:
+        _go_home()
+        st.session_state["flash_error"] = "Select a saved run to open its details."
+        st.rerun()
+    result = st.session_state.get("selected_run")
+    if not isinstance(result, RunResult) or result.manifest.run_id != run_id:
+        try:
+            result = repository.load_run(run_id)
+        except StorageError:
+            _go_home()
+            st.session_state["flash_error"] = (
+                "Saved run could not be opened. Check PostgreSQL and DATABASE_URL, "
+                "then try again."
+            )
+            st.rerun()
+        st.session_state["selected_run"] = result
+    st.title(result.manifest.source_filename)
+    _render_result(result, key_prefix="detail")
+
+
+def _render_flashes() -> None:
+    if warning := st.session_state.pop("flash_warning", None):
+        st.warning(warning)
+    if error := st.session_state.pop("flash_error", None):
+        st.error(error)
 
 
 def main() -> None:
     st.set_page_config(
-        page_title="BRD/SRS Test-Case Research Core",
+        page_title="BRD/SRS Test Case",
         page_icon=None,
         layout="wide",
         initial_sidebar_state="collapsed",
     )
     _apply_theme()
-    st.markdown(
-        """
-        <section class="research-hero">
-            <p class="research-eyebrow">Traceable test-case generation</p>
-            <h1>Generate detailed test cases from one controlled run.</h1>
-            <p>
-                Turn a text-extractable BRD or SRS into requirements, scenarios,
-                test cases, and a traceability matrix with the generation strategy
-                that fits this run.
-            </p>
-            <div class="protocol-strip" aria-label="Generation protocol">
-                <span>1 selected run type</span>
-                <span>Temperature 0</span>
-                <span>Traceability validation</span>
-                <span>Detailed artifacts</span>
-            </div>
-        </section>
-        """,
-        unsafe_allow_html=True,
-    )
+    _sync_app_settings()
+    _render_top_nav()
+    _render_flashes()
 
     try:
         repository = _resolve_repository()
@@ -762,290 +859,18 @@ def main() -> None:
         )
         st.stop()
 
-    current_provider = st.session_state.get("provider", "gemini")
-    if (
-        "model" not in st.session_state
-        or (
-            current_provider == "gemini"
-            and st.session_state["model"] in RETIRED_GEMINI_DEFAULTS
-        )
-    ):
-        st.session_state["model"] = _default_model(current_provider)
+    st.session_state.setdefault("view", "runs")
+    view = st.session_state["view"]
+    if view == "create":
+        _render_create()
+    elif view == "detail":
+        _render_detail(repository)
+    else:
+        st.session_state["view"] = "runs"
+        _render_runs(repository)
 
-    existing_result = st.session_state.get("run_result")
-    step_labels = ["1 · Configure", "2 · Run", "3 · Results", "4 · Run history"]
-    configure_tab, run_tab, results_tab, history_tab = st.tabs(
-        step_labels,
-        default=(
-            step_labels[2]
-            if isinstance(existing_result, RunResult)
-            else step_labels[0]
-        ),
-        key=(
-            "workflow_steps_with_result"
-            if isinstance(existing_result, RunResult)
-            else "workflow_steps_empty"
-        ),
-    )
-
-    with configure_tab:
-        with st.container(border=True):
-            st.markdown(
-                """
-                <div class="step-heading">
-                    <span class="step-index" aria-hidden="true">1</span>
-                    <div>
-                        <h2>Configure the generation engine</h2>
-                        <p>Choose the provider, model, credentials, and shared run limits.</p>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.caption("Credentials stay in memory and are never written to run artifacts.")
-            provider_column, credential_column = st.columns(2, gap="large")
-            with provider_column:
-                provider = st.selectbox(
-                    "Provider",
-                    ["gemini", "lm_studio", "ollama"],
-                    key="provider",
-                    on_change=_reset_provider,
-                    format_func=_provider_label,
-                )
-                if provider == "lm_studio":
-                    available_models = st.session_state.get("lm_studio_models", [])
-                    model = (
-                        st.selectbox(
-                            "Model",
-                            available_models,
-                            index=0 if available_models else None,
-                            key="model",
-                            placeholder="Load models or enter a model ID",
-                            accept_new_options=True,
-                            help="Models reported by LM Studio's OpenAI-compatible API.",
-                        )
-                        or ""
-                    )
-                    if not available_models:
-                        st.caption(
-                            "Enter the server token and load available models, "
-                            "or type the exact model ID."
-                        )
-                else:
-                    model = st.text_input(
-                        "Model",
-                        key="model",
-                        help=(
-                            "Current stable Gemini default."
-                            if provider == "gemini"
-                            else "The model must already be available in Ollama."
-                        ),
-                    )
-
-            api_key = ""
-            base_url = _base_url(provider) if provider in LOCAL_BASE_URLS else ""
-            with credential_column:
-                if provider == "gemini":
-                    api_key = st.text_input(
-                        "Gemini API key",
-                        type="password",
-                        value=_env("GEMINI_API_KEY"),
-                        key="gemini_api_key",
-                        help="Used in memory for provider requests and never persisted in run artifacts.",
-                    )
-                elif provider == "lm_studio":
-                    api_key = st.text_input(
-                        "LM Studio API token",
-                        type="password",
-                        value=_env("LM_STUDIO_API_TOKEN"),
-                        key="lm_studio_api_key",
-                        help="Required only when authentication is enabled in LM Studio Server Settings.",
-                        on_change=_clear_lm_studio_models,
-                    )
-
-                if provider in LOCAL_BASE_URLS:
-                    st.session_state.setdefault("base_url", base_url)
-                    base_url = st.text_input(
-                        f"{_provider_label(provider)} base URL",
-                        key="base_url",
-                        help=(
-                            "OpenAI-compatible base URL, including /v1."
-                            if provider == "lm_studio"
-                            else "Start Ollama locally before generating test cases."
-                        ),
-                        on_change=(
-                            _clear_lm_studio_models
-                            if provider == "lm_studio"
-                            else None
-                        ),
-                    )
-                if provider == "lm_studio":
-                    st.button(
-                        "Load available models",
-                        key="load_lm_studio_models",
-                        on_click=_refresh_lm_studio_models,
-                        width="stretch",
-                    )
-                    if error := st.session_state.get("lm_studio_model_error"):
-                        st.error(f"Could not load models: {error}")
-                    elif st.session_state.get("lm_studio_models"):
-                        st.success(
-                            f"Loaded {len(st.session_state['lm_studio_models'])} models."
-                        )
-
-            with st.expander("Advanced run controls"):
-                token_ceiling = st.number_input(
-                    "Token ceiling",
-                    min_value=1000,
-                    value=200_000,
-                    step=1000,
-                    key="token_ceiling",
-                    help="Maximum provider tokens charged to this run.",
-                )
-                st.caption("Temperature is fixed at 0 for reproducible output.")
-
-            run_type = st.selectbox(
-                "Run type",
-                list(RunType),
-                key="run_type",
-                format_func=_run_type_label,
-                help=(
-                    "Choose one generation strategy for this run. "
-                    "Only the selected strategy executes."
-                ),
-            )
-            st.caption(RUN_TYPE_COPY[run_type][1])
-
-    with run_tab:
-        with st.container(border=True):
-            st.markdown(
-                """
-                <div class="step-heading">
-                    <span class="step-index" aria-hidden="true">2</span>
-                    <div>
-                        <h2>Add the source and generate</h2>
-                        <p>Upload one text-extractable BRD or SRS, then run the selected strategy.</p>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            document_column, protocol_column = st.columns([1.1, 0.9], gap="large")
-            with document_column:
-                uploaded = st.file_uploader(
-                    "BRD/SRS PDF",
-                    type=["pdf"],
-                    key="pdf",
-                    help="Use a text-extractable PDF. Scanned image-only files require OCR and are not supported.",
-                )
-                if uploaded is not None:
-                    st.success(
-                        f"Ready: {uploaded.name} · {uploaded.size / 1024:.1f} KB"
-                    )
-
-            with protocol_column:
-                with st.container(border=True):
-                    st.markdown("#### Selected run")
-                    st.markdown(f"**{_run_type_label(run_type)}**")
-                    st.caption(RUN_TYPE_COPY[run_type][1])
-                    st.caption(
-                        f"{_provider_label(provider)} · {model} · "
-                        f"{token_ceiling:,} token ceiling"
-                    )
-
-            run_clicked = st.button(
-                "Generate test cases",
-                type="primary",
-                key="run",
-                width="stretch",
-            )
-
-        if run_clicked:
-            st.session_state.pop("run_result", None)
-            if uploaded is None:
-                st.error("Upload one text-extractable PDF before generating test cases.")
-            elif provider == "gemini" and not api_key.strip():
-                st.error("Enter a Gemini API key before generating test cases.")
-            else:
-                settings = ProviderSettings(
-                    provider=provider,
-                    model=model,
-                    token_ceiling=token_ceiling,
-                    api_key=api_key,
-                    base_url=base_url,
-                )
-                try:
-                    settings.validate()
-                    with st.status("Preparing generation", expanded=True) as status:
-
-                        def progress(message: str) -> None:
-                            status.write(message)
-
-                        runner = st.session_state.get("_runner", run_generation)
-                        result = runner(
-                            uploaded.getvalue(),
-                            uploaded.name,
-                            run_type,
-                            settings,
-                            repository=repository,
-                            progress=progress,
-                        )
-                        st.session_state["run_result"] = result
-                        label, state = _result_status(result)
-                        status.update(
-                            label=label,
-                            state=state,
-                            expanded=state == "error",
-                        )
-                    st.rerun()
-                except Exception as error:
-                    st.error(f"Generation failed: {_safe_error(error, settings)}")
-
-    with results_tab:
-        with st.container(border=True):
-            st.markdown(
-                """
-                <div class="step-heading">
-                    <span class="step-index" aria-hidden="true">3</span>
-                    <div>
-                        <h2>Review and export generated artifacts</h2>
-                        <p>Inspect requirements, scenarios, test cases, traceability, and run diagnostics.</p>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            result = st.session_state.get("run_result")
-            if isinstance(result, RunResult):
-                if (
-                    result.manifest.provider != provider
-                    or result.manifest.model != model
-                    or result.manifest.token_ceiling != token_ceiling
-                    or result.manifest.run_type != run_type
-                ):
-                    st.info(
-                        "The setup has changed since this result was created. "
-                        "Generate again to refresh it."
-                    )
-                _render_result(result, key_prefix="current")
-            else:
-                _render_empty_state()
-
-    with history_tab:
-        with st.container(border=True):
-            st.markdown(
-                """
-                <div class="step-heading">
-                    <span class="step-index" aria-hidden="true">4</span>
-                    <div>
-                        <h2>Browse saved runs</h2>
-                        <p>Compare persisted run settings and open complete generated artifacts.</p>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            _render_history(repository)
+    if st.session_state.get("show_settings"):
+        _settings_dialog()
 
 
 main()
