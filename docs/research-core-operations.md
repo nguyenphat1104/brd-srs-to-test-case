@@ -14,7 +14,7 @@ env PYTHONPATH=src .venv/bin/python -m streamlit run app.py
 
 Open the local URL Streamlit prints, normally `http://localhost:8501`.
 
-To stop the database without deleting run history:
+To stop the database without deleting saved runs:
 
 ```sh
 docker compose down
@@ -30,11 +30,11 @@ PostgreSQL data remains in the Compose-managed `postgres_data` named volume.
 4. A completed or failed run opens automatically. Review its test cases first, then supporting requirements and scenarios, metrics, downloads, diagnostics, and immutable configuration snapshot.
 5. Use **Back to runs** and select a row to reopen it. A running record left by a stopped process displays as **Interrupted**.
 
-Each **Generate test cases** creates an immutable run. Correct a problem and retry rather than editing a saved run.
+Each accepted generation request creates a new immutable run. Correct a problem and retry rather than editing a saved run.
 
 ## Persisted data and security boundary
 
-The application stores normalized safe run data in local PostgreSQL: the source basename and document hash, extracted text chunks, run configuration and lifecycle events, metrics, validation, requirements, scenarios, test cases, citations, and traceability data.
+The application stores normalized run data in local PostgreSQL: the source basename and document hash, extracted text chunks, run configuration and lifecycle events, metrics, validation, requirements, scenarios, test cases, citations, and traceability data.
 
 Raw PDF bytes and provider credentials are never stored in PostgreSQL, downloads, URLs, or run snapshots. **Save settings** stores the active credential in this browser's `localStorage` only when explicitly selected; same-origin scripts can read it. Use a dedicated browser profile and origin, and do not use a shared machine. Known secrets and base URLs are redacted from displayed and persisted failures. Do not put secrets in the source PDF or in a local-provider URL.
 

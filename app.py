@@ -803,7 +803,7 @@ def _render_runs(repository: RunRepository) -> None:
     except StorageError:
         st.session_state.pop("displayed_run_ids", None)
         st.error(
-            "Saved run history is unavailable. Check PostgreSQL and DATABASE_URL, "
+            "Saved runs are unavailable. Check PostgreSQL and DATABASE_URL, "
             "then refresh this page."
         )
         return
@@ -953,7 +953,7 @@ def main() -> None:
         repository = _resolve_repository()
     except StorageError:
         st.error(
-            "Run history database is unavailable. Start it with "
+            "Runs database is unavailable. Start it with "
             "`docker compose up -d db`, verify DATABASE_URL, and refresh this page."
         )
         st.stop()

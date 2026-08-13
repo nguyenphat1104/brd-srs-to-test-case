@@ -560,7 +560,7 @@ def test_list_error_is_safe_actionable_and_create_remains_available() -> None:
 
     text = _rendered_text(at)
     assert not at.exception
-    assert "Saved run history is unavailable" in text
+    assert "Saved runs are unavailable. Check PostgreSQL and DATABASE_URL, then refresh this page." in text
     assert "DATABASE_URL" in text
     assert "list-secret" not in text
     assert _element(at.button, "Create new run")
@@ -599,7 +599,7 @@ def test_database_initialization_failure_remains_blocking() -> None:
     at.run()
 
     text = _rendered_text(at)
-    assert "Run history database is unavailable" in text
+    assert "Runs database is unavailable. Start it with" in text
     assert "docker compose up -d db" in text
     assert "DATABASE_URL" in text
     assert "secret" not in text
