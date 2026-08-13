@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 import streamlit as st
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -45,7 +45,7 @@ class AppSettings(BaseModel):
 
 
 def parse_settings(
-    payload: Any, fallback: AppSettings
+    payload: object, fallback: AppSettings
 ) -> tuple[AppSettings, str | None]:
     if payload is None:
         return fallback, None
@@ -59,7 +59,7 @@ def parse_settings(
 
 @dataclass(frozen=True)
 class BrowserSettingsResult:
-    payload: Any = None
+    payload: object = None
     error: str | None = None
     loaded: bool = False
     revision: int = -1
@@ -89,7 +89,7 @@ export default function(component) {
 
 
 def sync_browser_settings(
-    *, save: Any = None, revision: int = 0
+    *, save: dict[str, object] | None = None, revision: int = 0
 ) -> BrowserSettingsResult:
     injected = st.session_state.get("_browser_settings_sync")
     if injected is not None:
