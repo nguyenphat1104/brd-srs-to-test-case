@@ -347,51 +347,9 @@ def _render_sources(sources) -> None:
         st.markdown(f"- `{source.chunk_id}` · {location} — {source.excerpt}")
 
 
-def _render_bundle(result: RunResult, *, key_prefix: str) -> None:
+def _render_test_cases(result: RunResult, *, key_prefix: str) -> None:
     bundle = result.bundle
-    if bundle is None:
-        return
-
-    st.markdown("### Generated artifacts")
-    st.markdown("#### Requirements")
-    for position, requirement in enumerate(bundle.requirements):
-        with st.expander(
-            f"{requirement.requirement_id} · {requirement.title}",
-            key=f"{key_prefix}-{result.manifest.run_id}-requirement-{position}",
-        ):
-            st.markdown(requirement.description)
-            st.markdown(
-                f"**Type:** {requirement.requirement_type.value.replace('_', ' ').title()}  \n"
-                f"**Priority:** {requirement.priority.value.title()}  \n"
-                f"**Module:** {requirement.module}"
-            )
-            st.markdown(
-                "**Dependency IDs:** "
-                + (", ".join(requirement.dependency_ids) or "None")
-            )
-            st.markdown("**Ambiguities:**")
-            st.markdown(
-                "\n".join(f"- {item}" for item in requirement.ambiguities)
-                or "None"
-            )
-            _render_sources(requirement.source_references)
-
-    st.markdown("#### Scenarios")
-    for position, scenario in enumerate(bundle.scenarios):
-        with st.expander(
-            f"{scenario.scenario_id} · {scenario.title}",
-            key=f"{key_prefix}-{result.manifest.run_id}-scenario-{position}",
-        ):
-            st.markdown(scenario.objective)
-            st.markdown(
-                f"**Type:** {scenario.scenario_type.value.replace('_', ' ').title()}  \n"
-                f"**Requirement IDs:** {', '.join(scenario.requirement_ids)}"
-            )
-            st.markdown("**Preconditions:**")
-            st.markdown(
-                "\n".join(f"- {item}" for item in scenario.preconditions) or "None"
-            )
-            _render_sources(scenario.source_references)
+    assert bundle is not None
 
     st.markdown("#### Test cases")
     for position, test_case in enumerate(bundle.test_cases):
@@ -422,6 +380,95 @@ def _render_bundle(result: RunResult, *, key_prefix: str) -> None:
                 ]
             )
             _render_sources(test_case.source_references)
+
+
+def _render_requirements(result: RunResult, *, key_prefix: str) -> None:
+    bundle = result.bundle
+    assert bundle is not None
+
+    st.markdown("#### Requirements")
+    for position, requirement in enumerate(bundle.requirements):
+        with st.expander(
+            f"{requirement.requirement_id} · {requirement.title}",
+            key=f"{key_prefix}-{result.manifest.run_id}-requirement-{position}",
+        ):
+            st.markdown(requirement.description)
+            st.markdown(
+                f"**Type:** {requirement.requirement_type.value.replace('_', ' ').title()}  \n"
+                f"**Priority:** {requirement.priority.value.title()}  \n"
+                f"**Module:** {requirement.module}"
+            )
+            st.markdown(
+                "**Dependency IDs:** "
+                + (", ".join(requirement.dependency_ids) or "None")
+            )
+            st.markdown("**Ambiguities:**")
+            st.markdown(
+                "\n".join(f"- {item}" for item in requirement.ambiguities)
+                or "None"
+            )
+            _render_sources(requirement.source_references)
+
+
+def _render_scenarios(result: RunResult, *, key_prefix: str) -> None:
+    bundle = result.bundle
+    assert bundle is not None
+
+    st.markdown("#### Scenarios")
+    for position, scenario in enumerate(bundle.scenarios):
+        with st.expander(
+            f"{scenario.scenario_id} · {scenario.title}",
+            key=f"{key_prefix}-{result.manifest.run_id}-scenario-{position}",
+        ):
+            st.markdown(scenario.objective)
+            st.markdown(
+                f"**Type:** {scenario.scenario_type.value.replace('_', ' ').title()}  \n"
+                f"**Requirement IDs:** {', '.join(scenario.requirement_ids)}"
+            )
+            st.markdown("**Preconditions:**")
+            st.markdown(
+                "\n".join(f"- {item}" for item in scenario.preconditions) or "None"
+            )
+            _render_sources(scenario.source_references)
+
+
+def _render_bundle(result: RunResult, *, key_prefix: str) -> None:
+    if result.bundle is None:
+        return
+
+    st.markdown("### Generated artifacts")
+    _render_test_cases(result, key_prefix=key_prefix)
+    _render_requirements(result, key_prefix=key_prefix)
+    _render_scenarios(result, key_prefix=key_prefix)
+
+
+def _render_snapshot(result: RunResult) -> None:
+    manifest = result.manifest
+    st.markdown("### Run configuration snapshot")
+    st.table(
+        [
+            {"Setting": "Run ID", "Value": manifest.run_id},
+            {"Setting": "Run type", "Value": _run_type_label(manifest.run_type)},
+            {"Setting": "Provider", "Value": _provider_label(manifest.provider)},
+            {"Setting": "Model", "Value": manifest.model},
+            {"Setting": "Temperature", "Value": f"{manifest.temperature:g}"},
+            {"Setting": "Token ceiling", "Value": f"{manifest.token_ceiling:,}"},
+            {"Setting": "Source filename", "Value": manifest.source_filename},
+            {"Setting": "Document hash", "Value": manifest.document_hash},
+            {"Setting": "Prompt version", "Value": manifest.prompt_version},
+            {"Setting": "Schema version", "Value": manifest.schema_version},
+            {"Setting": "Status", "Value": manifest.status.value},
+            {"Setting": "Started", "Value": manifest.started_at.isoformat()},
+            {
+                "Setting": "Completed",
+                "Value": (
+                    manifest.completed_at.isoformat()
+                    if manifest.completed_at is not None
+                    else "—"
+                ),
+            },
+        ]
+    )
 
 
 def _render_result(result: RunResult, *, key_prefix: str = "result") -> None:
@@ -456,6 +503,8 @@ def _render_result(result: RunResult, *, key_prefix: str = "result") -> None:
             st.code(_technical_detail(manifest.failure_message), language=None)
     elif manifest.status is RunStatus.COMPLETED:
         st.success("Completed and validated")
+
+    _render_snapshot(result)
 
     metrics = result.metrics
     if metrics is not None:

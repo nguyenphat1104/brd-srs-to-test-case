@@ -607,15 +607,27 @@ def test_database_initialization_failure_remains_blocking() -> None:
     assert not at.dataframe
 
 
-def test_renders_detailed_artifact_content_and_downloads() -> None:
+def test_completed_detail_renders_test_cases_first_and_snapshot() -> None:
     result = _detailed_run()
-    at = _app_test()
+    secret = "browser-only-secret"
+    base_url = "http://localhost:11434"
+    at = _app_test(
+        browser=FakeBrowserSettings(
+            _saved_settings(api_key=secret, base_url=base_url)
+        )
+    )
     _show_detail(at, result)
 
     at.run()
 
     assert not at.exception
     text = _rendered_text(at)
+    headings = [element.value for element in at.markdown]
+    assert headings.index("#### Test cases") < headings.index("#### Requirements")
+    assert headings.index("#### Requirements") < headings.index("#### Scenarios")
+    assert headings.index("### Run configuration snapshot") < headings.index(
+        "### Generated artifacts"
+    )
     for expected in (
         "Staged single agent",
         "Ollama",
@@ -641,7 +653,31 @@ def test_renders_detailed_artifact_content_and_downloads() -> None:
         "AUTHENTICATION",
     ):
         assert expected in text
+    snapshot = next(
+        table.value
+        for table in at.table
+        if list(table.value.columns) == ["Setting", "Value"]
+    )
+    assert snapshot.to_dict("records") == [
+        {"Setting": "Run ID", "Value": result.manifest.run_id},
+        {"Setting": "Run type", "Value": "Staged single agent"},
+        {"Setting": "Provider", "Value": "Ollama"},
+        {"Setting": "Model", "Value": "gemma4"},
+        {"Setting": "Temperature", "Value": "0"},
+        {"Setting": "Token ceiling", "Value": "100,000"},
+        {"Setting": "Source filename", "Value": "sample.pdf"},
+        {"Setting": "Document hash", "Value": "a" * 64},
+        {"Setting": "Prompt version", "Value": "research-core-v1"},
+        {"Setting": "Schema version", "Value": "research-core-v1"},
+        {"Setting": "Status", "Value": "completed"},
+        {"Setting": "Started", "Value": result.manifest.started_at.isoformat()},
+        {"Setting": "Completed", "Value": result.manifest.completed_at.isoformat()},
+    ]
     tables = "\n".join(str(table.value) for table in at.table)
+    assert secret not in text
+    assert base_url not in text
+    assert secret not in tables
+    assert base_url not in tables
     assert "Enter valid credentials." in tables
     assert "The credentials are accepted." in tables
     assert "Submit the login form." in tables
@@ -664,7 +700,17 @@ def test_failed_result_without_metrics_has_an_actionable_summary() -> None:
     at.run()
 
     assert at.status[0].label == "Generation failed"
-    assert "text-extractable PDF" in _rendered_text(at)
+    text = _rendered_text(at)
+    assert "text-extractable PDF" in text
+    assert "### Run configuration snapshot" in text
+    snapshot = next(
+        table.value
+        for table in at.table
+        if list(table.value.columns) == ["Setting", "Value"]
+    )
+    assert dict(zip(snapshot["Setting"], snapshot["Value"], strict=True))[
+        "Status"
+    ] == "failed"
     assert _element(at.download_button, "Download diagnostics")
 
 
@@ -679,8 +725,19 @@ def test_interrupted_result_has_diagnostics_without_a_fake_failure() -> None:
     assert at.status[0].label == "Generation interrupted"
     assert "Unknown failure" not in text
     assert "Technical details" not in text
+    assert "### Run configuration snapshot" in text
     assert not at.error
     assert not at.success
+    snapshot = next(
+        table.value
+        for table in at.table
+        if list(table.value.columns) == ["Setting", "Value"]
+    )
+    snapshot_values = dict(
+        zip(snapshot["Setting"], snapshot["Value"], strict=True)
+    )
+    assert snapshot_values["Status"] == "running"
+    assert snapshot_values["Completed"] == "—"
     assert _element(at.download_button, "Download diagnostics").key == (
         "detail-interrupted-run-diagnostics"
     )
@@ -696,6 +753,10 @@ def test_failed_semantic_result_keeps_artifact_details_and_diagnostics() -> None
     text = _rendered_text(at)
     assert "TC-001 · Sign in with valid credentials" in text
     assert "LM Studio" in text
+    assert "### Run configuration snapshot" in text
+    assert [element.value for element in at.markdown].index(
+        "#### Test cases"
+    ) < [element.value for element in at.markdown].index("#### Requirements")
     assert {button.label for button in at.download_button} == {
         "Download diagnostics"
     }
