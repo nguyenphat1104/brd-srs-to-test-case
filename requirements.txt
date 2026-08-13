@@ -2,5 +2,5 @@ google-genai>=2,<3
 pydantic>=2.10,<3
 pypdf>=6,<7
 pytest>=8,<9
-streamlit>=1.50,<2
+streamlit>=1.61,<2
 psycopg[binary]>=3.2,<4
