@@ -409,7 +409,7 @@ def run_generation(
         if getattr(provider, "model", None) != settings.model:
             raise ConfigurationError("Provider model must match the run model.")
 
-        context = PipelineContext(provider=provider)
+        context = PipelineContext(provider=provider, progress=progress)
         bundle = canonicalize_source_references(
             PIPELINES[run_type](context, chunks), chunks
         )

@@ -856,6 +856,10 @@ def _render_create(repository: RunRepository, settings: AppSettings) -> None:
         format_func=_run_type_label,
     )
     st.caption(RUN_TYPE_COPY[run_type][1])
+    if run_type is RunType.CENTRALIZED_MULTI_AGENT:
+        st.caption(
+            "Live activity shows orchestrator handoffs and agent status, not private model reasoning."
+        )
     st.markdown("### App settings")
     st.caption(
         f"{_provider_label(settings.provider)} · {settings.model} · "
@@ -887,7 +891,7 @@ def _render_create(repository: RunRepository, settings: AppSettings) -> None:
         return
 
     try:
-        with st.status("Preparing generation", expanded=True) as status:
+        with st.status("Live generation activity", expanded=True) as status:
             runner = st.session_state.get("_runner", run_generation)
             result = runner(
                 upload.getvalue(),

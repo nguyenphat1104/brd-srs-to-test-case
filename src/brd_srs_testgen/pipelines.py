@@ -4,7 +4,7 @@ import json
 import threading
 import time
 from collections.abc import Callable, Iterable
-from concurrent.futures import CancelledError, FIRST_EXCEPTION, ThreadPoolExecutor, wait
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
 from typing import TypeVar
 
@@ -274,6 +274,7 @@ Return every original artifact, including unaffected ones. Before returning, ver
 class PipelineContext:
     provider: StructuredProvider
     sleep: Callable[[float], None] = time.sleep
+    progress: Callable[[str], None] | None = None
     retries: int = 0
     schema_repairs: int = 0
     semantic_revisions: int = 0
@@ -295,6 +296,14 @@ class PipelineContext:
     def _record_latency(self, latency_seconds: float) -> None:
         with self._lock:
             self.latency_seconds += latency_seconds
+
+    def notify(self, message: str) -> None:
+        if self.progress is None:
+            return
+        try:
+            self.progress(message)
+        except Exception:
+            pass
 
     def generate(
         self,
@@ -451,6 +460,9 @@ def _balance(items: list[I], weight: Callable[[I], int]) -> list[list[I]]:
 def _run_parallel_workers(
     groups: list[list[I]],
     worker: Callable[[int, list[I], threading.Event], R],
+    *,
+    on_started: Callable[[int], None] | None = None,
+    on_completed: Callable[[int], None] | None = None,
 ) -> list[R]:
     cancellation_event = threading.Event()
     first_error: list[Exception] = []
@@ -466,19 +478,29 @@ def _run_parallel_workers(
             cancellation_event.set()
             raise
 
+    results: dict[int, R] = {}
     with ThreadPoolExecutor(max_workers=WORKER_COUNT) as executor:
-        futures = [
-            executor.submit(invoke, worker_index, group)
+        futures = {
+            executor.submit(invoke, worker_index, group): worker_index
             for worker_index, group in enumerate(groups)
-        ]
-        _done, pending = wait(futures, return_when=FIRST_EXCEPTION)
-        if first_error:
-            for future in pending:
-                future.cancel()
-        wait(futures)
+        }
+        for worker_index in range(len(groups)):
+            if on_started is not None:
+                on_started(worker_index)
+        for future in as_completed(futures):
+            worker_index = futures[future]
+            try:
+                results[worker_index] = future.result()
+            except Exception:
+                for pending in futures:
+                    pending.cancel()
+                wait(futures)
+                raise first_error[0]
+            if on_completed is not None:
+                on_completed(worker_index)
     if first_error:
         raise first_error[0]
-    return [future.result() for future in futures]
+    return [results[worker_index] for worker_index in range(len(groups))]
 
 
 def _worker_bounds(worker_index: int) -> tuple[int, int]:
@@ -606,6 +628,9 @@ def run_centralized_multi_agent(
 ) -> ArtifactBundle:
     chunks = list(chunks)
     chunk_groups = _balance(chunks, lambda chunk: len(chunk.text))
+    context.notify(
+        "Orchestrator: spawning Analyzer 1, Analyzer 2, and Analyzer 3."
+    )
 
     def extract_requirements(
         worker_index: int,
@@ -621,13 +646,23 @@ def run_centralized_multi_agent(
         _validate_worker_requirements(worker_index, batch)
         return batch
 
-    worker_requirements = _run_parallel_workers(chunk_groups, extract_requirements)
+    worker_requirements = _run_parallel_workers(
+        chunk_groups,
+        extract_requirements,
+        on_started=lambda index: context.notify(
+            f"Analyzer {index + 1}: working — extracting requirements."
+        ),
+        on_completed=lambda index: context.notify(
+            f"Analyzer {index + 1}: done — handed requirements to the orchestrator."
+        ),
+    )
 
     candidates = [
         requirement
         for batch in worker_requirements
         for requirement in batch.requirements
     ]
+    context.notify("Orchestrator: reconciling the analysts' requirement findings.")
     requirements = canonicalize_source_references(
         context.generate(
             [_user(reconcile_requirements_prompt(chunks, candidates))],
@@ -641,6 +676,9 @@ def run_centralized_multi_agent(
         requirements.requirements,
         lambda requirement: len(requirement.description)
         + 100 * len(requirement.source_references),
+    )
+    context.notify(
+        "Orchestrator: spawning Test Generator 1, Test Generator 2, and Test Generator 3."
     )
 
     def generate_cases(
@@ -672,8 +710,18 @@ def run_centralized_multi_agent(
         )
         return batch
 
-    worker_cases = _run_parallel_workers(requirement_groups, generate_cases)
+    worker_cases = _run_parallel_workers(
+        requirement_groups,
+        generate_cases,
+        on_started=lambda index: context.notify(
+            f"Test Generator {index + 1}: working — creating scenarios and test cases."
+        ),
+        on_completed=lambda index: context.notify(
+            f"Test Generator {index + 1}: done — handed artifacts to the orchestrator."
+        ),
+    )
 
+    context.notify("Orchestrator: merging the generated artifacts.")
     bundle = canonicalize_source_references(
         ArtifactBundle(
             requirements=requirements.requirements,

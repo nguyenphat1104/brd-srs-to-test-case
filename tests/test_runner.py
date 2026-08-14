@@ -319,6 +319,36 @@ def test_running_record_and_started_event_precede_parse_and_provider(
     assert trace[-1] == "Completed"
 
 
+def test_pipeline_activity_is_forwarded_to_the_progress_callback(monkeypatch) -> None:
+    repository = RecordingRepository()
+    trace = []
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def generate(context, _chunks):
+        context.notify("Orchestrator: spawning Analyzer 1.")
+        return bundle()
+
+    monkeypatch.setitem(runner.PIPELINES, RunType.CENTRALIZED_MULTI_AGENT, generate)
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.CENTRALIZED_MULTI_AGENT,
+        settings(),
+        repository=repository,
+        progress=trace.append,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+    )
+
+    assert result.manifest.status is RunStatus.COMPLETED
+    assert trace == [
+        "Preparing document",
+        "Generating artifacts",
+        "Orchestrator: spawning Analyzer 1.",
+        "Completed",
+    ]
+
+
 def test_parsing_failure_is_finalized_without_generated_parts(monkeypatch) -> None:
     secret = "gemini-super-secret"
     base_url = "http://private-lm-studio:1234/v1"

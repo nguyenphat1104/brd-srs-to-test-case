@@ -107,6 +107,36 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
     ) == 2
 
 
+def test_centralized_activity_reports_orchestrator_handoffs() -> None:
+    activity: list[str] = []
+
+    run_centralized_multi_agent(
+        PipelineContext(provider=CentralProvider(), progress=activity.append), [chunk()]
+    )
+
+    assert activity[0] == "Orchestrator: spawning Analyzer 1, Analyzer 2, and Analyzer 3."
+    assert "Orchestrator: reconciling the analysts' requirement findings." in activity
+    assert (
+        "Orchestrator: spawning Test Generator 1, Test Generator 2, and Test Generator 3."
+        in activity
+    )
+    assert activity[-1] == "Orchestrator: merging the generated artifacts."
+    for index in range(1, 4):
+        assert f"Analyzer {index}: working — extracting requirements." in activity
+        assert (
+            f"Analyzer {index}: done — handed requirements to the orchestrator."
+            in activity
+        )
+        assert (
+            f"Test Generator {index}: working — creating scenarios and test cases."
+            in activity
+        )
+        assert (
+            f"Test Generator {index}: done — handed artifacts to the orchestrator."
+            in activity
+        )
+
+
 @pytest.mark.parametrize(
     ("worker_index", "lower", "upper"),
     [(0, 1, 1000), (1, 1001, 2000), (2, 2001, 3000)],
