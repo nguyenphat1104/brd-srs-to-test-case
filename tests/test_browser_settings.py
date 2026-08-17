@@ -33,6 +33,25 @@ def test_ollama_settings_build_provider_settings_without_run_type():
     assert "run_type" not in settings.model_dump()
 
 
+def test_agent_model_overrides_are_forwarded_to_provider_settings():
+    settings = app_settings(
+        analyst_model="analyst",
+        test_generator_model="generator",
+        reviewer_model="reviewer",
+    )
+
+    provider_settings = settings.provider_settings()
+
+    assert {
+        agent: provider_settings.model_for(agent)
+        for agent in ("analyst", "test_generator", "reviewer")
+    } == {
+        "analyst": "analyst",
+        "test_generator": "generator",
+        "reviewer": "reviewer",
+    }
+
+
 def test_gemini_requires_a_credential_when_building_provider_settings():
     settings = app_settings(provider="gemini", base_url="")
 

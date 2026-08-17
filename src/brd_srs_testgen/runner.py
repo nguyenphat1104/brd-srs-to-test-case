@@ -5,7 +5,7 @@ import json
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from urllib.parse import parse_qsl, urlsplit
@@ -66,6 +66,16 @@ class ProviderSettings:
     token_ceiling: int
     api_key: str = field(default="", repr=False)
     base_url: str = field(default="http://localhost:11434", repr=False)
+    analyst_model: str = ""
+    test_generator_model: str = ""
+    reviewer_model: str = ""
+
+    def model_for(self, agent: str) -> str:
+        configured = getattr(self, f"{agent}_model", "")
+        return configured.strip() or self.model
+
+    def with_model(self, model: str) -> ProviderSettings:
+        return replace(self, model=model)
 
     def validate(self) -> None:
         if not isinstance(self.provider, str) or self.provider not in {
@@ -84,6 +94,11 @@ class ProviderSettings:
             raise ValueError("Token ceiling must be positive.")
         if not isinstance(self.api_key, str):
             raise ValueError("API key must be a string.")
+        for agent in ("analyst", "test_generator", "reviewer"):
+            if not isinstance(getattr(self, f"{agent}_model"), str):
+                raise ValueError(
+                    f"{agent.replace('_', ' ').title()} model must be a string."
+                )
         if self.provider == "gemini" and not self.api_key.strip():
             raise ValueError("Gemini API key is required.")
         if self.provider in {"lm_studio", "ollama"}:
@@ -288,6 +303,7 @@ def _repair_coverage(
         ],
         CoverageRepair,
         max_output_tokens=2_000,
+        agent="reviewer",
     )
     scenario_links = {
         item.scenario_id: list(item.requirement_ids) for item in bundle.scenarios
@@ -409,7 +425,24 @@ def run_generation(
         if getattr(provider, "model", None) != settings.model:
             raise ConfigurationError("Provider model must match the run model.")
 
-        context = PipelineContext(provider=provider, progress=progress)
+        providers: dict[str, StructuredProvider] = {}
+        if run_type is RunType.CENTRALIZED_MULTI_AGENT:
+            for agent in ("analyst", "test_generator", "reviewer"):
+                model = settings.model_for(agent)
+                if model == settings.model:
+                    continue
+                agent_provider = _make_provider(settings.with_model(model), ledger)
+                if getattr(agent_provider, "ledger", None) is not ledger:
+                    raise ConfigurationError("Provider must use the run budget ledger.")
+                if getattr(agent_provider, "model", None) != model:
+                    raise ConfigurationError(
+                        "Agent provider model must match its configured model."
+                    )
+                providers[agent] = agent_provider
+
+        context = PipelineContext(
+            provider=provider, providers=providers, progress=progress
+        )
         bundle = canonicalize_source_references(
             PIPELINES[run_type](context, chunks), chunks
         )

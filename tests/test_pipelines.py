@@ -107,6 +107,55 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
     ) == 2
 
 
+def test_centralized_routes_each_agent_role_to_its_provider() -> None:
+    analyst = CentralProvider()
+    generator = CentralProvider()
+    reviewer = CentralProvider()
+    analyst.model = "analyst-model"
+    generator.model = "generator-model"
+    reviewer.model = "reviewer-model"
+    activity = []
+
+    result = run_centralized_multi_agent(
+        PipelineContext(
+            provider=CentralProvider(),
+            providers={
+                "analyst": analyst,
+                "test_generator": generator,
+                "reviewer": reviewer,
+            },
+            progress=activity.append,
+        ),
+        [chunk()],
+    )
+
+    assert result == bundle()
+    assert len(analyst.calls) == 3
+    assert all(
+        "WORKER REQUIREMENT EXTRACTION" in call[0][0]["content"]
+        for call in analyst.calls
+    )
+    assert len(generator.calls) == 3
+    assert all(issubclass(call[1], GeneratedCases) for call in generator.calls)
+    assert len(reviewer.calls) == 1
+    assert "CANDIDATES JSON" in reviewer.calls[0][0][0]["content"]
+    assert {
+        event.model
+        for event in activity
+        if getattr(event, "role", "") == "Requirement analyst"
+    } == {"analyst-model"}
+    assert {
+        event.model
+        for event in activity
+        if getattr(event, "role", "") == "Test designer"
+    } == {"generator-model"}
+    assert {
+        event.model
+        for event in activity
+        if getattr(event, "role", "") == "Requirements curator"
+    } == {"reviewer-model"}
+
+
 def test_centralized_activity_reports_orchestrator_handoffs() -> None:
     activity: list[str] = []
 
@@ -135,6 +184,27 @@ def test_centralized_activity_reports_orchestrator_handoffs() -> None:
             f"Test Generator {index}: done — handed artifacts to the orchestrator."
             in activity
         )
+
+    analyst_artifacts = [
+        event
+        for event in activity
+        if getattr(event, "artifact_label", "") == "Candidate requirements"
+    ]
+    analysts_working = [
+        event
+        for event in activity
+        if getattr(event, "task", "").startswith("Extract testable business rules")
+    ]
+    generator_artifacts = [
+        event
+        for event in activity
+        if getattr(event, "artifact_label", "") == "Scenarios and test cases"
+    ]
+    assert all(event.model == "test-model" and event.artifact is not None for event in analyst_artifacts)
+    assert all(event.model == "test-model" and event.artifact is not None for event in generator_artifacts)
+    assert len(analysts_working) == 3
+    assert all("assigned source chunk" in event.scope for event in analysts_working)
+    assert all("Candidate requirements" in event.deliverable for event in analysts_working)
 
 
 @pytest.mark.parametrize(
@@ -283,6 +353,7 @@ class CancellationAwareContext(PipelineContext):
         max_output_tokens,
         allow_schema_repair=True,
         cancellation_event=None,
+        agent="default",
     ):
         if cancellation_event is not None:
             self.provider.cancellation_event = cancellation_event
@@ -292,6 +363,7 @@ class CancellationAwareContext(PipelineContext):
             max_output_tokens,
             allow_schema_repair,
             cancellation_event,
+            agent,
         )
 
 

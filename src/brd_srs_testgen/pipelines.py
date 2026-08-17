@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .documents import canonicalize_source_references, render_chunks
 from .models import (
+    ActivityEvent,
     ArtifactBundle,
     DocumentChunk,
     GeneratedCases,
@@ -273,6 +274,7 @@ Return every original artifact, including unaffected ones. Before returning, ver
 @dataclass
 class PipelineContext:
     provider: StructuredProvider
+    providers: dict[str, StructuredProvider] = field(default_factory=dict)
     sleep: Callable[[float], None] = time.sleep
     progress: Callable[[str], None] | None = None
     retries: int = 0
@@ -287,6 +289,12 @@ class PipelineContext:
     def charged_tokens(self) -> int:
         return self.provider.ledger.used
 
+    def _provider_for(self, agent: str) -> StructuredProvider:
+        return self.providers.get(agent, self.provider)
+
+    def model_for(self, agent: str) -> str:
+        return self._provider_for(agent).model
+
     def _record(self, result: GenerationResult | StructuredOutputError) -> None:
         with self._lock:
             self.input_tokens += result.input_tokens
@@ -297,11 +305,37 @@ class PipelineContext:
         with self._lock:
             self.latency_seconds += latency_seconds
 
-    def notify(self, message: str) -> None:
+    def notify(
+        self,
+        message: str,
+        *,
+        agent: str = "",
+        role: str = "",
+        model: str = "",
+        state: str = "",
+        task: str = "",
+        scope: str = "",
+        deliverable: str = "",
+        artifact: BaseModel | None = None,
+        artifact_label: str = "",
+    ) -> None:
         if self.progress is None:
             return
         try:
-            self.progress(message)
+            self.progress(
+                ActivityEvent(
+                    message,
+                    agent=agent,
+                    role=role,
+                    model=model,
+                    state=state,
+                    task=task,
+                    scope=scope,
+                    deliverable=deliverable,
+                    artifact=artifact,
+                    artifact_label=artifact_label,
+                )
+            )
         except Exception:
             pass
 
@@ -312,6 +346,7 @@ class PipelineContext:
         max_output_tokens: int,
         allow_schema_repair: bool = True,
         cancellation_event: threading.Event | None = None,
+        agent: str = "default",
     ) -> T:
         current_messages = [message.copy() for message in messages]
         transport_retries = 0
@@ -322,7 +357,7 @@ class PipelineContext:
                 raise CancelledError("A sibling worker failed.")
             started = time.perf_counter()
             try:
-                result = self.provider.generate(
+                result = self._provider_for(agent).generate(
                     current_messages, schema, max_output_tokens=max_output_tokens
                 )
             except ProviderError as error:
@@ -396,6 +431,7 @@ class PipelineContext:
             [*messages, prompt],
             schema,
             max_output_tokens,
+            agent="reviewer",
         )
         if use_history:
             messages.extend((prompt, _assistant(revised)))
@@ -457,12 +493,20 @@ def _balance(items: list[I], weight: Callable[[I], int]) -> list[list[I]]:
     return groups
 
 
+def _chunk_scope(chunks: list[DocumentChunk]) -> str:
+    pages = ", ".join(
+        str(page) for page in sorted({chunk.page_number for chunk in chunks})
+    )
+    label = "chunks" if len(chunks) != 1 else "chunk"
+    return f"{len(chunks)} assigned source {label} · pages {pages or 'none'}"
+
+
 def _run_parallel_workers(
     groups: list[list[I]],
     worker: Callable[[int, list[I], threading.Event], R],
     *,
     on_started: Callable[[int], None] | None = None,
-    on_completed: Callable[[int], None] | None = None,
+    on_completed: Callable[[int, R], None] | None = None,
 ) -> list[R]:
     cancellation_event = threading.Event()
     first_error: list[Exception] = []
@@ -497,7 +541,7 @@ def _run_parallel_workers(
                 wait(futures)
                 raise first_error[0]
             if on_completed is not None:
-                on_completed(worker_index)
+                on_completed(worker_index, results[worker_index])
     if first_error:
         raise first_error[0]
     return [results[worker_index] for worker_index in range(len(groups))]
@@ -629,7 +673,10 @@ def run_centralized_multi_agent(
     chunks = list(chunks)
     chunk_groups = _balance(chunks, lambda chunk: len(chunk.text))
     context.notify(
-        "Orchestrator: spawning Analyzer 1, Analyzer 2, and Analyzer 3."
+        "Orchestrator: spawning Analyzer 1, Analyzer 2, and Analyzer 3.",
+        agent="Orchestrator",
+        role="Policy coordinator",
+        state="working",
     )
 
     def extract_requirements(
@@ -642,6 +689,7 @@ def run_centralized_multi_agent(
             BoundedRequirementBatch,
             8_000,
             cancellation_event=cancellation_event,
+            agent="analyst",
         ), chunks)
         _validate_worker_requirements(worker_index, batch)
         return batch
@@ -650,10 +698,26 @@ def run_centralized_multi_agent(
         chunk_groups,
         extract_requirements,
         on_started=lambda index: context.notify(
-            f"Analyzer {index + 1}: working — extracting requirements."
+            f"Analyzer {index + 1}: working — extracting requirements.",
+            agent=f"Analyzer {index + 1}",
+            role="Requirement analyst",
+            model=context.model_for("analyst"),
+            state="working",
+            task=(
+                "Extract testable business rules, validations, and exceptions "
+                "with source references."
+            ),
+            scope=_chunk_scope(chunk_groups[index]),
+            deliverable="Candidate requirements for reviewer reconciliation.",
         ),
-        on_completed=lambda index: context.notify(
-            f"Analyzer {index + 1}: done — handed requirements to the orchestrator."
+        on_completed=lambda index, batch: context.notify(
+            f"Analyzer {index + 1}: done — handed requirements to the orchestrator.",
+            agent=f"Analyzer {index + 1}",
+            role="Requirement analyst",
+            model=context.model_for("analyst"),
+            state="complete",
+            artifact=batch,
+            artifact_label="Candidate requirements",
         ),
     )
 
@@ -662,14 +726,30 @@ def run_centralized_multi_agent(
         for batch in worker_requirements
         for requirement in batch.requirements
     ]
-    context.notify("Orchestrator: reconciling the analysts' requirement findings.")
+    context.notify(
+        "Orchestrator: reconciling the analysts' requirement findings.",
+        agent="Reviewer",
+        role="Requirements curator",
+        model=context.model_for("reviewer"),
+        state="working",
+    )
     requirements = canonicalize_source_references(
         context.generate(
             [_user(reconcile_requirements_prompt(chunks, candidates))],
             BoundedRequirementBatch,
             8_000,
+            agent="reviewer",
         ),
         chunks,
+    )
+    context.notify(
+        f"Reviewer: published {len(requirements.requirements)} canonical requirements.",
+        agent="Reviewer",
+        role="Requirements curator",
+        model=context.model_for("reviewer"),
+        state="complete",
+        artifact=requirements,
+        artifact_label="Canonical requirements",
     )
 
     requirement_groups = _balance(
@@ -678,7 +758,10 @@ def run_centralized_multi_agent(
         + 100 * len(requirement.source_references),
     )
     context.notify(
-        "Orchestrator: spawning Test Generator 1, Test Generator 2, and Test Generator 3."
+        "Orchestrator: spawning Test Generator 1, Test Generator 2, and Test Generator 3.",
+        agent="Orchestrator",
+        role="Policy coordinator",
+        state="working",
     )
 
     def generate_cases(
@@ -701,6 +784,7 @@ def run_centralized_multi_agent(
             BoundedGeneratedCases,
             8_000,
             cancellation_event=cancellation_event,
+            agent="test_generator",
         ), chunks)
         _validate_worker_cases(
             worker_index,
@@ -714,14 +798,23 @@ def run_centralized_multi_agent(
         requirement_groups,
         generate_cases,
         on_started=lambda index: context.notify(
-            f"Test Generator {index + 1}: working — creating scenarios and test cases."
+            f"Test Generator {index + 1}: working — creating scenarios and test cases.",
+            agent=f"Test Generator {index + 1}",
+            role="Test designer",
+            model=context.model_for("test_generator"),
+            state="working",
         ),
-        on_completed=lambda index: context.notify(
-            f"Test Generator {index + 1}: done — handed artifacts to the orchestrator."
+        on_completed=lambda index, batch: context.notify(
+            f"Test Generator {index + 1}: done — handed artifacts to the orchestrator.",
+            agent=f"Test Generator {index + 1}",
+            role="Test designer",
+            model=context.model_for("test_generator"),
+            state="complete",
+            artifact=batch,
+            artifact_label="Scenarios and test cases",
         ),
     )
 
-    context.notify("Orchestrator: merging the generated artifacts.")
     bundle = canonicalize_source_references(
         ArtifactBundle(
             requirements=requirements.requirements,
@@ -729,5 +822,13 @@ def run_centralized_multi_agent(
             test_cases=[test_case for batch in worker_cases for test_case in batch.test_cases],
         ),
         chunks,
+    )
+    context.notify(
+        "Orchestrator: merging the generated artifacts.",
+        agent="Orchestrator",
+        role="Policy coordinator",
+        state="complete",
+        artifact=bundle,
+        artifact_label="Merged artifact bundle",
     )
     return bundle

@@ -85,6 +85,8 @@ In **Settings**, select `ollama`; the editable defaults are `http://localhost:11
 
 Start the local server from LM Studio's Developer tab and load a model. In **Settings**, select `LM Studio` and keep the default OpenAI-compatible base URL, `http://localhost:1234/v1`. If authentication is enabled, enter a token created in LM Studio Server Settings. Select **Load available models**, choose the loaded model, select **Save settings**, create one run, and verify its detail page and saved **Runs** row.
 
+For `centralized_multi_agent`, optional Analyst, Test generator, and Reviewer model IDs route each role to a different model; blank fields use the primary Model. LM Studio does not load these IDs on demand, so load every selected model before generating. All roles share the configured token ceiling.
+
 ## Offline verification
 
 Tests use fake providers and make no live provider calls. `TEST_DATABASE_URL` must target the dedicated local `brd_srs_test` database; never point it at the application database or a remote database. Source the existing `.env` so the current local DSN is exported:

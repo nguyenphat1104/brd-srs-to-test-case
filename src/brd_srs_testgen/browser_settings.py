@@ -24,6 +24,9 @@ class AppSettings(BaseModel):
     api_key: str = Field(default="", repr=False)
     base_url: str = ""
     token_ceiling: int = Field(strict=True, ge=1000)
+    analyst_model: str = ""
+    test_generator_model: str = ""
+    reviewer_model: str = ""
 
     @field_validator("model")
     @classmethod
@@ -32,6 +35,10 @@ class AppSettings(BaseModel):
             raise ValueError("Model must not be blank.")
         return value
 
+    def model_for(self, agent: str) -> str:
+        configured = getattr(self, f"{agent}_model", "")
+        return configured.strip() or self.model
+
     def provider_settings(self) -> ProviderSettings:
         settings = ProviderSettings(
             provider=self.provider,
@@ -39,6 +46,9 @@ class AppSettings(BaseModel):
             token_ceiling=self.token_ceiling,
             api_key=self.api_key,
             base_url=self.base_url,
+            analyst_model=self.analyst_model,
+            test_generator_model=self.test_generator_model,
+            reviewer_model=self.reviewer_model,
         )
         settings.validate()
         return settings

@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- Prototype: current Streamlit palette and real pipeline stages only; no private model reasoning. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Direction A — Runbook checkpoints</title>
+  <style>
+    :root { --blue:#2563eb; --blue-soft:#eff6ff; --ink:#0f172a; --muted:#64748b; --line:#dbe3ee; --paper:#fff; --wash:#f8fafc; --green:#15803d; --amber:#a16207; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--wash); color:var(--ink); font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .shell { max-width:1360px; margin:0 auto; padding:30px 38px 54px; }
+    .eyebrow { color:var(--blue); font-size:12px; font-weight:750; letter-spacing:.08em; text-transform:uppercase; }
+    header { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; padding:6px 0 25px; }
+    h1 { margin:4px 0 0; font-size:29px; letter-spacing:-.04em; } .run { color:var(--muted); text-align:right; } .run strong { color:var(--ink); }
+    .rail, .panel, .agent { background:var(--paper); border:1px solid var(--line); border-radius:12px; box-shadow:0 1px 2px rgba(15,23,42,.025); }
+    .rail { padding:21px 23px 18px; } .rail-top { display:flex; justify-content:space-between; align-items:center; gap:16px; } .rail-top h2,.panel h2 { margin:0; font-size:15px; } .live { color:var(--green); font-weight:700; font-size:12px; }
+    .steps { display:grid; grid-template-columns:repeat(5,1fr); gap:0; margin-top:21px; } .step { position:relative; min-width:0; padding-right:13px; } .step:not(:last-child)::after { content:""; position:absolute; z-index:0; top:9px; left:19px; width:calc(100% - 19px); height:2px; background:var(--line); } .step.done:not(:last-child)::after { background:var(--blue); }
+    .dot { position:relative; z-index:1; display:grid; place-items:center; width:20px; height:20px; border:2px solid var(--line); border-radius:50%; background:#fff; color:#fff; font-size:11px; font-weight:800; } .done .dot { border-color:var(--blue); background:var(--blue); } .active .dot { border-color:var(--blue); box-shadow:0 0 0 5px rgba(37,99,235,.12); animation:pulse 1.8s ease-in-out infinite; } .step-title { margin-top:10px; font-size:13px; font-weight:750; } .step-copy { color:var(--muted); font-size:12px; }
+    .grid { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(300px,.85fr); gap:18px; margin-top:18px; } .panel { padding:21px; } .phase { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:19px; } .phase h2 { font-size:18px; letter-spacing:-.02em; } .phase p { margin:4px 0 0; color:var(--muted); } .tag { flex:none; padding:5px 9px; color:var(--blue); background:var(--blue-soft); border-radius:999px; font-size:12px; font-weight:750; }
+    .agents { display:grid; gap:10px; } .agent { display:grid; grid-template-columns:42px minmax(0,1fr) auto; gap:13px; align-items:center; padding:14px; } .avatar { width:38px; height:38px; display:grid; place-items:center; border-radius:10px; color:var(--blue); background:var(--blue-soft); font-size:12px; font-weight:800; } .agent-name { font-weight:750; } .agent-meta,.agent-task { color:var(--muted); font-size:12px; } .agent-task { margin-top:5px; color:var(--ink); } .state { min-width:76px; text-align:right; color:var(--muted); font-size:12px; font-weight:700; } .state.working { color:var(--blue); } .state.done { color:var(--green); } .state.working::before,.state.done::before { content:""; display:inline-block; width:7px; height:7px; margin:0 5px 1px 0; border-radius:50%; background:currentColor; } .state.working::before { animation:pulse 1.8s ease-in-out infinite; }
+    .artifact { margin-top:17px; padding:15px; border:1px solid #bfdbfe; border-radius:10px; background:var(--blue-soft); } .artifact-label { color:var(--blue); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; } .artifact h3 { margin:5px 0 3px; font-size:14px; } .artifact p { margin:0; color:#475569; font-size:12px; }.artifact .link { display:inline-block; margin-top:9px; color:var(--blue); font-size:12px; font-weight:750; }
+    .checkpoint-list { margin:15px 0 0; padding:0; list-style:none; } .checkpoint-list li { display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:9px; align-items:center; padding:13px 0; border-top:1px solid var(--line); } .check { display:grid; place-items:center; width:18px; height:18px; border-radius:50%; background:#dcfce7; color:var(--green); font-size:11px; font-weight:900; } .check.active { background:var(--blue-soft); color:var(--blue); animation:pulse 1.8s ease-in-out infinite; } .check.pending { background:#f1f5f9; color:#94a3b8; }.checkpoint-list b { font-size:13px; }.checkpoint-list span { color:var(--muted); font-size:12px; }
+    .note { margin-top:17px; padding:13px; border-left:3px solid var(--blue); background:#f8fafc; color:var(--muted); font-size:12px; } @keyframes pulse { 50% { opacity:.55; transform:scale(.9); } }
+    @media (max-width:800px) { .shell { padding:20px; } header,.phase { align-items:flex-start; flex-direction:column; } .run { text-align:left; } .steps { grid-template-columns:1fr; gap:12px; } .step { display:grid; grid-template-columns:20px minmax(0,1fr); column-gap:10px; padding:0; } .step:not(:last-child)::after { top:20px; left:9px; width:2px; height:calc(100% + 8px); } .step-title { margin:0; } .step-copy { grid-column:2; } .grid { grid-template-columns:1fr; } } @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header><div><div class="eyebrow">BRD / SRS → Test Cases</div><h1>Generation run</h1></div><div class="run"><strong>Online store checkout BRD</strong><br>Centralized multi-agent workflow</div></header>
+    <section class="rail" aria-label="Generation plan"><div class="rail-top"><h2>Plan and checkpoints</h2><span class="live">● Run in progress</span></div><div class="steps">
+      <div class="step done"><div class="dot">✓</div><div><div class="step-title">Parse document</div><div class="step-copy">Checkpoint complete</div></div></div>
+      <div class="step done"><div class="dot">✓</div><div><div class="step-title">Extract requirements</div><div class="step-copy">Checkpoint complete</div></div></div>
+      <div class="step active"><div class="dot"></div><div><div class="step-title">Reconcile findings</div><div class="step-copy">In progress</div></div></div>
+      <div class="step"><div class="dot"></div><div><div class="step-title">Generate test cases</div><div class="step-copy">Waiting for checkpoint</div></div></div>
+      <div class="step"><div class="dot"></div><div><div class="step-title">Validate and deliver</div><div class="step-copy">Waiting for checkpoint</div></div></div>
+    </div></section>
+    <div class="grid">
+      <section class="panel"><div class="phase"><div><h2>Current phase: reconcile requirements</h2><p>The reviewer is comparing the analysts’ candidate findings before publishing the canonical requirements.</p></div><span class="tag">Checkpoint 3 of 5</span></div>
+        <div class="agents">
+          <article class="agent"><div class="avatar">OR</div><div><div class="agent-name">Orchestrator</div><div class="agent-meta">Coordinator · google/gemma-4-26b-a4b-qat</div><div class="agent-task">Waiting for the reviewer’s canonical requirement set.</div></div><div class="state">Waiting</div></article>
+          <article class="agent"><div class="avatar">A1</div><div><div class="agent-name">Analyzer 1</div><div class="agent-meta">Requirements analyst · qwen/qwen3-4b</div><div class="agent-task">Extracted business rules and submitted candidate requirements.</div></div><div class="state done">Complete</div></article>
+          <article class="agent"><div class="avatar">A2</div><div><div class="agent-name">Analyzer 2</div><div class="agent-meta">Requirements analyst · google/gemma-4-26b-a4b-qat</div><div class="agent-task">Extracted validation and exception requirements.</div></div><div class="state done">Complete</div></article>
+          <article class="agent"><div class="avatar">RV</div><div><div class="agent-name">Reviewer</div><div class="agent-meta">Requirements reviewer · qwen/qwen3-4b</div><div class="agent-task">Reconciling duplicate and conflicting candidate requirements.</div></div><div class="state working">Working</div></article>
+        </div>
+        <div class="artifact"><div class="artifact-label">Latest artifact</div><h3>Canonical requirements · pending publication</h3><p>The review output becomes the input for the test-generation checkpoint.</p><span class="link">Preview when published →</span></div>
+      </section>
+      <aside class="panel"><h2>Checkpoint record</h2><ul class="checkpoint-list"><li><span class="check">✓</span><div><b>Document prepared</b><br><span>Source ready for analysis</span></div><span>Done</span></li><li><span class="check">✓</span><div><b>Candidate findings collected</b><br><span>Analyst artifacts received</span></div><span>Done</span></li><li><span class="check active">•</span><div><b>Canonical requirements published</b><br><span>Reviewer handoff</span></div><span>Active</span></li><li><span class="check pending">4</span><div><b>Test-case bundles created</b><br><span>Generator handoff</span></div><span>Queued</span></li><li><span class="check pending">5</span><div><b>Result validated</b><br><span>Final delivery</span></div><span>Queued</span></li></ul><div class="note">Live activity shows agent handoffs, tasks, and artifacts. Private model reasoning is not displayed.</div></aside>
+    </div>
+  </main>
+</body>
+</html>

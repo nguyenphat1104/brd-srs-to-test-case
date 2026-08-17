@@ -6,7 +6,9 @@ from streamlit.testing.v1 import AppTest
 
 from brd_srs_testgen.browser_settings import AppSettings, BrowserSettingsResult
 from brd_srs_testgen.models import (
+    ActivityEvent,
     FailureCategory,
+    RequirementBatch,
     RunHistoryItem,
     RunManifest,
     RunResult,
@@ -332,11 +334,19 @@ def test_settings_save_is_explicit_and_activates_after_storage_confirms() -> Non
     _element(at.button, "Settings").click()
     at.run()
     _element(at.text_input, "Model").set_value("gemini-saved")
+    _element(at.text_input, "Analyst model (optional)").set_value("analyst-model")
+    _element(at.text_input, "Test generator model (optional)").set_value(
+        "generator-model"
+    )
+    _element(at.text_input, "Reviewer model (optional)").set_value("reviewer-model")
     at.run()
     _element(at.button, "Save settings").click()
     at.run()
 
     assert browser.saved[-1]["model"] == "gemini-saved"
+    assert browser.saved[-1]["analyst_model"] == "analyst-model"
+    assert browser.saved[-1]["test_generator_model"] == "generator-model"
+    assert browser.saved[-1]["reviewer_model"] == "reviewer-model"
     assert "run_type" not in browser.saved[-1]
     assert at.session_state["app_settings"].model == "gemini-saved"
 
@@ -403,7 +413,7 @@ def test_ollama_settings_use_local_defaults() -> None:
     )
 
 
-def test_lm_studio_settings_retain_current_controls(monkeypatch) -> None:
+def test_lm_studio_settings_load_and_assign_models_automatically(monkeypatch) -> None:
     monkeypatch.setenv("LM_STUDIO_API_TOKEN", "lm-studio-from-env")
     monkeypatch.setenv("LM_STUDIO_BASE_URL", "http://lm-studio:1234/v1")
     at = _app_test()
@@ -424,9 +434,13 @@ def test_lm_studio_settings_retain_current_controls(monkeypatch) -> None:
     assert _element(at.text_input, "LM Studio base URL").value == (
         "http://lm-studio:1234/v1"
     )
-    _element(at.button, "Load available models").click()
-    at.run()
     assert _element(at.selectbox, "Model").value == "google/gemma-4-26b-a4b-qat"
+    assert _element(at.selectbox, "Analyst model").value == (
+        "google/gemma-4-26b-a4b-qat"
+    )
+    assert _element(at.selectbox, "Test generator model").value == "qwen/qwen3-4b"
+    assert _element(at.selectbox, "Reviewer model").value == "google/gemma-4-26b-a4b-qat"
+    assert "Load available models" not in {button.label for button in at.button}
 
     _element(at.selectbox, "Model").set_value("qwen/qwen3-4b")
     at.run()
@@ -448,8 +462,6 @@ def test_lm_studio_model_error_redacts_token_and_base_url(monkeypatch) -> None:
     _element(at.button, "Settings").click()
     at.run()
     _element(at.selectbox, "Provider").set_value("lm_studio")
-    at.run()
-    _element(at.button, "Load available models").click()
     at.run()
 
     text = _rendered_text(at)
@@ -780,7 +792,17 @@ def test_create_runs_one_selected_type_and_opens_returned_detail() -> None:
         repository,
         progress,
     ):
-        progress("Generating test cases")
+        progress(
+            ActivityEvent(
+                "Analyzer 1: done — handed requirements to the orchestrator.",
+                agent="Analyzer 1",
+                role="Requirement analyst",
+                model="analyst-model",
+                state="complete",
+                artifact=RequirementBatch(requirements=[]),
+                artifact_label="Candidate requirements",
+            )
+        )
         calls.append(
             (
                 pdf_bytes,
@@ -818,7 +840,47 @@ def test_create_runs_one_selected_type_and_opens_returned_detail() -> None:
     assert at.session_state["view"] == "detail"
     assert at.session_state["selected_run_id"] == result.manifest.run_id
     assert at.session_state["selected_run"] == result
+    assert not at.exception
     assert "TC-001 · Sign in with valid credentials" in _rendered_text(at)
+
+
+def test_centralized_run_shows_plan_and_agent_activity() -> None:
+    def fake_runner(*args, progress, **kwargs):
+        progress(
+            ActivityEvent(
+                "Analyzer 1: working — extracting requirements.",
+                agent="Analyzer 1",
+                role="Requirement analyst",
+                model="analyst-model",
+                state="working",
+                task="Extract testable business rules with source references.",
+                scope="1 assigned source chunk · pages 1",
+                deliverable="Candidate requirements for reviewer reconciliation.",
+            )
+        )
+        raise RuntimeError("stop after activity")
+
+    at = _app_test()
+    at.session_state["_runner"] = fake_runner
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.selectbox, "Run type").set_value(
+        RunType.CENTRALIZED_MULTI_AGENT
+    )
+    _element(at.file_uploader, "BRD/SRS PDF").set_value(
+        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
+    )
+    _element(at.button, "Generate test cases").click()
+    at.run()
+
+    text = _rendered_text(at)
+    assert "Agent activity" in text
+    assert "Prepare document" in text
+    assert "Analyzer 1" in text
+    assert "Model: analyst-model" in text
+    assert "Extract testable business rules with source references." in text
+    assert "1 assigned source chunk · pages 1" in text
 
 
 def test_returned_failed_generation_opens_detail_with_diagnostics_only(

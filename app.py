@@ -13,6 +13,7 @@ from brd_srs_testgen.browser_settings import (
     sync_browser_settings,
 )
 from brd_srs_testgen.models import (
+    ActivityEvent,
     FailureCategory,
     RunResult,
     RunStatus,
@@ -47,6 +48,13 @@ RUN_TYPE_COPY = {
         "A coordinator delegates bounded work to three workers before deterministic review.",
     ),
 }
+ACTIVITY_PLAN = (
+    ("Prepare document", "Source ready"),
+    ("Extract requirements", "Analyst handoff"),
+    ("Reconcile findings", "Reviewer handoff"),
+    ("Generate test cases", "Generator handoff"),
+    ("Validate and deliver", "Final bundle"),
+)
 
 
 def _env(name: str) -> str:
@@ -172,6 +180,83 @@ def _apply_theme() -> None:
             outline: 3px solid var(--color-focus) !important;
             outline-offset: 2px;
         }
+        .activity-plan {
+            display: grid;
+            gap: 0.25rem;
+        }
+        .activity-plan__step {
+            display: grid;
+            grid-template-columns: 1.35rem minmax(0, 1fr);
+            gap: 0.65rem;
+            align-items: start;
+            padding: 0.7rem 0;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .activity-plan__step:last-child {
+            border-bottom: 0;
+        }
+        .activity-plan__marker {
+            display: grid;
+            place-items: center;
+            width: 1.25rem;
+            height: 1.25rem;
+            border: 1px solid var(--color-border);
+            border-radius: 999px;
+            color: var(--color-muted);
+            background: #f1f5f9;
+            font-size: 0.7rem;
+            font-weight: 800;
+        }
+        .activity-plan__step--complete .activity-plan__marker {
+            border-color: #bbf7d0;
+            color: #166534;
+            background: #f0fdf4;
+        }
+        .activity-plan__step--active .activity-plan__marker {
+            border-color: #93c5fd;
+            color: #1d4ed8;
+            background: #eff6ff;
+            animation: activity-pulse 1.8s ease-in-out infinite;
+        }
+        .activity-plan__name {
+            color: var(--color-foreground);
+            font-size: 0.84rem;
+            font-weight: 700;
+        }
+        .activity-plan__detail {
+            color: var(--color-muted);
+            font-size: 0.75rem;
+        }
+        .activity-state {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            color: var(--color-muted);
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+        .activity-state::before {
+            content: "";
+            width: 0.45rem;
+            height: 0.45rem;
+            border-radius: 999px;
+            background: currentColor;
+        }
+        .activity-state--working {
+            color: var(--color-accent);
+        }
+        .activity-state--working::before {
+            animation: activity-pulse 1.8s ease-in-out infinite;
+        }
+        .activity-state--complete {
+            color: #15803d;
+        }
+        @keyframes activity-pulse {
+            50% {
+                opacity: 0.55;
+                transform: scale(0.82);
+            }
+        }
         @media (max-width: 640px) {
             [data-testid="stMainBlockContainer"] {
                 padding-top: 1rem;
@@ -207,6 +292,8 @@ def _reset_provider() -> None:
     st.session_state["settings_base_url"] = (
         _base_url(provider) if provider in LOCAL_BASE_URLS else ""
     )
+    for agent in ("analyst", "test_generator", "reviewer"):
+        st.session_state[f"settings_{agent}_model"] = ""
     st.session_state.pop("lm_studio_models", None)
     st.session_state.pop("lm_studio_model_error", None)
 
@@ -215,6 +302,17 @@ def _clear_lm_studio_models() -> None:
     st.session_state["settings_model"] = ""
     st.session_state.pop("lm_studio_models", None)
     st.session_state.pop("lm_studio_model_error", None)
+
+
+def _assign_lm_studio_models(models: list[str]) -> None:
+    if not models:
+        return
+    if st.session_state.get("settings_model") not in models:
+        st.session_state["settings_model"] = models[0]
+    for index, agent in enumerate(("analyst", "test_generator", "reviewer")):
+        key = f"settings_{agent}_model"
+        if st.session_state.get(key) not in models:
+            st.session_state[key] = models[index % len(models)]
 
 
 def _refresh_lm_studio_models() -> None:
@@ -238,7 +336,7 @@ def _refresh_lm_studio_models() -> None:
         st.session_state["lm_studio_model_error"] = message
     else:
         st.session_state["lm_studio_models"] = models
-        st.session_state["settings_model"] = models[0] if models else ""
+        _assign_lm_studio_models(models)
         if models:
             st.session_state.pop("lm_studio_model_error", None)
         else:
@@ -275,6 +373,79 @@ def _safe_error(error: Exception, settings: ProviderSettings) -> str:
         if secret:
             message = message.replace(secret, "[REDACTED]")
     return message
+
+
+def _activity_plan_step(event: str, current_step: int) -> int:
+    message = str(event).lower()
+    if not isinstance(event, ActivityEvent):
+        if "generating artifacts" in message:
+            return max(current_step, 1)
+        if "completed" in message:
+            return len(ACTIVITY_PLAN)
+        return current_step
+    if event.agent.startswith("Analyzer"):
+        return max(current_step, 1)
+    if event.agent == "Reviewer":
+        return max(current_step, 2)
+    if event.agent.startswith("Test Generator"):
+        return max(current_step, 3)
+    if event.agent == "Orchestrator" and "merging" in message:
+        return max(current_step, 4)
+    return current_step
+
+
+def _render_activity_plan(placeholder, current_step: int) -> None:
+    steps = []
+    for index, (name, detail) in enumerate(ACTIVITY_PLAN):
+        if index < current_step:
+            state, marker, status = "complete", "✓", "Complete"
+        elif index == current_step and current_step < len(ACTIVITY_PLAN):
+            state, marker, status = "active", str(index + 1), "Working"
+        else:
+            state, marker, status = "pending", str(index + 1), "Queued"
+        steps.append(
+            f"<div class='activity-plan__step activity-plan__step--{state}'>"
+            f"<span class='activity-plan__marker'>{marker}</span>"
+            f"<div><div class='activity-plan__name'>{name}</div>"
+            f"<div class='activity-plan__detail'>{detail} · {status}</div>"
+            "</div></div>"
+        )
+    placeholder.markdown(
+        "<div class='activity-plan' aria-label='Generation plan'>"
+        f"{''.join(steps)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_activity(activity, event: str) -> None:
+    if not isinstance(event, ActivityEvent) or not event.agent:
+        activity.caption(str(event))
+        return
+
+    with activity:
+        with st.chat_message("assistant"):
+            st.markdown(f"**{event.agent}** · {event.role}")
+            metadata = []
+            if event.model:
+                metadata.append(f"Model: {event.model}")
+            if metadata:
+                st.caption(" · ".join(metadata))
+            state = event.state.lower() or "update"
+            st.markdown(
+                f"<span class='activity-state activity-state--{state}'>"
+                f"{event.state.title() or 'Update'}</span>",
+                unsafe_allow_html=True,
+            )
+            if event.task:
+                st.markdown(f"**Task:** {event.task}")
+            if event.scope:
+                st.caption(f"Scope: {event.scope}")
+            if event.deliverable:
+                st.caption(f"Delivers: {event.deliverable}")
+            st.write(str(event))
+            if event.artifact is not None:
+                with st.expander(event.artifact_label or "View artifact"):
+                    st.json(event.artifact.model_dump(mode="json"), expanded=False)
 
 
 def _failure_name(category: FailureCategory | None) -> str:
@@ -655,6 +826,10 @@ def _open_settings(after_save: str | None = None) -> None:
     st.session_state["settings_api_key"] = settings.api_key
     st.session_state["settings_base_url"] = settings.base_url
     st.session_state["settings_token_ceiling"] = settings.token_ceiling
+    for agent in ("analyst", "test_generator", "reviewer"):
+        st.session_state[f"settings_{agent}_model"] = getattr(
+            settings, f"{agent}_model"
+        )
     st.session_state["show_settings"] = True
     if after_save is None:
         st.session_state.pop("settings_after_persist", None)
@@ -672,14 +847,15 @@ def _settings_dialog() -> None:
         on_change=_reset_provider,
     )
     if provider == "lm_studio":
+        if "lm_studio_models" not in st.session_state:
+            _refresh_lm_studio_models()
         models = st.session_state.get("lm_studio_models", [])
         st.selectbox(
             "Model",
             models,
             index=0 if models else None,
             key="settings_model",
-            placeholder="Load models or enter a model ID",
-            accept_new_options=True,
+            placeholder="Models load automatically from LM Studio",
         )
         st.text_input(
             "LM Studio API token",
@@ -701,15 +877,32 @@ def _settings_dialog() -> None:
             on_change=_clear_lm_studio_models if provider == "lm_studio" else None,
         )
     if provider == "lm_studio":
-        st.button(
-            "Load available models",
-            on_click=_refresh_lm_studio_models,
-            width="stretch",
-        )
         if error := st.session_state.get("lm_studio_model_error"):
             st.error(f"Could not load models: {error}")
         elif models:
             st.success(f"Loaded {len(models)} models.")
+
+    st.markdown("#### Centralized multi-agent routing")
+    if provider == "lm_studio" and models:
+        st.caption(
+            "Loaded automatically. The first three models are assigned by default; "
+            "a model is reused only when fewer than three are available."
+        )
+        st.selectbox("Analyst model", models, key="settings_analyst_model")
+        st.selectbox(
+            "Test generator model", models, key="settings_test_generator_model"
+        )
+        st.selectbox("Reviewer model", models, key="settings_reviewer_model")
+    else:
+        st.caption(
+            "Optional overrides used only by the centralized workflow. Leave blank to "
+            "use Model."
+        )
+        st.text_input("Analyst model (optional)", key="settings_analyst_model")
+        st.text_input(
+            "Test generator model (optional)", key="settings_test_generator_model"
+        )
+        st.text_input("Reviewer model (optional)", key="settings_reviewer_model")
 
     st.number_input(
         "Token ceiling",
@@ -739,6 +932,9 @@ def _settings_dialog() -> None:
             api_key=st.session_state.get("settings_api_key", ""),
             base_url=st.session_state.get("settings_base_url", ""),
             token_ceiling=st.session_state["settings_token_ceiling"],
+            analyst_model=st.session_state["settings_analyst_model"],
+            test_generator_model=st.session_state["settings_test_generator_model"],
+            reviewer_model=st.session_state["settings_reviewer_model"],
         )
         settings.provider_settings()
     except ValueError as error:
@@ -865,6 +1061,16 @@ def _render_create(repository: RunRepository, settings: AppSettings) -> None:
         f"{_provider_label(settings.provider)} · {settings.model} · "
         f"{settings.token_ceiling:,} token ceiling"
     )
+    if run_type is RunType.CENTRALIZED_MULTI_AGENT and any(
+        settings.model_for(agent) != settings.model
+        for agent in ("analyst", "test_generator", "reviewer")
+    ):
+        st.caption(
+            "Routing: "
+            f"Analyst {settings.model_for('analyst')} · "
+            f"Generator {settings.model_for('test_generator')} · "
+            f"Reviewer {settings.model_for('reviewer')}"
+        )
     st.button("Edit settings", on_click=_open_settings, args=("create",))
     if st.session_state.get("settings_save_request") is not None:
         st.info("Saving browser settings…")
@@ -893,14 +1099,45 @@ def _render_create(repository: RunRepository, settings: AppSettings) -> None:
     try:
         with st.status("Live generation activity", expanded=True) as status:
             runner = st.session_state.get("_runner", run_generation)
-            result = runner(
-                upload.getvalue(),
-                upload.name,
-                run_type,
-                provider_settings,
-                repository=repository,
-                progress=status.write,
-            )
+            if run_type is RunType.CENTRALIZED_MULTI_AGENT:
+                feed_column, plan_column = st.columns((1.7, 0.9), gap="large")
+                with feed_column:
+                    st.markdown("#### Agent activity")
+                    st.caption(
+                        "Agent handoffs, current tasks, and published artifacts."
+                    )
+                    activity = st.container()
+                with plan_column:
+                    st.markdown("#### Plan")
+                    plan = st.empty()
+                    st.caption("Private model reasoning is not displayed.")
+
+                current_step = 0
+                _render_activity_plan(plan, current_step)
+
+                def progress(event: str) -> None:
+                    nonlocal current_step
+                    current_step = _activity_plan_step(event, current_step)
+                    _render_activity_plan(plan, current_step)
+                    _render_activity(activity, event)
+
+                result = runner(
+                    upload.getvalue(),
+                    upload.name,
+                    run_type,
+                    provider_settings,
+                    repository=repository,
+                    progress=progress,
+                )
+            else:
+                result = runner(
+                    upload.getvalue(),
+                    upload.name,
+                    run_type,
+                    provider_settings,
+                    repository=repository,
+                    progress=status.write,
+                )
             label, state = _result_status(result)
             status.update(label=label, state=state, expanded=state == "error")
     except Exception as error:

@@ -143,6 +143,12 @@ class CentralProvider:
         return _result(schema.model_validate(value.model_dump(mode="json")))
 
 
+class NamedProvider(ScriptedProvider):
+    def __init__(self, ledger: BudgetLedger, model: str) -> None:
+        super().__init__(ledger, [])
+        self.model = model
+
+
 class InvalidCentralProvider(CentralProvider):
     def generate(self, messages, schema, *, max_output_tokens):
         result = super().generate(messages, schema, max_output_tokens=max_output_tokens)
@@ -748,6 +754,55 @@ def test_invalid_central_worker_output_is_semantic_failure(monkeypatch) -> None:
 
     assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
     assert "outside worker 1 range" in result.manifest.failure_message
+
+
+def test_centralized_builds_configured_agent_models_with_one_budget(monkeypatch) -> None:
+    built = []
+    captured = []
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def make_provider(config, ledger):
+        built.append((config.model, ledger))
+        return NamedProvider(ledger, config.model)
+
+    monkeypatch.setattr(runner, "_make_provider", make_provider)
+    monkeypatch.setitem(
+        runner.PIPELINES,
+        RunType.CENTRALIZED_MULTI_AGENT,
+        lambda context, _chunks: captured.append(context) or bundle(),
+    )
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.CENTRALIZED_MULTI_AGENT,
+        settings(
+            model="primary",
+            analyst_model="analyst",
+            test_generator_model="generator",
+            reviewer_model="reviewer",
+        ),
+        repository=repository,
+    )
+
+    assert result.manifest.status is RunStatus.COMPLETED
+    assert [model for model, _ledger in built] == [
+        "primary",
+        "analyst",
+        "generator",
+        "reviewer",
+    ]
+    assert {id(ledger) for _model, ledger in built} == {
+        id(captured[0].provider.ledger)
+    }
+    assert {
+        agent: provider.model for agent, provider in captured[0].providers.items()
+    } == {
+        "analyst": "analyst",
+        "test_generator": "generator",
+        "reviewer": "reviewer",
+    }
 
 
 def test_actual_ollama_timeout_survives_budget_blocked_retry(monkeypatch) -> None:

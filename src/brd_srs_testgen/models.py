@@ -10,6 +10,36 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ActivityEvent(str):
+    """A display-safe progress update that remains compatible with text callbacks."""
+
+    def __new__(
+        cls,
+        message: str,
+        *,
+        agent: str = "",
+        role: str = "",
+        model: str = "",
+        state: str = "",
+        task: str = "",
+        scope: str = "",
+        deliverable: str = "",
+        artifact: BaseModel | None = None,
+        artifact_label: str = "",
+    ) -> "ActivityEvent":
+        event = super().__new__(cls, message)
+        event.agent = agent
+        event.role = role
+        event.model = model
+        event.state = state
+        event.task = task
+        event.scope = scope
+        event.deliverable = deliverable
+        event.artifact = artifact
+        event.artifact_label = artifact_label
+        return event
+
+
 class RequirementType(StrEnum):
     FUNCTIONAL = "functional"
     NON_FUNCTIONAL = "non_functional"
