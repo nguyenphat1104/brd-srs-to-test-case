@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -87,6 +87,23 @@ class FailureCategory(StrEnum):
     BUDGET_EXHAUSTION = "budget_exhaustion"
     SCHEMA_FAILURE = "schema_failure"
     SEMANTIC_VALIDATION = "semantic_validation"
+
+
+class AgentSetup(StrictModel):
+    agent: Literal["analyst", "test_generator", "reviewer", "coverage_analyzer"]
+    role: str = Field(min_length=1, max_length=120)
+    instructions: str = Field(default="", max_length=4_000)
+
+
+def default_agent_setups() -> dict[str, AgentSetup]:
+    return {
+        "analyst": AgentSetup(agent="analyst", role="Requirement analyst"),
+        "test_generator": AgentSetup(agent="test_generator", role="Test designer"),
+        "reviewer": AgentSetup(agent="reviewer", role="Requirements curator"),
+        "coverage_analyzer": AgentSetup(
+            agent="coverage_analyzer", role="Coverage analyst"
+        ),
+    }
 
 
 class SourceReference(StrictModel):
@@ -277,6 +294,7 @@ class RunResult(StrictModel):
     validation: ValidationReport | None = None
     rtm: list[RTMRow] = Field(default_factory=list)
     metrics: RunMetrics | None = None
+    coverage: CoverageScore | None = None
 
     def download_bundle(self) -> dict[str, JsonValue]:
         bundle = self.bundle
@@ -298,7 +316,42 @@ class RunResult(StrictModel):
             "validation": self.validation.model_dump(mode="json") if self.validation else None,
             "rtm": [item.model_dump(mode="json") for item in self.rtm],
             "metrics": self.metrics.model_dump(mode="json") if self.metrics else None,
+            "coverage": self.coverage.model_dump(mode="json") if self.coverage else None,
         }
+
+
+class CoverageUnit(StrictModel):
+    unit_id: str = Field(pattern=r"^CU-\d{3,}$")
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    unit_type: str = Field(min_length=1)
+    source_chunk_ids: list[str] = Field(min_length=1)
+
+
+class CoverageUnitBatch(StrictModel):
+    units: list[CoverageUnit]
+
+
+class CoverageMappingEntry(StrictModel):
+    test_case_id: str = Field(pattern=r"^TC-\d{3,}$")
+    covered_unit_ids: list[str] = Field(default_factory=list)
+
+
+class CoverageMappingBatch(StrictModel):
+    mappings: list[CoverageMappingEntry]
+
+
+class CoverageScore(StrictModel):
+    precision: float = Field(ge=0, le=1)
+    recall: float = Field(ge=0, le=1)
+    f1: float = Field(ge=0, le=1)
+    true_positive_count: int = Field(ge=0)
+    false_positive_count: int = Field(ge=0)
+    false_negative_count: int = Field(ge=0)
+    total_coverage_units: int = Field(ge=0)
+    total_test_cases: int = Field(ge=0)
+    uncovered_unit_ids: list[str] = Field(default_factory=list)
+    unmapped_test_case_ids: list[str] = Field(default_factory=list)
 
 
 class RunHistoryItem(StrictModel):

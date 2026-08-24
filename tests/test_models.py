@@ -332,6 +332,7 @@ def test_run_result_download_bundle_handles_missing_artifacts() -> None:
         "validation": None,
         "rtm": [],
         "metrics": None,
+        "coverage": None,
     }
 
 

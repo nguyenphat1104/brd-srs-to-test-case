@@ -6,6 +6,7 @@ import pytest
 
 from brd_srs_testgen import pipelines as pipeline_module
 from brd_srs_testgen.models import (
+    AgentSetup,
     ArtifactBundle,
     GeneratedCases,
     RequirementBatch,
@@ -216,12 +217,43 @@ def test_worker_prompts_use_disjoint_inclusive_id_ranges(
 ) -> None:
     requirements = worker_requirements_prompt(worker_index, [chunk()])
     cases = worker_cases_prompt(worker_index, bundle().requirements, [chunk()])
+    canonical_rule = (
+        "Use unique canonical IDs in increasing order: REQ-001, SCN-001, and TC-001."
+    )
 
     assert f"REQ-{lower:03d} through REQ-{upper:03d}" in requirements
     assert f"SCN-{lower:03d} through SCN-{upper:03d}" in cases
     assert f"TC-{lower:03d} through TC-{upper:03d}" in cases
     assert "must not emit IDs outside these ranges" in requirements
     assert "must not emit IDs outside these ranges" in cases
+    assert canonical_rule not in requirements
+    assert canonical_rule not in cases
+    assert canonical_rule in single_prompt([chunk()])
+
+
+def test_worker_prompt_includes_configured_agent_setup() -> None:
+    prompt = worker_requirements_prompt(
+        1,
+        [chunk()],
+        setup=AgentSetup(
+            agent="analyst",
+            role="Payments requirement specialist",
+            instructions="Prioritize validation and exception rules.",
+        ),
+    )
+
+    assert "Role: Payments requirement specialist" in prompt
+    assert "Prioritize validation and exception rules." in prompt
+
+
+def test_worker_prompt_omits_unconfigured_instruction_fallback() -> None:
+    prompt = worker_requirements_prompt(
+        0,
+        [chunk()],
+        setup=AgentSetup(agent="analyst", role="Requirement analyst"),
+    )
+
+    assert "Additional instructions:" not in prompt
 
 
 class InvalidWorkerProvider(CentralProvider):

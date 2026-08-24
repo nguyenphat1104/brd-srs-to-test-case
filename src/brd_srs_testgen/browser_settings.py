@@ -19,7 +19,7 @@ class AppSettings(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
     version: Literal[1] = 1
-    provider: Literal["gemini", "lm_studio", "ollama"]
+    provider: Literal["gemini", "lm_studio", "llama_cpp", "ollama"]
     model: str
     api_key: str = Field(default="", repr=False)
     base_url: str = ""
@@ -27,6 +27,7 @@ class AppSettings(BaseModel):
     analyst_model: str = ""
     test_generator_model: str = ""
     reviewer_model: str = ""
+    coverage_analyzer_model: str = ""
 
     @field_validator("model")
     @classmethod
@@ -49,6 +50,7 @@ class AppSettings(BaseModel):
             analyst_model=self.analyst_model,
             test_generator_model=self.test_generator_model,
             reviewer_model=self.reviewer_model,
+            coverage_analyzer_model=self.coverage_analyzer_model,
         )
         settings.validate()
         return settings

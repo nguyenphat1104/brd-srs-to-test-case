@@ -351,6 +351,8 @@ def test_pipeline_activity_is_forwarded_to_the_progress_callback(monkeypatch) ->
         "Preparing document",
         "Generating artifacts",
         "Orchestrator: spawning Analyzer 1.",
+        "Analyzing coverage",
+        "Coverage Analyzer: extracting coverage units from the source document.",
         "Completed",
     ]
 
@@ -925,7 +927,13 @@ def test_progress_is_a_single_string_and_observer_errors_are_ignored(
     result, _repository = _successful_run(monkeypatch, progress=progress)
 
     assert result.manifest.status is RunStatus.COMPLETED
-    assert trace == ["Preparing document", "Generating artifacts", "Completed"]
+    assert trace == [
+        "Preparing document",
+        "Generating artifacts",
+        "Analyzing coverage",
+        "Coverage Analyzer: extracting coverage units from the source document.",
+        "Completed",
+    ]
     assert all(isinstance(message, str) for message in trace)
 
 
@@ -981,6 +989,20 @@ def test_lm_studio_settings_create_authenticated_provider() -> None:
 
     assert isinstance(provider, providers_module.LMStudioProvider)
     assert provider.api_key == "local-token"
+
+
+def test_llama_cpp_settings_create_unmanaged_openai_provider() -> None:
+    configured = settings(
+        provider="llama_cpp",
+        model="local",
+        base_url="http://localhost:8080/v1",
+    )
+
+    configured.validate()
+    provider = runner._make_provider(configured, BudgetLedger(100_000))
+
+    assert isinstance(provider, providers_module.LMStudioProvider)
+    assert provider.auto_load is False
 
 
 @pytest.mark.parametrize(

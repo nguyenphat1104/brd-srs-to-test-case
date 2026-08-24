@@ -17,6 +17,7 @@ T = TypeVar("T", bound=BaseModel)
 Messages = list[dict[str, str]]
 RETRYABLE_CODES = {408, 429, 500, 502, 503, 504}
 TIMEOUT_CODES = {408, 504}
+LM_STUDIO_MIN_CONTEXT = 32_768
 
 
 class BudgetExceeded(RuntimeError):
@@ -257,6 +258,161 @@ def _lm_studio_url(base_url: str, endpoint: str) -> str:
     ):
         raise ValueError("Invalid LM Studio URL.")
     return url
+
+
+def _lm_studio_native_url(base_url: str, endpoint: str) -> str:
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-3].rstrip("/")
+    return _lm_studio_url(base_url, f"api/v1/{endpoint}")
+
+
+def _lm_studio_error_message(error: HTTPError) -> str:
+    try:
+        body = error.read(2_000).decode("utf-8", "replace").strip()
+        detail = json.loads(body).get("error", {}).get("message", body)
+    except (AttributeError, TypeError, ValueError, OSError):
+        return str(error)
+    return f"{error}: {detail}" if isinstance(detail, str) and detail else str(error)
+
+
+def _lm_studio_headers(api_key: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
+def load_lm_studio_model(
+    base_url: str,
+    model: str,
+    api_key: str = "",
+    *,
+    context_length: int | None = None,
+    timeout: int = 120,
+) -> None:
+    headers = {"Content-Type": "application/json"}
+    headers.update(_lm_studio_headers(api_key))
+    payload: dict[str, object] = {"model": model}
+    if context_length is not None:
+        payload["context_length"] = context_length
+    try:
+        request = Request(
+            _lm_studio_native_url(base_url, "models/load"),
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urlopen(request, timeout=timeout):
+            pass
+    except HTTPError as error:
+        raise ProviderError(
+            _lm_studio_error_message(error),
+            code=error.code,
+            retryable=error.code in RETRYABLE_CODES,
+            timed_out=error.code in TIMEOUT_CODES,
+        ) from error
+    except URLError as error:
+        raise ProviderError(
+            str(error),
+            code=None,
+            retryable=_url_error_retryable(error),
+            timed_out=_is_timeout(error.reason),
+        ) from error
+    except (TimeoutError, ConnectionError) as error:
+        raise ProviderError(
+            str(error), code=None, retryable=True, timed_out=_is_timeout(error)
+        ) from error
+    except (TypeError, ValueError) as error:
+        raise ProviderError(
+            "Invalid LM Studio URL.", code=None, retryable=False
+        ) from error
+    except Exception as error:
+        raise ProviderError(str(error), code=None, retryable=False) from error
+
+
+def _lm_studio_model_state(
+    base_url: str, model: str, api_key: str, *, timeout: int
+) -> tuple[list[str], int, int]:
+    try:
+        request = Request(
+            _lm_studio_native_url(base_url, "models"),
+            headers=_lm_studio_headers(api_key),
+            method="GET",
+        )
+        with urlopen(request, timeout=timeout) as response:
+            models = json.load(response)["models"]
+        selected = next(
+            item for item in models if isinstance(item, dict) and item.get("key") == model
+        )
+        maximum = _positive_token_count(
+            selected["max_context_length"], "LM Studio model context length"
+        )
+        instances = selected.get("loaded_instances", [])
+        instance_ids = [
+            item["id"]
+            for item in instances
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        ]
+        loaded_context = max(
+            (
+                item.get("config", {}).get("context_length", 0)
+                for item in instances
+                if isinstance(item, dict)
+                and isinstance(item.get("config"), dict)
+                and isinstance(item["config"].get("context_length"), int)
+            ),
+            default=0,
+        )
+        return instance_ids, loaded_context, maximum
+    except HTTPError as error:
+        raise ProviderError(
+            _lm_studio_error_message(error),
+            code=error.code,
+            retryable=error.code in RETRYABLE_CODES,
+            timed_out=error.code in TIMEOUT_CODES,
+        ) from error
+    except (KeyError, StopIteration, TypeError, ValueError) as error:
+        raise ProviderError(
+            f"LM Studio could not find configured model '{model}'.",
+            code=None,
+            retryable=False,
+        ) from error
+    except URLError as error:
+        raise ProviderError(
+            str(error),
+            code=None,
+            retryable=_url_error_retryable(error),
+            timed_out=_is_timeout(error.reason),
+        ) from error
+    except (TimeoutError, ConnectionError) as error:
+        raise ProviderError(
+            str(error), code=None, retryable=True, timed_out=_is_timeout(error)
+        ) from error
+    except Exception as error:
+        raise ProviderError(str(error), code=None, retryable=False) from error
+
+
+def _unload_lm_studio_model(
+    base_url: str, instance_id: str, api_key: str, *, timeout: int
+) -> None:
+    headers = {"Content-Type": "application/json"}
+    headers.update(_lm_studio_headers(api_key))
+    try:
+        request = Request(
+            _lm_studio_native_url(base_url, "models/unload"),
+            data=json.dumps({"instance_id": instance_id}).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urlopen(request, timeout=timeout):
+            pass
+    except HTTPError as error:
+        raise ProviderError(
+            _lm_studio_error_message(error),
+            code=error.code,
+            retryable=error.code in RETRYABLE_CODES,
+            timed_out=error.code in TIMEOUT_CODES,
+        ) from error
+    except Exception as error:
+        raise _provider_error(error) from error
 
 
 def list_lm_studio_models(
@@ -510,13 +666,43 @@ class LMStudioProvider:
         ledger: BudgetLedger,
         *,
         api_key: str = "",
+        auto_load: bool = True,
         timeout: int = 600,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.ledger = ledger
         self.api_key = api_key
+        self.auto_load = auto_load
         self.timeout = timeout
+        self._model_load_lock = threading.Lock()
+
+    def _ensure_model_loaded(self, required_context: int) -> None:
+        with self._model_load_lock:
+            instances, loaded_context, maximum = _lm_studio_model_state(
+                self.base_url, self.model, self.api_key, timeout=self.timeout
+            )
+            if required_context > maximum:
+                raise ProviderError(
+                    f"LM Studio model '{self.model}' supports {maximum:,} tokens, "
+                    f"but this task needs about {required_context:,}.",
+                    code=None,
+                    retryable=False,
+                )
+            target_context = min(maximum, max(required_context, LM_STUDIO_MIN_CONTEXT))
+            if loaded_context >= target_context:
+                return
+            for instance_id in instances:
+                _unload_lm_studio_model(
+                    self.base_url, instance_id, self.api_key, timeout=self.timeout
+                )
+            load_lm_studio_model(
+                self.base_url,
+                self.model,
+                self.api_key,
+                context_length=target_context,
+                timeout=self.timeout,
+            )
 
     def generate(
         self,
@@ -543,6 +729,11 @@ class LMStudioProvider:
             "stream": False,
         }
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        # ponytail: byte estimate; use a model tokenizer if it ever rejects a valid request.
+        input_estimate = max(1, (len(encoded) + 3) // 4)
+        required_context = ((input_estimate + max_output_tokens + 1_023) // 1_024) * 1_024
+        if self.auto_load:
+            self._ensure_model_loaded(required_context)
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -558,8 +749,6 @@ class LMStudioProvider:
                 "Invalid LM Studio URL.", code=None, retryable=False
             ) from error
 
-        # ponytail: approximate preflight count; use a model tokenizer if it blocks valid runs.
-        input_estimate = max(1, (len(encoded) + 3) // 4)
         reservation = self.ledger.reserve(input_estimate + max_output_tokens)
         started = time.perf_counter()
         try:
@@ -572,7 +761,7 @@ class LMStudioProvider:
         except HTTPError as error:
             self.ledger.settle(reservation, reservation.tokens)
             raise ProviderError(
-                str(error),
+                _lm_studio_error_message(error),
                 code=error.code,
                 retryable=error.code in RETRYABLE_CODES,
                 timed_out=error.code in TIMEOUT_CODES,

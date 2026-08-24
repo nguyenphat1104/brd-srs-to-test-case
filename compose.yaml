@@ -6,6 +6,7 @@ services:
     environment:
       DATABASE_URL: postgresql://brd_srs:brd_srs_local@db:5432/brd_srs
       LM_STUDIO_BASE_URL: ${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+      LLAMA_CPP_BASE_URL: ${LLAMA_CPP_BASE_URL:-http://host.docker.internal:8081/v1}
     ports:
       - 127.0.0.1:8501:8501
     depends_on:
@@ -16,16 +17,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
-    restart: unless-stopped
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: ["tunnel", "--no-autoupdate", "--config", "/Users/jun/.cloudflared/config.yml", "run"]
-    volumes:
-      - /Users/jun/.cloudflared:/Users/jun/.cloudflared:ro
-    depends_on:
-      app:
-        condition: service_healthy
     restart: unless-stopped
 
   db:

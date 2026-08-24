@@ -7,6 +7,7 @@ import psycopg
 import pytest
 
 from brd_srs_testgen.models import (
+    AgentSetup,
     ArtifactBundle,
     DocumentChunk,
     FailureCategory,
@@ -1116,3 +1117,24 @@ def test_terminal_chunks_events_and_finalization_are_immutable(
 
     assert repository.load_chunks(result.manifest.run_id) == original_chunks
     assert repository.load_events(result.manifest.run_id) == original_events
+
+
+def test_agent_setups_round_trip_as_shared_configuration(
+    repository: RunRepository,
+) -> None:
+    setups = repository.load_agent_setups()
+    assert setups["analyst"].role == "Requirement analyst"
+    assert setups["analyst"].instructions == (
+        "Extract supported functional, nonfunctional, and business requirements "
+        "from assigned evidence. Preserve dependencies, ambiguities, and exact "
+        "citations. Do not infer unsupported behavior."
+    )
+
+    setups["analyst"] = AgentSetup(
+        agent="analyst",
+        role="Payments requirement specialist",
+        instructions="Prioritize validation and exception rules.",
+    )
+    repository.save_agent_setups(setups.values())
+
+    assert repository.load_agent_setups() == setups

@@ -5,7 +5,7 @@ import ssl
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import httpx
 import pytest
@@ -345,6 +345,10 @@ def test_ollama_posts_schema_and_reads_token_counts() -> None:
 
 
 def test_lm_studio_posts_openai_schema_auth_and_reads_usage() -> None:
+    models = io.BytesIO(
+        b'{"models":[{"key":"local-model","max_context_length":4096,"loaded_instances":[]}]}'
+    )
+    loaded = io.BytesIO(b'{"status":"loaded"}')
     response = io.BytesIO(
         json.dumps(
             {
@@ -363,14 +367,25 @@ def test_lm_studio_posts_openai_schema_auth_and_reads_usage() -> None:
         api_key="local-token",
     )
 
-    with patch("brd_srs_testgen.providers.urlopen", return_value=response) as opened:
+    with patch(
+        "brd_srs_testgen.providers.urlopen", side_effect=[models, loaded, response]
+    ) as opened:
         result = provider.generate(
             [{"role": "user", "content": "Extract requirements"}],
             RequirementBatch,
             max_output_tokens=40,
         )
 
-    request = opened.call_args.args[0]
+    models_request = opened.call_args_list[0].args[0]
+    assert models_request.full_url == "http://localhost:1234/api/v1/models"
+
+    load_request = opened.call_args_list[1].args[0]
+    assert load_request.full_url == "http://localhost:1234/api/v1/models/load"
+    assert load_request.get_header("Authorization") == "Bearer local-token"
+    assert json.loads(load_request.data)["model"] == "local-model"
+    assert json.loads(load_request.data)["context_length"] >= 40
+
+    request = opened.call_args_list[2].args[0]
     payload = json.loads(request.data)
     assert request.full_url == "http://localhost:1234/v1/chat/completions"
     assert request.get_header("Authorization") == "Bearer local-token"
@@ -380,6 +395,86 @@ def test_lm_studio_posts_openai_schema_auth_and_reads_usage() -> None:
     assert payload["max_tokens"] == 40
     assert result.total_tokens == 12
     assert ledger.used == 12
+
+
+def test_llama_cpp_posts_openai_schema_without_lm_studio_model_management() -> None:
+    response = io.BytesIO(
+        b'{"choices":[{"message":{"content":"{\\"requirements\\":[]}"}}],"usage":{"prompt_tokens":8,"completion_tokens":4}}'
+    )
+    provider = LMStudioProvider(
+        "http://localhost:8080/v1",
+        "local",
+        BudgetLedger(10_000),
+        auto_load=False,
+    )
+
+    with patch("brd_srs_testgen.providers.urlopen", return_value=response) as opened:
+        result = provider.generate(
+            [{"role": "user", "content": "Extract requirements"}],
+            RequirementBatch,
+            max_output_tokens=100,
+        )
+
+    assert result.value.requirements == []
+    assert opened.call_count == 1
+    assert opened.call_args.args[0].full_url == "http://localhost:8080/v1/chat/completions"
+
+
+def test_lm_studio_reloads_an_insufficient_context_once() -> None:
+    models = io.BytesIO(
+        b'{"models":[{"key":"local-model","max_context_length":4096,"loaded_instances":[{"id":"local-model:1","config":{"context_length":512}}]}]}'
+    )
+    unloaded = io.BytesIO(b'{"instance_id":"local-model:1"}')
+    loaded = io.BytesIO(b'{"status":"loaded"}')
+    response = io.BytesIO(
+        b'{"choices":[{"message":{"content":"{\\"requirements\\":[]}"}}],"usage":{"prompt_tokens":8,"completion_tokens":4}}'
+    )
+    provider = LMStudioProvider(
+        "http://localhost:1234/v1", "local-model", BudgetLedger(10_000)
+    )
+
+    with patch(
+        "brd_srs_testgen.providers.urlopen",
+        side_effect=[models, unloaded, loaded, response],
+    ) as opened:
+        provider.generate(
+            [{"role": "user", "content": "Extract requirements"}],
+            RequirementBatch,
+            max_output_tokens=40,
+        )
+
+    requests = [call.args[0] for call in opened.call_args_list]
+    assert [request.full_url for request in requests] == [
+        "http://localhost:1234/api/v1/models",
+        "http://localhost:1234/api/v1/models/unload",
+        "http://localhost:1234/api/v1/models/load",
+        "http://localhost:1234/v1/chat/completions",
+    ]
+    assert json.loads(requests[1].data) == {"instance_id": "local-model:1"}
+
+
+def test_lm_studio_model_load_error_keeps_server_message() -> None:
+    error = HTTPError(
+        "http://localhost:1234/api/v1/models/load",
+        400,
+        "Bad Request",
+        None,
+        io.BytesIO(b'{"error":{"message":"Model needs 8 GB free RAM."}}'),
+    )
+    ledger = BudgetLedger(limit=100)
+    provider = LMStudioProvider(
+        "http://localhost:1234/v1", "local-model", ledger
+    )
+
+    with patch("brd_srs_testgen.providers.urlopen", side_effect=error):
+        with pytest.raises(ProviderError, match="8 GB free RAM"):
+            provider.generate(
+                [{"role": "user", "content": "Extract requirements"}],
+                RequirementBatch,
+                max_output_tokens=40,
+            )
+
+    assert ledger.used == 0
 
 
 def test_lm_studio_lists_models_with_auth() -> None:

@@ -27,6 +27,41 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS runs_started_at_idx ON runs (started_at DESC);
 
+CREATE TABLE IF NOT EXISTS agent_setups (
+    agent text PRIMARY KEY CHECK (agent IN ('analyst', 'test_generator', 'reviewer', 'coverage_analyzer')),
+    role text NOT NULL CHECK (role <> ''),
+    instructions text NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+INSERT INTO agent_setups (agent, role, instructions, updated_at)
+VALUES
+    (
+        'analyst',
+        'Requirement analyst',
+        'Extract supported functional, nonfunctional, and business requirements from assigned evidence. Preserve dependencies, ambiguities, and exact citations. Do not infer unsupported behavior.',
+        now()
+    ),
+    (
+        'test_generator',
+        'Test designer',
+        'Generate traceable scenarios and executable manual test cases for each assigned requirement. Cover supported positive, negative, boundary, edge, and state-transition behavior.',
+        now()
+    ),
+    (
+        'reviewer',
+        'Requirements curator',
+        'Review artifacts against the source evidence for groundedness, traceability, completeness, duplicate IDs, and valid relationships. List every required correction.',
+        now()
+    ),
+    (
+        'coverage_analyzer',
+        'Coverage analyst',
+        'Extract testable coverage units from the source document as ground truth, then map generated test cases to those units for precision/recall/F1 scoring.',
+        now()
+    )
+ON CONFLICT (agent) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS document_chunks (
     run_id text NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
     chunk_id text NOT NULL CHECK (chunk_id <> ''),
@@ -250,4 +285,18 @@ CREATE TABLE IF NOT EXISTS validation_orphan_test_cases (
     position integer NOT NULL CHECK (position > 0),
     test_case_id text NOT NULL,
     PRIMARY KEY (run_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS coverage_scores (
+    run_id text PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
+    precision double precision NOT NULL CHECK (precision BETWEEN 0 AND 1),
+    recall double precision NOT NULL CHECK (recall BETWEEN 0 AND 1),
+    f1 double precision NOT NULL CHECK (f1 BETWEEN 0 AND 1),
+    true_positive_count integer NOT NULL CHECK (true_positive_count >= 0),
+    false_positive_count integer NOT NULL CHECK (false_positive_count >= 0),
+    false_negative_count integer NOT NULL CHECK (false_negative_count >= 0),
+    total_coverage_units integer NOT NULL CHECK (total_coverage_units >= 0),
+    total_test_cases integer NOT NULL CHECK (total_test_cases >= 0),
+    uncovered_unit_ids jsonb NOT NULL DEFAULT '[]',
+    unmapped_test_case_ids jsonb NOT NULL DEFAULT '[]'
 );

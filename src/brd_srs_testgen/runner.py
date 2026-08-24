@@ -14,9 +14,12 @@ from uuid import uuid4
 import google.genai as genai
 
 from .documents import DocumentError, canonicalize_source_references, parse_pdf
+from .coverage import run_coverage_analysis
 from .models import (
+    AgentSetup,
     ArtifactBundle,
     CoverageRepair,
+    CoverageScore,
     FailureCategory,
     ReviewIssue,
     ReviewResult,
@@ -69,6 +72,8 @@ class ProviderSettings:
     analyst_model: str = ""
     test_generator_model: str = ""
     reviewer_model: str = ""
+    coverage_analyzer_model: str = ""
+    agent_setups: dict[str, AgentSetup] = field(default_factory=dict)
 
     def model_for(self, agent: str) -> str:
         configured = getattr(self, f"{agent}_model", "")
@@ -77,13 +82,19 @@ class ProviderSettings:
     def with_model(self, model: str) -> ProviderSettings:
         return replace(self, model=model)
 
+    def with_agent_setups(
+        self, agent_setups: dict[str, AgentSetup]
+    ) -> ProviderSettings:
+        return replace(self, agent_setups=agent_setups)
+
     def validate(self) -> None:
         if not isinstance(self.provider, str) or self.provider not in {
             "gemini",
             "lm_studio",
+            "llama_cpp",
             "ollama",
         }:
-            raise ValueError("Provider must be gemini, LM Studio, or ollama.")
+            raise ValueError("Provider must be gemini, LM Studio, llama.cpp, or ollama.")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("Model must not be blank.")
         if (
@@ -94,15 +105,19 @@ class ProviderSettings:
             raise ValueError("Token ceiling must be positive.")
         if not isinstance(self.api_key, str):
             raise ValueError("API key must be a string.")
-        for agent in ("analyst", "test_generator", "reviewer"):
+        for agent in ("analyst", "test_generator", "reviewer", "coverage_analyzer"):
             if not isinstance(getattr(self, f"{agent}_model"), str):
                 raise ValueError(
                     f"{agent.replace('_', ' ').title()} model must be a string."
                 )
         if self.provider == "gemini" and not self.api_key.strip():
             raise ValueError("Gemini API key is required.")
-        if self.provider in {"lm_studio", "ollama"}:
-            provider_name = "LM Studio" if self.provider == "lm_studio" else "Ollama"
+        if self.provider in {"lm_studio", "llama_cpp", "ollama"}:
+            provider_name = {
+                "lm_studio": "LM Studio",
+                "llama_cpp": "llama.cpp",
+                "ollama": "Ollama",
+            }[self.provider]
             if not isinstance(self.base_url, str) or any(
                 character.isspace() for character in self.base_url
             ):
@@ -153,6 +168,14 @@ def _make_provider(
             settings.model,
             ledger,
             api_key=settings.api_key,
+        )
+    if settings.provider == "llama_cpp":
+        return LMStudioProvider(
+            settings.base_url,
+            settings.model,
+            ledger,
+            api_key=settings.api_key,
+            auto_load=False,
         )
     return OllamaProvider(settings.base_url, settings.model, ledger)
 
@@ -413,6 +436,7 @@ def run_generation(
     context: PipelineContext | None = None
     bundle: ArtifactBundle | None = None
     validation: ValidationReport | None = None
+    coverage: CoverageScore | None = None
     rtm: list[RTMRow] = []
     started = time.perf_counter()
     try:
@@ -427,7 +451,7 @@ def run_generation(
 
         providers: dict[str, StructuredProvider] = {}
         if run_type is RunType.CENTRALIZED_MULTI_AGENT:
-            for agent in ("analyst", "test_generator", "reviewer"):
+            for agent in ("analyst", "test_generator", "reviewer", "coverage_analyzer"):
                 model = settings.model_for(agent)
                 if model == settings.model:
                     continue
@@ -441,7 +465,10 @@ def run_generation(
                 providers[agent] = agent_provider
 
         context = PipelineContext(
-            provider=provider, providers=providers, progress=progress
+            provider=provider,
+            providers=providers,
+            agent_setups=settings.agent_setups,
+            progress=progress,
         )
         bundle = canonicalize_source_references(
             PIPELINES[run_type](context, chunks), chunks
@@ -477,6 +504,12 @@ def run_generation(
             validation = validate_bundle(bundle, chunks)
 
         rtm = build_rtm(bundle)
+        if validation.valid and bundle is not None:
+            _notify(progress, "Analyzing coverage")
+            try:
+                coverage = run_coverage_analysis(context, bundle, chunks)
+            except Exception:
+                pass  # Coverage analysis is informational; never fail the run.
         metrics = compute_metrics(
             bundle,
             validation,
@@ -532,6 +565,7 @@ def run_generation(
         validation=validation,
         rtm=rtm,
         metrics=metrics,
+        coverage=coverage,
     )
     repository.finalize(result)
     _notify(progress, manifest.status.value.title())

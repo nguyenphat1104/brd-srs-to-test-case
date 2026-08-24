@@ -6,6 +6,7 @@ from streamlit.testing.v1 import AppTest
 
 from brd_srs_testgen.browser_settings import AppSettings, BrowserSettingsResult
 from brd_srs_testgen.models import (
+    AgentSetup,
     ActivityEvent,
     FailureCategory,
     RequirementBatch,
@@ -15,6 +16,7 @@ from brd_srs_testgen.models import (
     RunStatus,
     RunType,
     TestStep as ModelTestStep,
+    default_agent_setups,
 )
 from brd_srs_testgen.storage import StorageError
 from tests.factories import completed_run
@@ -43,6 +45,7 @@ class FakeRepository:
         self.initialize_calls = 0
         self.list_calls = 0
         self.load_calls: list[str] = []
+        self.agent_setups = default_agent_setups()
 
     def initialize(self) -> None:
         self.initialize_calls += 1
@@ -67,6 +70,12 @@ class FakeRepository:
             return self.results[run_id]
         except KeyError as error:
             raise StorageError(f"missing secret run {run_id}") from error
+
+    def load_agent_setups(self) -> dict[str, AgentSetup]:
+        return self.agent_setups.copy()
+
+    def save_agent_setups(self, setups) -> None:
+        self.agent_setups = {setup.agent: setup for setup in setups}
 
 
 class FakeBrowserSettings:
@@ -134,6 +143,10 @@ def _app_test(
 
 def _element(elements, label: str):
     return next(element for element in elements if element.label == label)
+
+
+def _element_starting(elements, prefix: str):
+    return next(element for element in elements if element.label.startswith(prefix))
 
 
 def _rendered_text(at: AppTest) -> str:
@@ -278,7 +291,7 @@ def _history_item(result: RunResult) -> RunHistoryItem:
     )
 
 
-def test_runs_home_restores_settings_and_shows_native_history() -> None:
+def test_runs_home_restores_settings_and_shows_run_item_list() -> None:
     completed = _detailed_run()
     interrupted = _interrupted_run()
     repository = FakeRepository(
@@ -293,23 +306,25 @@ def test_runs_home_restores_settings_and_shows_native_history() -> None:
     assert at.session_state["app_settings"] == AppSettings(**_saved_settings())
     assert not at.tabs
     assert {button.label for button in at.button} >= {
-        "BRD/SRS Test Case",
         "Settings",
         "Create new run",
     }
-    history = at.dataframe[0].value
-    assert list(history.columns) == [
-        "Started",
-        "Source",
-        "Run type",
-        "Provider",
-        "Model",
-        "Status",
-        "Test cases",
-    ]
-    assert list(history["Source"]) == ["interrupted.pdf", "sample.pdf"]
-    assert list(history["Status"]) == ["Interrupted", "Completed"]
-    assert list(history["Test cases"]) == ["—", "1"]
+    text = _rendered_text(at)
+    assert not at.dataframe
+    assert {button.label for button in at.button} >= {
+        "Open interrupted.pdf",
+        "Open sample.pdf",
+    }
+    for expected in (
+        "interrupted.pdf",
+        "sample.pdf",
+        "Centralized multi-agent",
+        "Interrupted",
+        "Completed",
+        "Not recorded",
+        "1 generated",
+    ):
+        assert expected in text
 
 
 def test_settings_save_is_explicit_and_activates_after_storage_confirms() -> None:
@@ -398,6 +413,20 @@ def test_create_waits_for_initial_browser_settings_load() -> None:
     assert at.session_state["view"] == "create"
 
 
+def test_create_explains_why_settings_open() -> None:
+    at = _app_test(browser=FakeBrowserSettings(_saved_settings(api_key="")))
+    at.run()
+
+    _element(at.button, "Create new run").click()
+    at.run()
+
+    assert at.session_state["settings_after_persist"] == "create"
+    assert (
+        "Gemini API key is required. Add it in Settings before creating a run."
+        in _rendered_text(at)
+    )
+
+
 def test_ollama_settings_use_local_defaults() -> None:
     at = _app_test()
     at.run()
@@ -479,7 +508,7 @@ def test_missing_settings_can_be_saved_before_create() -> None:
     )
     at.run()
 
-    assert at.dataframe
+    assert _element_starting(at.button, "Open sample.pdf")
     _element(at.button, "Create new run").click()
     at.run()
     _element(at.text_input, "Gemini API key").set_value("new-secret")
@@ -511,15 +540,65 @@ def test_selecting_a_run_loads_detail_once_and_back_returns_home() -> None:
     at = _app_test(repository)
     at.run()
 
-    at.session_state["runs-table"] = {"selection": {"rows": [0]}}
+    _element_starting(at.button, f"Open {result.manifest.source_filename}").click()
     at.run()
 
     assert repository.load_calls == [result.manifest.run_id]
     assert at.session_state["view"] == "detail"
-    assert "TC-001 · Sign in with valid credentials" in _rendered_text(at)
+    assert _element(at.button, "Open test case TC-001 detail")
     _element(at.button, "Back to runs").click()
     at.run()
     assert at.session_state["view"] == "runs"
+
+
+def test_clicking_a_test_case_item_opens_detail_modal_once() -> None:
+    result = _detailed_run()
+    repository = FakeRepository(
+        runs=[_history_item(result)],
+        results={result.manifest.run_id: result},
+    )
+    at = _app_test(repository)
+    at.run()
+
+    _element_starting(at.button, f"Open {result.manifest.source_filename}").click()
+    at.run()
+
+    _element(at.button, "Open test case TC-001 detail").click()
+    at.run()
+
+    text = _rendered_text(at)
+    assert "TC-001 · Sign in with valid credentials" in text
+    assert "The login page is open." in text
+    assert "customer@example.com" in text
+    tables = "\n".join(str(table.value) for table in at.table)
+    assert "Enter valid credentials." in tables
+    assert "The account dashboard is displayed." in tables
+
+    at.run()
+    assert "TC-001 · Sign in with valid credentials" not in _rendered_text(at)
+
+
+def test_clicking_requirement_and_scenario_items_opens_detail_modals() -> None:
+    result = _detailed_run()
+    at = _app_test()
+    _show_detail(at, result)
+
+    at.run()
+
+    _element(at.button, "Open requirement REQ-001 detail").click()
+    at.run()
+    requirement_text = _rendered_text(at)
+    assert "REQ-001 · Authenticate users" in requirement_text
+    assert "Registered customers can securely sign in." in requirement_text
+    assert "Lockout threshold is unspecified." in requirement_text
+
+    at.run()
+    _element(at.button, "Open scenario SCN-001 detail").click()
+    at.run()
+    scenario_text = _rendered_text(at)
+    assert "SCN-001 · Valid sign in" in scenario_text
+    assert "Verify successful authentication." in scenario_text
+    assert "The customer account is active." in scenario_text
 
 
 def test_selecting_a_run_uses_the_displayed_row_snapshot() -> None:
@@ -542,10 +621,9 @@ def test_selecting_a_run_uses_the_displayed_row_snapshot() -> None:
     at = _app_test(repository)
     at.run()
 
-    at.session_state["runs-table"] = {"selection": {"rows": [0]}}
+    _element_starting(at.button, f"Open {intended.manifest.source_filename}").click()
     at.run()
 
-    assert repository.list_calls == 1
     assert repository.load_calls == [intended.manifest.run_id]
     assert at.session_state["selected_run_id"] == intended.manifest.run_id
 
@@ -562,7 +640,7 @@ def test_browser_storage_error_warns_without_blocking_history() -> None:
     assert at.warning
     assert "Browser settings storage is unavailable" in _rendered_text(at)
     assert "secret" not in _rendered_text(at)
-    assert at.dataframe
+    assert _element_starting(at.button, "Open sample.pdf")
     assert _element(at.button, "Create new run")
 
 
@@ -623,7 +701,7 @@ def test_database_initialization_failure_remains_blocking() -> None:
     assert not at.dataframe
 
 
-def test_completed_detail_renders_test_cases_first_and_snapshot() -> None:
+def test_completed_detail_groups_artifacts_and_configuration() -> None:
     result = _detailed_run()
     secret = "browser-only-secret"
     base_url = "http://browser-only.invalid:43114"
@@ -641,34 +719,23 @@ def test_completed_detail_renders_test_cases_first_and_snapshot() -> None:
     headings = [element.value for element in at.markdown]
     assert headings.index("#### Test cases") < headings.index("#### Requirements")
     assert headings.index("#### Requirements") < headings.index("#### Scenarios")
-    assert headings.index("### Run configuration snapshot") < headings.index(
-        "### Generated artifacts"
-    )
+    assert [tab.label for tab in at.tabs] == [
+        "Test cases (1)",
+        "Requirements (1)",
+        "Scenarios (1)",
+    ]
+    assert "### Quality and traceability" in headings
+    assert not any(expander.label == "Quality and traceability" for expander in at.expander)
+    assert _element(at.expander, "Run configuration")
     for expected in (
         "Staged single agent",
         "Ollama",
         "gemma4",
-        "sample.pdf",
-        "Temperature 0",
-        "Token ceiling 100,000",
-        "REQ-001 · Authenticate users",
-        "Registered customers can securely sign in.",
-        "Functional",
-        "High",
-        "Authentication",
-        "REQ-000",
-        "Lockout threshold is unspecified.",
-        "SCN-001 · Valid sign in",
-        "Verify successful authentication.",
-        "Positive",
-        "The customer account is active.",
-        "TC-001 · Sign in with valid credentials",
-        "P1",
-        "The login page is open.",
-        "customer@example.com",
-        "AUTHENTICATION",
     ):
         assert expected in text
+    assert _element(at.button, "Open test case TC-001 detail")
+    assert _element(at.button, "Open requirement REQ-001 detail")
+    assert _element(at.button, "Open scenario SCN-001 detail")
     snapshot = next(
         table.value
         for table in at.table
@@ -694,18 +761,47 @@ def test_completed_detail_renders_test_cases_first_and_snapshot() -> None:
     assert base_url not in text
     assert secret not in tables
     assert base_url not in tables
-    assert "Enter valid credentials." in tables
-    assert "The credentials are accepted." in tables
-    assert "Submit the login form." in tables
-    assert "The account dashboard is displayed." in tables
     assert {button.key for button in at.download_button} == {
         f"detail-{result.manifest.run_id}-rtm",
         f"detail-{result.manifest.run_id}-bundle",
     }
     assert _element(at.metric, "Charged tokens").value == "30"
     assert "Latency 0.10 s · 0 retries" in text
-    assert "Positive scenario coverage" in tables
-    assert "Non-positive scenario coverage" in tables
+    assert "Citation coverage" in text
+    assert "Positive scenario coverage" in text
+    assert "Non-positive scenario coverage" in text
+
+
+def test_quality_chart_surfaces_the_lowest_coverage_gap() -> None:
+    result = _detailed_run()
+    assert result.metrics is not None
+    result = result.model_copy(
+        update={
+            "metrics": result.metrics.model_copy(
+                update={
+                    "citation_coverage": 1,
+                    "requirement_scenario_coverage": 0.17,
+                    "requirement_test_case_coverage": 0.17,
+                    "positive_scenario_coverage": 0,
+                    "non_positive_scenario_coverage": 0.17,
+                    "rtm_completeness": 0.17,
+                }
+            )
+        }
+    )
+    at = _app_test()
+    _show_detail(at, result)
+
+    at.run()
+
+    text = _rendered_text(at)
+    assert "Priority: Positive scenario coverage is 0%. Target: 100%." in text
+    assert text.index("Positive scenario coverage") < text.index(
+        "Requirement → scenario"
+    )
+    assert "quality-chart__bar--critical" in text
+    assert "quality-chart__bar--partial" in text
+    assert "quality-chart__bar--complete" in text
 
 
 def test_failed_result_without_metrics_has_an_actionable_summary() -> None:
@@ -715,10 +811,11 @@ def test_failed_result_without_metrics_has_an_actionable_summary() -> None:
 
     at.run()
 
-    assert at.status[0].label == "Generation failed"
     text = _rendered_text(at)
     assert "text-extractable PDF" in text
-    assert "### Run configuration snapshot" in text
+    assert at.error
+    assert "Diagnostics and next steps" in text
+    assert "Run configuration" in text
     snapshot = next(
         table.value
         for table in at.table
@@ -738,12 +835,14 @@ def test_interrupted_result_has_diagnostics_without_a_fake_failure() -> None:
     at.run()
 
     text = _rendered_text(at)
-    assert at.status[0].label == "Generation interrupted"
+    assert "Generation was interrupted. Review diagnostics before retrying." in text
     assert "Unknown failure" not in text
     assert "Technical details" not in text
-    assert "### Run configuration snapshot" in text
+    assert "Diagnostics and next steps" in text
+    assert "Run configuration" in text
     assert not at.error
     assert not at.success
+    assert at.warning
     snapshot = next(
         table.value
         for table in at.table
@@ -767,9 +866,9 @@ def test_failed_semantic_result_keeps_artifact_details_and_diagnostics() -> None
     at.run()
 
     text = _rendered_text(at)
-    assert "TC-001 · Sign in with valid credentials" in text
+    assert _element(at.button, "Open test case TC-001 detail")
     assert "LM Studio" in text
-    assert "### Run configuration snapshot" in text
+    assert "Run configuration" in text
     assert [element.value for element in at.markdown].index(
         "#### Test cases"
     ) < [element.value for element in at.markdown].index("#### Requirements")
@@ -841,10 +940,19 @@ def test_create_runs_one_selected_type_and_opens_returned_detail() -> None:
     assert at.session_state["selected_run_id"] == result.manifest.run_id
     assert at.session_state["selected_run"] == result
     assert not at.exception
-    assert "TC-001 · Sign in with valid credentials" in _rendered_text(at)
+    assert _element(at.button, "Open test case TC-001 detail")
 
 
 def test_centralized_run_shows_plan_and_agent_activity() -> None:
+    detailed = _detailed_run()
+    result = detailed.model_copy(
+        update={
+            "manifest": detailed.manifest.model_copy(
+                update={"run_type": RunType.CENTRALIZED_MULTI_AGENT}
+            )
+        }
+    )
+
     def fake_runner(*args, progress, **kwargs):
         progress(
             ActivityEvent(
@@ -856,9 +964,11 @@ def test_centralized_run_shows_plan_and_agent_activity() -> None:
                 task="Extract testable business rules with source references.",
                 scope="1 assigned source chunk · pages 1",
                 deliverable="Candidate requirements for reviewer reconciliation.",
+                artifact=RequirementBatch(requirements=[]),
+                artifact_label="Candidate requirements",
             )
         )
-        raise RuntimeError("stop after activity")
+        return result
 
     at = _app_test()
     at.session_state["_runner"] = fake_runner
@@ -881,6 +991,17 @@ def test_centralized_run_shows_plan_and_agent_activity() -> None:
     assert "Model: analyst-model" in text
     assert "Extract testable business rules with source references." in text
     assert "1 assigned source chunk · pages 1" in text
+    assert "Candidate requirements" in text
+    assert "Artifact panel" not in text
+    assert at.session_state["timeline_activity"][0].artifact_label == (
+        "Candidate requirements"
+    )
+    assert "TC-001 · Sign in with valid credentials" not in text
+    _element(at.button, "View result").click()
+    at.run()
+    assert _element(at.button, "Open test case TC-001 detail")
+    assert at.session_state["view"] == "create"
+    assert at.session_state["timeline_result"] == result
 
 
 def test_returned_failed_generation_opens_detail_with_diagnostics_only(
@@ -911,7 +1032,7 @@ def test_returned_failed_generation_opens_detail_with_diagnostics_only(
     assert at.session_state["view"] == "detail"
     assert at.session_state["selected_run_id"] == result.manifest.run_id
     assert at.session_state["selected_run"] == result
-    assert at.status[0].label == "Generation failed"
+    assert at.error
     assert {button.label for button in at.download_button} == {
         "Download diagnostics"
     }
@@ -999,6 +1120,31 @@ def test_edit_settings_from_create_preserves_upload_and_run_type() -> None:
         "customer-login.pdf"
     )
     assert _element(at.selectbox, "Run type").value is RunType.STAGED_SINGLE_AGENT
+
+
+def test_settings_save_shared_agent_setup_in_postgres_repository() -> None:
+    repository = FakeRepository()
+    at = _app_test(repository)
+    at.run()
+
+    _element(at.button, "Settings").click()
+    at.run()
+    assert any(
+        expander.label.startswith("Analyst · Requirement analyst")
+        for expander in at.expander
+    )
+    _element(at.text_input, "Analyst role").set_value(
+        "Payments requirement specialist"
+    )
+    _element(at.text_area, "Analyst additional instructions").set_value(
+        "Prioritize validation and exception rules."
+    )
+    _element(at.button, "Save settings").click()
+    at.run()
+
+    analyst = repository.agent_setups["analyst"]
+    assert analyst.role == "Payments requirement specialist"
+    assert analyst.instructions == "Prioritize validation and exception rules."
 
 
 def test_create_waits_for_settings_save_without_losing_inputs() -> None:

@@ -10,7 +10,9 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from .models import (
+    AgentSetup,
     ArtifactBundle,
+    CoverageScore,
     DocumentChunk,
     Requirement,
     RunHistoryItem,
@@ -24,6 +26,7 @@ from .models import (
     TestStep,
     ValidationIssue,
     ValidationReport,
+    default_agent_setups,
 )
 from .validation import build_rtm
 
@@ -90,6 +93,49 @@ class RunRepository:
                 connection.execute(schema)
         except (OSError, psycopg.Error) as error:
             raise StorageError("Database initialization failed.") from error
+
+    def load_agent_setups(self) -> dict[str, AgentSetup]:
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT agent, role, instructions FROM agent_setups ORDER BY agent"
+                ).fetchall()
+            setups = default_agent_setups()
+            setups.update(
+                {
+                    row["agent"]: AgentSetup.model_validate(row, strict=True)
+                    for row in rows
+                }
+            )
+            return setups
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Agent setup could not be loaded.") from error
+
+    def save_agent_setups(self, setups: Iterable[AgentSetup]) -> None:
+        items = list(setups)
+        expected = set(default_agent_setups())
+        if {item.agent for item in items} != expected:
+            raise StorageError("All centralized agent setups are required.")
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.executemany(
+                        "INSERT INTO agent_setups (agent, role, instructions, updated_at) "
+                        "VALUES (%s, %s, %s, %s) "
+                        "ON CONFLICT (agent) DO UPDATE SET role = EXCLUDED.role, "
+                        "instructions = EXCLUDED.instructions, updated_at = EXCLUDED.updated_at",
+                        (
+                            (
+                                item.agent,
+                                item.role,
+                                item.instructions,
+                                datetime.now(UTC),
+                            )
+                            for item in items
+                        ),
+                    )
+        except psycopg.Error as error:
+            raise StorageError("Agent setup could not be saved.") from error
 
     def create_run(self, manifest: RunManifest) -> None:
         if manifest.status is not RunStatus.RUNNING:
@@ -241,6 +287,8 @@ class RunRepository:
                     )
                 if result.metrics is not None:
                     self._insert_metrics(connection, manifest.run_id, result.metrics)
+                if result.coverage is not None:
+                    self._insert_coverage(connection, manifest.run_id, result.coverage)
                 self._append_event(
                     connection, manifest.run_id, "finished", manifest.completed_at
                 )
@@ -555,6 +603,31 @@ class RunRepository:
             ),
         )
 
+    @staticmethod
+    def _insert_coverage(
+        connection: psycopg.Connection, run_id: str, coverage: CoverageScore
+    ) -> None:
+        connection.execute(
+            "INSERT INTO coverage_scores "
+            "(run_id, precision, recall, f1, true_positive_count, "
+            "false_positive_count, false_negative_count, total_coverage_units, "
+            "total_test_cases, uncovered_unit_ids, unmapped_test_case_ids) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                run_id,
+                coverage.precision,
+                coverage.recall,
+                coverage.f1,
+                coverage.true_positive_count,
+                coverage.false_positive_count,
+                coverage.false_negative_count,
+                coverage.total_coverage_units,
+                coverage.total_test_cases,
+                Jsonb(coverage.uncovered_unit_ids),
+                Jsonb(coverage.unmapped_test_case_ids),
+            ),
+        )
+
     def load_events(self, run_id: str) -> list[dict[str, object]]:
         try:
             with self._connect() as connection:
@@ -588,12 +661,14 @@ class RunRepository:
                 bundle = self._load_bundle(connection, run_id)
                 validation = self._load_validation(connection, run_id)
                 metrics = self._load_metrics(connection, run_id)
+                coverage = self._load_coverage(connection, run_id)
                 return RunResult(
                     manifest=manifest,
                     bundle=bundle,
                     validation=validation,
                     rtm=build_rtm(bundle) if bundle is not None else [],
                     metrics=metrics,
+                    coverage=coverage,
                 )
         except StorageError:
             raise
@@ -640,6 +715,32 @@ class RunRepository:
             schema_repairs=row["schema_repairs"],
             semantic_revisions=row["semantic_revisions"],
             budget_exhausted=row["budget_exhausted"],
+        )
+
+    @staticmethod
+    def _load_coverage(
+        connection: psycopg.Connection, run_id: str
+    ) -> CoverageScore | None:
+        row = connection.execute(
+            "SELECT precision, recall, f1, true_positive_count, "
+            "false_positive_count, false_negative_count, total_coverage_units, "
+            "total_test_cases, uncovered_unit_ids, unmapped_test_case_ids "
+            "FROM coverage_scores WHERE run_id = %s",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return CoverageScore(
+            precision=row["precision"],
+            recall=row["recall"],
+            f1=row["f1"],
+            true_positive_count=row["true_positive_count"],
+            false_positive_count=row["false_positive_count"],
+            false_negative_count=row["false_negative_count"],
+            total_coverage_units=row["total_coverage_units"],
+            total_test_cases=row["total_test_cases"],
+            uncovered_unit_ids=row["uncovered_unit_ids"],
+            unmapped_test_case_ids=row["unmapped_test_case_ids"],
         )
 
     @staticmethod
