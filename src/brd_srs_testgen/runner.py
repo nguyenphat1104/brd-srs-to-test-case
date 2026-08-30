@@ -20,6 +20,7 @@ from .models import (
     ArtifactBundle,
     CoverageRepair,
     CoverageScore,
+    DocumentChunk,
     FailureCategory,
     ReviewIssue,
     ReviewResult,
@@ -54,6 +55,7 @@ from .validation import build_rtm, compute_metrics, validate_bundle
 
 
 SCHEMA_VERSION = "research-core-v1"
+LOCAL_REQUEST_TOKEN_BUDGET = 12_000
 ProviderFactory = Callable[[RunType, BudgetLedger], StructuredProvider]
 Progress = Callable[[str], None]
 
@@ -369,6 +371,27 @@ def _repair_coverage(
     )
 
 
+def _revision_chunks(
+    bundle: ArtifactBundle,
+    validation: ValidationReport,
+    chunks: list[DocumentChunk],
+) -> list[DocumentChunk]:
+    artifact_ids = {issue.artifact_id for issue in validation.issues}
+    artifacts = [
+        *(
+            item for item in bundle.requirements if item.requirement_id in artifact_ids
+        ),
+        *(item for item in bundle.scenarios if item.scenario_id in artifact_ids),
+        *(item for item in bundle.test_cases if item.test_case_id in artifact_ids),
+    ]
+    source_chunk_ids = {
+        reference.chunk_id
+        for artifact in artifacts
+        for reference in artifact.source_references
+    }
+    return [chunk for chunk in chunks if chunk.chunk_id in source_chunk_ids]
+
+
 def run_generation(
     pdf_bytes: bytes,
     source_filename: str,
@@ -469,6 +492,11 @@ def run_generation(
             providers=providers,
             agent_setups=settings.agent_setups,
             progress=progress,
+            max_request_tokens=(
+                LOCAL_REQUEST_TOKEN_BUDGET
+                if settings.provider == "llama_cpp"
+                else None
+            ),
         )
         bundle = canonicalize_source_references(
             PIPELINES[run_type](context, chunks), chunks
@@ -481,7 +509,7 @@ def run_generation(
                 context, bundle, validation.uncovered_requirement_ids
             )
             validation = validate_bundle(bundle, chunks)
-        if not validation.valid:
+        if not validation.valid and context.max_request_tokens is None:
             bundle = context.revise(
                 [],
                 "artifact bundle",
@@ -496,7 +524,7 @@ def run_generation(
                         for issue in validation.issues
                     ],
                 ),
-                chunks,
+                _revision_chunks(bundle, validation, chunks),
                 ArtifactBundle,
                 16_000,
             )

@@ -6,9 +6,9 @@ import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import Literal, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from .documents import canonicalize_source_references, render_chunks
 from .models import (
@@ -41,6 +41,7 @@ R = TypeVar("R")
 Messages = list[dict[str, str]]
 PROMPT_VERSION = "research-core-v4"
 WORKER_COUNT = 3
+MIN_OUTPUT_TOKENS = 1_024
 
 
 class PipelineOutputError(ValueError):
@@ -54,6 +55,31 @@ class BoundedRequirementBatch(RequirementBatch):
 class BoundedGeneratedCases(GeneratedCases):
     scenarios: list[Scenario] = Field(max_length=8)
     test_cases: list[TestCase] = Field(max_length=8)
+
+
+def _scoped_worker_cases_schema(
+    requirement_ids: Iterable[str],
+) -> type[BoundedGeneratedCases]:
+    allowed_ids = tuple(sorted(set(requirement_ids)))
+    if not allowed_ids:
+        return BoundedGeneratedCases
+    requirement_id = Literal.__getitem__(allowed_ids)
+    scoped_scenario = create_model(
+        "ScopedWorkerScenario",
+        __base__=Scenario,
+        requirement_ids=(list[requirement_id], Field(min_length=1)),
+    )
+    scoped_test_case = create_model(
+        "ScopedWorkerTestCase",
+        __base__=TestCase,
+        requirement_ids=(list[requirement_id], Field(min_length=1)),
+    )
+    return create_model(
+        "ScopedWorkerCases",
+        __base__=BoundedGeneratedCases,
+        scenarios=(list[scoped_scenario], Field(max_length=8)),
+        test_cases=(list[scoped_test_case], Field(max_length=8)),
+    )
 
 
 RULES = """Rules:
@@ -146,26 +172,6 @@ Inspect only the assigned evidence. Extract every supported functional, nonfunct
 {_evidence(chunks)}"""
 
 
-def reconcile_requirements_prompt(
-    chunks: Iterable[DocumentChunk],
-    candidates: list[Requirement],
-    *,
-    setup: AgentSetup | None = None,
-) -> str:
-    candidate_batch = RequirementBatch(requirements=candidates)
-    return f"""{RULES}
-{CANONICAL_ID_RULES}
-
-Reconcile the untrusted candidate requirements against the full PDF evidence. Remove duplicates, resolve supported dependencies and conflicts, preserve supported ambiguities, and renumber the final requirements contiguously from REQ-001. Return one RequirementBatch.
-
-{_agent_setup_block(setup)}
-
-Candidate requirements JSON:
-{_data_block("CANDIDATES JSON", candidate_batch.model_dump_json())}
-
-{_evidence(chunks)}"""
-
-
 def worker_cases_prompt(
     worker_index: int,
     requirements: list[Requirement],
@@ -188,6 +194,7 @@ WORKER CASE GENERATION {worker_index + 1}/{WORKER_COUNT}
 
 Generate scenarios and executable manual test cases only for the assigned requirements, grounded only in the assigned evidence. Scenario IDs must use the inclusive range SCN-{lower:03d} through SCN-{upper:03d}; test-case IDs must use the inclusive range TC-{lower:03d} through TC-{upper:03d}; you must not emit IDs outside these ranges. Include positive, negative, boundary, edge, and state-transition coverage wherever supported. Return one GeneratedCases. If the assignment is empty, return empty scenarios and test_cases lists.
 Cover every assigned requirement with at least one scenario and test case, and cover every generated scenario with at least one test case.
+Requirement IDs are opaque labels: copy them only from the supplied JSON; never infer a new ID from its numeric pattern.
 
 {_agent_setup_block(setup)}
 
@@ -316,6 +323,7 @@ class PipelineContext:
     input_tokens: int = 0
     output_tokens: int = 0
     latency_seconds: float = 0.0
+    max_request_tokens: int | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     @property
@@ -340,6 +348,20 @@ class PipelineContext:
     def _record_latency(self, latency_seconds: float) -> None:
         with self._lock:
             self.latency_seconds += latency_seconds
+
+    def _output_budget(self, messages: Messages, schema: type[BaseModel], requested: int) -> int:
+        if self.max_request_tokens is None:
+            return requested
+        payload = json.dumps(
+            {"messages": messages, "schema": schema.model_json_schema()},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        available = self.max_request_tokens - max(1, (len(payload) + 3) // 4)
+        if available < MIN_OUTPUT_TOKENS:
+            raise PipelineOutputError(
+                "Prompt exceeds the local context budget before generation."
+            )
+        return min(requested, available)
 
     def notify(
         self,
@@ -391,10 +413,13 @@ class PipelineContext:
         while True:
             if cancellation_event is not None and cancellation_event.is_set():
                 raise CancelledError("A sibling worker failed.")
+            output_budget = self._output_budget(
+                current_messages, schema, max_output_tokens
+            )
             started = time.perf_counter()
             try:
                 result = self._provider_for(agent).generate(
-                    current_messages, schema, max_output_tokens=max_output_tokens
+                    current_messages, schema, max_output_tokens=output_budget
                 )
             except ProviderError as error:
                 self._record_latency(time.perf_counter() - started)
@@ -426,19 +451,13 @@ class PipelineContext:
                 with self._lock:
                     self.schema_repairs += 1
                 schema_repair_count += 1
-                validation_error = str(error.__cause__ or error)[:2_000]
+                validation_error = str(error.__cause__ or error)[:500]
                 repair_instruction = _user(
                     "The previous response was an invalid response. Return only valid "
                     "JSON matching this schema and all evidence/support constraints.\n"
-                    f"Validation error: {validation_error}\n"
-                    f"{_data_block('RESPONSE SCHEMA JSON', json.dumps(schema.model_json_schema(), ensure_ascii=False))}"
+                    f"Validation error: {validation_error}"
                 )
-                current_messages.extend(
-                    (
-                        {"role": "assistant", "content": error.raw_text},
-                        repair_instruction,
-                    )
-                )
+                current_messages.append(repair_instruction)
             except Exception:
                 self._record_latency(time.perf_counter() - started)
                 raise
@@ -620,8 +639,7 @@ def _validate_worker_requirements(
 def _validate_worker_cases(
     worker_index: int,
     batch: GeneratedCases,
-    assigned_requirement_ids: Iterable[str],
-    dependency_context_ids: Iterable[str],
+    canonical_requirement_ids: Iterable[str],
 ) -> None:
     _validate_worker_ids(
         worker_index,
@@ -642,8 +660,7 @@ def _validate_worker_cases(
                 f"Test case {test_case.test_case_id} references unknown worker "
                 f"scenario {test_case.scenario_id}."
             )
-    assigned_ids = set(assigned_requirement_ids)
-    allowed_ids = assigned_ids | set(dependency_context_ids)
+    allowed_ids = set(canonical_requirement_ids)
     artifacts = [
         ("Scenario", scenario.scenario_id, scenario.requirement_ids)
         for scenario in batch.scenarios
@@ -652,17 +669,50 @@ def _validate_worker_cases(
         for test_case in batch.test_cases
     ]
     for label, artifact_id, requirement_ids in artifacts:
-        if not assigned_ids.intersection(requirement_ids):
-            raise PipelineOutputError(
-                f"{label} {artifact_id} must include an assigned requirement."
-            )
         unknown_ids = set(requirement_ids) - allowed_ids
         if unknown_ids:
             raise PipelineOutputError(
                 f"{label} {artifact_id} references requirement IDs "
-                f"{sorted(unknown_ids)} outside assigned requirements and "
-                "dependency context."
+                f"{sorted(unknown_ids)} outside the canonical requirement catalog."
             )
+
+
+def _namespace_worker_case_ids(
+    worker_index: int, batch: GeneratedCases
+) -> GeneratedCases:
+    """Turn a worker's local SCN/TC numbering into its reserved ID range."""
+    offset = worker_index * 1000
+
+    def namespaced(prefix: str, item_id: str) -> str:
+        number = int(item_id.removeprefix(f"{prefix}-"))
+        if 1 <= number <= 1000:
+            return f"{prefix}-{number + offset:03d}"
+        return item_id
+
+    scenario_ids = {
+        scenario.scenario_id: namespaced("SCN", scenario.scenario_id)
+        for scenario in batch.scenarios
+    }
+    return GeneratedCases(
+        scenarios=[
+            scenario.model_copy(
+                update={"scenario_id": scenario_ids[scenario.scenario_id]}
+            )
+            for scenario in batch.scenarios
+        ],
+        test_cases=[
+            test_case.model_copy(
+                update={
+                    "test_case_id": namespaced("TC", test_case.test_case_id),
+                    "scenario_id": scenario_ids.get(
+                        test_case.scenario_id,
+                        namespaced("SCN", test_case.scenario_id),
+                    ),
+                }
+            )
+            for test_case in batch.test_cases
+        ],
+    )
 
 
 def _dependency_context(
@@ -701,6 +751,94 @@ def _relevant_chunks(
         for reference in requirement.source_references
     }
     return [chunk for chunk in chunks if chunk.chunk_id in chunk_ids]
+
+
+def _merge_worker_requirements(
+    batches: Iterable[RequirementBatch],
+) -> RequirementBatch:
+    grouped: dict[tuple[str, str], list[Requirement]] = {}
+    for requirement in (
+        requirement for batch in batches for requirement in batch.requirements
+    ):
+        key = (
+            requirement.title.strip().casefold(),
+            requirement.description.strip().casefold(),
+        )
+        grouped.setdefault(key, []).append(requirement)
+
+    selected = list(grouped.values())[:20]
+    id_map = {
+        requirement.requirement_id: f"REQ-{index:03d}"
+        for index, duplicates in enumerate(selected, 1)
+        for requirement in duplicates
+    }
+    requirements = []
+    for index, duplicates in enumerate(selected, 1):
+        primary = duplicates[0]
+        references = []
+        ambiguities = []
+        dependencies = []
+        seen_references = set()
+        for requirement in duplicates:
+            for reference in requirement.source_references:
+                key = (
+                    reference.chunk_id,
+                    reference.page_number,
+                    reference.section,
+                    reference.excerpt,
+                )
+                if key not in seen_references:
+                    seen_references.add(key)
+                    references.append(reference)
+            for ambiguity in requirement.ambiguities:
+                if ambiguity not in ambiguities:
+                    ambiguities.append(ambiguity)
+            for dependency_id in requirement.dependency_ids:
+                mapped = id_map.get(dependency_id)
+                if mapped and mapped != f"REQ-{index:03d}" and mapped not in dependencies:
+                    dependencies.append(mapped)
+        requirements.append(
+            primary.model_copy(
+                update={
+                    "requirement_id": f"REQ-{index:03d}",
+                    "source_references": references,
+                    "ambiguities": ambiguities,
+                    "dependency_ids": dependencies,
+                }
+            )
+        )
+    return RequirementBatch(requirements=requirements)
+
+
+def _normalize_worker_bundle(bundle: ArtifactBundle) -> ArtifactBundle:
+    """Make worker-produced trace links internally consistent without a model call."""
+    requirement_ids = {item.requirement_id for item in bundle.requirements}
+    cases_by_scenario: dict[str, list[TestCase]] = {}
+    for test_case in bundle.test_cases:
+        cases_by_scenario.setdefault(test_case.scenario_id, []).append(test_case)
+
+    scenarios = []
+    for scenario in bundle.scenarios:
+        test_cases = cases_by_scenario.get(scenario.scenario_id, [])
+        if not test_cases:
+            continue
+        linked_ids = list(scenario.requirement_ids)
+        for test_case in test_cases:
+            for requirement_id in test_case.requirement_ids:
+                if requirement_id in requirement_ids and requirement_id not in linked_ids:
+                    linked_ids.append(requirement_id)
+        scenarios.append(scenario.model_copy(update={"requirement_ids": linked_ids}))
+    scenario_ids = {scenario.scenario_id for scenario in scenarios}
+    return bundle.model_copy(
+        update={
+            "scenarios": scenarios,
+            "test_cases": [
+                test_case
+                for test_case in bundle.test_cases
+                if test_case.scenario_id in scenario_ids
+            ],
+        }
+    )
 
 
 def run_centralized_multi_agent(
@@ -763,38 +901,11 @@ def run_centralized_multi_agent(
         ),
     )
 
-    candidates = [
-        requirement
-        for batch in worker_requirements
-        for requirement in batch.requirements
-    ]
+    requirements = _merge_worker_requirements(worker_requirements)
     context.notify(
-        "Orchestrator: reconciling the analysts' requirement findings.",
-        agent="Reviewer",
-        role=context.agent_setup("reviewer").role,
-        model=context.model_for("reviewer"),
-        state="working",
-    )
-    requirements = canonicalize_source_references(
-        context.generate(
-            [
-                _user(
-                    reconcile_requirements_prompt(
-                        chunks, candidates, setup=context.agent_setup("reviewer")
-                    )
-                )
-            ],
-            BoundedRequirementBatch,
-            8_000,
-            agent="reviewer",
-        ),
-        chunks,
-    )
-    context.notify(
-        f"Reviewer: published {len(requirements.requirements)} canonical requirements.",
-        agent="Reviewer",
-        role=context.agent_setup("reviewer").role,
-        model=context.model_for("reviewer"),
+        f"Orchestrator: reconciled {len(requirements.requirements)} canonical requirements.",
+        agent="Orchestrator",
+        role="Policy coordinator",
         state="complete",
         artifact=requirements,
         artifact_label="Canonical requirements",
@@ -817,7 +928,12 @@ def run_centralized_multi_agent(
         group: list[Requirement],
         cancellation_event: threading.Event,
     ) -> GeneratedCases:
+        if not group:
+            return GeneratedCases(scenarios=[], test_cases=[])
         dependencies = _dependency_context(group, requirements.requirements)
+        case_schema = _scoped_worker_cases_schema(
+            requirement.requirement_id for requirement in requirements.requirements
+        )
         batch = canonicalize_source_references(context.generate(
             [
                 _user(
@@ -830,16 +946,16 @@ def run_centralized_multi_agent(
                     )
                 )
             ],
-            BoundedGeneratedCases,
+            case_schema,
             8_000,
             cancellation_event=cancellation_event,
             agent="test_generator",
         ), chunks)
+        batch = _namespace_worker_case_ids(worker_index, batch)
         _validate_worker_cases(
             worker_index,
             batch,
-            (requirement.requirement_id for requirement in group),
-            (requirement.requirement_id for requirement in dependencies),
+            (requirement.requirement_id for requirement in requirements.requirements),
         )
         return batch
 
@@ -864,13 +980,15 @@ def run_centralized_multi_agent(
         ),
     )
 
-    bundle = canonicalize_source_references(
-        ArtifactBundle(
+    bundle = _normalize_worker_bundle(
+        canonicalize_source_references(
+            ArtifactBundle(
             requirements=requirements.requirements,
             scenarios=[scenario for batch in worker_cases for scenario in batch.scenarios],
             test_cases=[test_case for batch in worker_cases for test_case in batch.test_cases],
-        ),
-        chunks,
+            ),
+            chunks,
+        )
     )
     context.notify(
         "Orchestrator: merging the generated artifacts.",

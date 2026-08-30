@@ -532,6 +532,27 @@ def _apply_theme() -> None:
             display: grid;
             gap: 0.25rem;
         }
+        .activity-plan__summary {
+            margin-bottom: 0.45rem;
+            color: var(--color-muted);
+            font-size: 0.76rem;
+            font-weight: 700;
+        }
+        .activity-plan__progress {
+            height: 0.42rem;
+            margin-bottom: 0.55rem;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #e2e8f0;
+        }
+        .activity-plan__progress > span {
+            display: block;
+            width: var(--plan-progress);
+            height: 100%;
+            border-radius: inherit;
+            background: var(--color-accent);
+            transition: width 200ms ease-out;
+        }
         .activity-plan__step {
             display: grid;
             grid-template-columns: 1.35rem minmax(0, 1fr);
@@ -565,6 +586,11 @@ def _apply_theme() -> None:
             color: #1d4ed8;
             background: #eff6ff;
             animation: activity-pulse 1.8s ease-in-out infinite;
+        }
+        .activity-plan__step--error .activity-plan__marker {
+            border-color: var(--color-danger-border);
+            color: var(--color-danger);
+            background: var(--color-danger-soft);
         }
         .activity-plan__name {
             color: var(--color-foreground);
@@ -609,6 +635,27 @@ def _apply_theme() -> None:
         }
         .st-key-live-feed [data-testid="stVerticalBlock"] {
             scrollbar-color: #bfdbfe transparent;
+        }
+        .agent-event__header {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+        }
+        .agent-event__name {
+            color: var(--color-foreground);
+            font-size: 0.9rem;
+            font-weight: 750;
+        }
+        .agent-event__role {
+            color: var(--color-muted);
+            font-size: 0.78rem;
+        }
+        .agent-event__message {
+            margin: 0.45rem 0 0;
+            color: var(--color-foreground);
+            font-size: 0.82rem;
+            line-height: 1.5;
         }
         .timeline-result-card {
             display: flex;
@@ -685,10 +732,23 @@ def _apply_theme() -> None:
             color: #ffffff;
             background: var(--color-accent);
         }
+        .seamless-stage--error .seamless-stage__marker {
+            border-color: var(--color-danger-border);
+            color: var(--color-danger);
+            background: var(--color-danger-soft);
+        }
         .seamless-stage__title {
             color: var(--color-foreground);
             font-size: 1rem;
             font-weight: 750;
+        }
+        .seamless-stage__eyebrow {
+            margin-bottom: 0.12rem;
+            color: var(--color-faint);
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
         .seamless-stage__detail {
             margin-top: 0.1rem;
@@ -841,10 +901,22 @@ def _activity_plan_step(event: str, current_step: int) -> int:
     return current_step
 
 
-def _render_activity_plan(placeholder, current_step: int) -> None:
+def _render_activity_plan(
+    placeholder, current_step: int, *, stopped: bool = False
+) -> None:
+    next_step = min(current_step, len(ACTIVITY_PLAN) - 1)
+    summary = (
+        f"Stopped at step {next_step + 1} of {len(ACTIVITY_PLAN)} · {ACTIVITY_PLAN[next_step][0]}"
+        if stopped
+        else "Plan complete"
+        if current_step == len(ACTIVITY_PLAN)
+        else f"Step {next_step + 1} of {len(ACTIVITY_PLAN)} · {ACTIVITY_PLAN[next_step][0]}"
+    )
     steps = []
     for index, (name, detail) in enumerate(ACTIVITY_PLAN):
-        if index < current_step:
+        if stopped and index == next_step:
+            state, marker, status = "error", "!", "Stopped"
+        elif index < current_step:
             state, marker, status = "complete", "✓", "Complete"
         elif index == current_step and current_step < len(ACTIVITY_PLAN):
             state, marker, status = "active", str(index + 1), "Working"
@@ -859,6 +931,11 @@ def _render_activity_plan(placeholder, current_step: int) -> None:
         )
     placeholder.markdown(
         "<div class='activity-plan' aria-label='Generation plan'>"
+        f"<div class='activity-plan__summary'>{summary}</div>"
+        "<div class='activity-plan__progress' role='progressbar' "
+        f"aria-valuenow='{next_step if stopped else current_step}' aria-valuemin='0' "
+        f"aria-valuemax='{len(ACTIVITY_PLAN)}'><span style='--plan-progress: "
+        f"{(next_step if stopped else current_step) / len(ACTIVITY_PLAN):.0%}'></span></div>"
         f"{''.join(steps)}</div>",
         unsafe_allow_html=True,
     )
@@ -888,8 +965,14 @@ def _render_activity(activity, event: str) -> None:
         return
 
     with activity:
-        with st.chat_message("assistant"):
-            st.markdown(f"**{event.agent}** · {event.role}")
+        with st.container(border=True):
+            st.markdown(
+                "<div class='agent-event__header'>"
+                f"<span class='agent-event__name'>{html.escape(event.agent)}</span>"
+                f"<span class='agent-event__role'>· {html.escape(event.role)}</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
             metadata = []
             if event.model:
                 metadata.append(f"Model: {event.model}")
@@ -907,7 +990,10 @@ def _render_activity(activity, event: str) -> None:
                 st.caption(f"Scope: {event.scope}")
             if event.deliverable:
                 st.caption(f"Delivers: {event.deliverable}")
-            st.write(str(event))
+            st.markdown(
+                f"<p class='agent-event__message'>{html.escape(str(event))}</p>",
+                unsafe_allow_html=True,
+            )
             if event.artifact is not None:
                 st.caption("Artifact published")
                 _render_artifact_popover(event)
@@ -945,6 +1031,7 @@ def _render_timeline_stage(
         f"<div class='seamless-stage seamless-stage--{state}'>"
         f"<span class='seamless-stage__marker'>{marker}</span>"
         "<div>"
+        f"<div class='seamless-stage__eyebrow'>Step {number} of 3</div>"
         f"<div class='seamless-stage__title'>{title}</div>"
         f"<div class='seamless-stage__detail'>{detail}</div>"
         "</div></div>",
@@ -1500,9 +1587,10 @@ def _result_dialog(result: RunResult) -> None:
 def _render_timeline_result_action(result: RunResult) -> None:
     label, _ = _result_status(result)
     completed = result.manifest.status is RunStatus.COMPLETED
+    eyebrow = "Validated result" if completed else "Run outcome"
     st.markdown(
         "<div class='timeline-result-card'>"
-        "<div><div class='timeline-result-card__eyebrow'>Validated result</div>"
+        f"<div><div class='timeline-result-card__eyebrow'>{eyebrow}</div>"
         f"<div class='timeline-result-card__title'>{label}</div></div>"
         "</div>",
         unsafe_allow_html=True,
@@ -1771,6 +1859,7 @@ def _go_home() -> None:
     st.session_state.pop("selected_run", None)
     st.session_state.pop("timeline_result", None)
     st.session_state.pop("timeline_activity", None)
+    st.session_state.pop("timeline_current_step", None)
 
 
 def _render_top_nav() -> None:
@@ -1903,18 +1992,19 @@ def _render_centralized_create(
         with source_stage.container():
             _render_timeline_stage(
                 1,
-                "Select source",
-                "Upload the BRD or SRS to create a traceable test suite.",
+                "Configure and start",
+                "Choose a source document, confirm the run settings, then start generation.",
                 state="active",
             )
         with st.container(border=True):
+            st.markdown("##### Source document")
             upload = st.file_uploader(
                 "BRD/SRS PDF",
                 type=["pdf"],
                 key="pdf",
                 help="Use a text-extractable PDF.",
             )
-            st.markdown("**App settings**")
+            st.markdown("##### Run settings")
             st.caption(
                 f"{_provider_label(settings.provider)} · {settings.model} · "
                 f"{settings.token_ceiling:,} token ceiling"
@@ -1959,13 +2049,11 @@ def _render_centralized_create(
         with live_stage.container():
             _render_timeline_stage(
                 2,
-                "Live generation",
+                "Generate and validate",
                 "Agents will publish their task, scope, checkpoint, and artifact here.",
                 state="pending",
             )
         live_panel = st.empty()
-        with live_panel.container(border=True):
-            st.caption("Generation starts after you select a source.")
 
         result_stage = st.empty()
         with result_stage.container():
@@ -1980,20 +2068,36 @@ def _render_centralized_create(
     if not generate:
         result = st.session_state.get("timeline_result")
         if isinstance(result, RunResult):
+            completed = result.manifest.status is RunStatus.COMPLETED
+            current_step = (
+                len(ACTIVITY_PLAN)
+                if completed
+                else st.session_state.get("timeline_current_step", 0)
+            )
             source_stage.empty()
             with source_stage.container():
                 _render_timeline_stage(
-                    1, "Select source", "Source locked for this saved run.", state="complete"
+                    1, "Configure and start", "Source locked for this saved run.", state="complete"
                 )
             live_stage.empty()
             with live_stage.container():
                 _render_timeline_stage(
-                    2, "Live generation", "Agent handoffs and review completed.", state="complete"
+                    2,
+                    "Generate and validate" if completed else "Generation stopped",
+                    "Agent handoffs and review completed."
+                    if completed
+                    else "Review the diagnostics, update the setup, and try again.",
+                    state="complete" if completed else "error",
                 )
             result_stage.empty()
             with result_stage.container():
                 _render_timeline_stage(
-                    3, "Validated result", "Open or download the completed test suite.", state="complete"
+                    3,
+                    "Validated result" if completed else "Diagnostics available",
+                    "Open or download the completed test suite."
+                    if completed
+                    else "No validated test suite was produced for this run.",
+                    state="complete" if completed else "error",
                 )
             activity_events = st.session_state.get("timeline_activity", [])
             if activity_events:
@@ -2003,17 +2107,21 @@ def _render_centralized_create(
                     with feed_column:
                         st.markdown("#### Agent activity")
                         st.caption("Live handoffs, current tasks, scopes, and checkpoints.")
-                        activity = st.container(height=560, key="live-feed")
+                        activity = st.container(height=420, key="live-feed")
                         for event in activity_events:
                             _render_activity(activity, event)
                         _scroll_live_feed()
                     with plan_column:
                         st.markdown("#### Plan")
                         plan = st.empty()
-                        _render_activity_plan(plan, len(ACTIVITY_PLAN))
+                        _render_activity_plan(
+                            plan, current_step, stopped=not completed
+                        )
                         st.caption("Private model reasoning is not displayed.")
             with result_panel.container(border=True):
                 _render_timeline_result_action(result)
+        else:
+            live_panel.empty()
         return
 
     if upload is None:
@@ -2030,16 +2138,17 @@ def _render_centralized_create(
     st.session_state.pop("timeline_result", None)
     activity_events: list[str] = []
     st.session_state["timeline_activity"] = activity_events
+    st.session_state["timeline_current_step"] = 0
     source_stage.empty()
     with source_stage.container():
         _render_timeline_stage(
-            1, "Select source", "Source ready for the generation plan.", state="complete"
+            1, "Configure and start", "Source and settings are locked for this run.", state="complete"
         )
     live_stage.empty()
     with live_stage.container():
         _render_timeline_stage(
             2,
-            "Live generation",
+            "Generate and validate",
             "Agents are working through the visible plan below.",
             state="active",
         )
@@ -2051,7 +2160,7 @@ def _render_centralized_create(
             with feed_column:
                 st.markdown("#### Agent activity")
                 st.caption("Agent handoffs, current tasks, scopes, and checkpoints.")
-                activity = st.container(height=560, key="live-feed")
+                activity = st.container(height=420, key="live-feed")
             with plan_column:
                 st.markdown("#### Plan")
                 plan = st.empty()
@@ -2063,6 +2172,7 @@ def _render_centralized_create(
             def progress(event: str) -> None:
                 nonlocal current_step
                 current_step = _activity_plan_step(event, current_step)
+                st.session_state["timeline_current_step"] = current_step
                 _render_activity_plan(plan, current_step)
                 _render_activity(activity, event)
                 activity_events.append(event)
@@ -2082,27 +2192,37 @@ def _render_centralized_create(
         with live_stage.container():
             _render_timeline_stage(
                 2,
-                "Live generation",
+                "Generate and validate",
                 "Generation stopped before the result was validated.",
                 state="pending",
             )
         st.error(f"Generation failed: {_safe_error(error, provider_settings)}")
         return
 
-    current_step = len(ACTIVITY_PLAN)
-    _render_activity_plan(plan, current_step)
+    completed = result.manifest.status is RunStatus.COMPLETED
+    if completed:
+        current_step = len(ACTIVITY_PLAN)
+        st.session_state["timeline_current_step"] = current_step
+    _render_activity_plan(plan, current_step, stopped=not completed)
     live_stage.empty()
     with live_stage.container():
         _render_timeline_stage(
-            2, "Live generation", "Agent handoffs and review completed.", state="complete"
+            2,
+            "Generate and validate" if completed else "Generation stopped",
+            "Agent handoffs and review completed."
+            if completed
+            else "Review the diagnostics, update the setup, and try again.",
+            state="complete" if completed else "error",
         )
     result_stage.empty()
     with result_stage.container():
         _render_timeline_stage(
             3,
-            "Validated result",
-            "Review complete; the saved artifacts are ready to inspect.",
-            state="complete" if result.manifest.status is RunStatus.COMPLETED else "pending",
+            "Validated result" if completed else "Diagnostics available",
+            "Review complete; the saved artifacts are ready to inspect."
+            if completed
+            else "No validated test suite was produced for this run.",
+            state="complete" if completed else "error",
         )
     st.session_state["selected_run_id"] = result.manifest.run_id
     st.session_state["selected_run"] = result
@@ -2113,8 +2233,10 @@ def _render_centralized_create(
 
 def _render_create(repository: RunRepository, settings: AppSettings) -> None:
     st.button("Back to runs", on_click=_go_home)
-    st.title("Create a run")
-    st.caption("Add a source document and choose one generation strategy.")
+    st.title("Create a test suite")
+    st.caption(
+        "Upload a BRD or SRS, confirm the generation strategy, and track every stage of the run."
+    )
     run_type = st.selectbox(
         "Run type",
         list(RunType),

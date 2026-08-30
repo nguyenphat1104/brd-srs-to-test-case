@@ -19,6 +19,7 @@ from brd_srs_testgen.models import (
     ReviewResult,
     RunStatus,
     RunType,
+    ValidationReport,
 )
 from brd_srs_testgen.pipelines import PipelineOutputError
 from brd_srs_testgen.providers import (
@@ -697,6 +698,80 @@ def test_failed_validation_gets_one_semantic_revision(monkeypatch) -> None:
     assert result.manifest.status is RunStatus.COMPLETED
     assert result.validation.valid is True
     assert result.metrics.semantic_revisions == 1
+
+
+def test_local_run_does_not_send_an_invalid_bundle_to_a_full_revision(monkeypatch) -> None:
+    artifacts = bundle()
+    invalid_reference = artifacts.requirements[0].source_references[0].model_copy(
+        update={"excerpt": "invented evidence"}
+    )
+    invalid = artifacts.model_copy(
+        update={
+            "requirements": [
+                artifacts.requirements[0].model_copy(
+                    update={"source_references": [invalid_reference]}
+                )
+            ]
+        }
+    )
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(provider="llama_cpp"),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, [invalid]),
+    )
+
+    assert result.manifest.status is RunStatus.FAILED
+    assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
+    assert result.metrics.semantic_revisions == 0
+
+
+def test_revision_uses_only_chunks_cited_by_invalid_artifacts() -> None:
+    artifacts = bundle()
+    unrelated = chunk().model_copy(
+        update={
+            "chunk_id": "p0002-c001-unrelated",
+            "page_number": 2,
+            "text": "Unrelated source text.",
+            "content_hash": "b" * 64,
+        }
+    )
+    source = artifacts.scenarios[0].source_references[0].model_copy(
+        update={
+            "chunk_id": unrelated.chunk_id,
+            "page_number": unrelated.page_number,
+            "excerpt": unrelated.text,
+        }
+    )
+    invalid = artifacts.model_copy(
+        update={
+            "scenarios": [
+                artifacts.scenarios[0].model_copy(update={"source_references": [source]})
+            ]
+        }
+    )
+    validation = ValidationReport.model_validate(
+        {
+            "valid": False,
+            "issues": [
+                {
+                    "code": "invalid_source_reference",
+                    "artifact_id": "SCN-001",
+                    "message": "Invalid source reference.",
+                }
+            ],
+            "uncovered_requirement_ids": [],
+            "orphan_scenario_ids": [],
+            "orphan_test_case_ids": [],
+        }
+    )
+
+    assert runner._revision_chunks(invalid, validation, [chunk(), unrelated]) == [unrelated]
 
 
 def test_uncovered_requirement_gets_link_only_repair(monkeypatch) -> None:

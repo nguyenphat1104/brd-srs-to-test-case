@@ -986,6 +986,7 @@ def test_centralized_run_shows_plan_and_agent_activity() -> None:
 
     text = _rendered_text(at)
     assert "Agent activity" in text
+    assert "Plan complete" in text
     assert "Prepare document" in text
     assert "Analyzer 1" in text
     assert "Model: analyst-model" in text
@@ -1002,6 +1003,41 @@ def test_centralized_run_shows_plan_and_agent_activity() -> None:
     assert _element(at.button, "Open test case TC-001 detail")
     assert at.session_state["view"] == "create"
     assert at.session_state["timeline_result"] == result
+
+
+def test_centralized_returned_failure_stops_the_plan_and_keeps_diagnostics() -> None:
+    failed = _failed_run()
+    result = failed.model_copy(
+        update={
+            "manifest": failed.manifest.model_copy(
+                update={"run_type": RunType.CENTRALIZED_MULTI_AGENT}
+            )
+        }
+    )
+    at = _app_test()
+    at.session_state["_runner"] = lambda *args, **kwargs: result
+    at.run()
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.selectbox, "Run type").set_value(
+        RunType.CENTRALIZED_MULTI_AGENT
+    )
+    _element(at.file_uploader, "BRD/SRS PDF").set_value(
+        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
+    )
+    _element(at.button, "Generate test cases").click()
+    at.run()
+
+    text = _rendered_text(at)
+    assert "Generation stopped" in text
+    assert "Diagnostics available" in text
+    assert "Stopped at step 1 of 5" in text
+    assert "Review complete; the saved artifacts are ready to inspect." not in text
+    assert _element(at.button, "View diagnostics")
+    assert at.session_state["timeline_current_step"] == 0
+
+    at.run()
+    assert "Generation stopped" in _rendered_text(at)
 
 
 def test_returned_failed_generation_opens_detail_with_diagnostics_only(

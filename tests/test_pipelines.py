@@ -3,6 +3,7 @@ import threading
 from collections import deque
 
 import pytest
+from pydantic import ValidationError
 
 from brd_srs_testgen import pipelines as pipeline_module
 from brd_srs_testgen.models import (
@@ -48,14 +49,12 @@ class CentralProvider:
         content = messages[-1]["content"]
         with self.lock:
             self.calls.append((messages, schema, max_output_tokens))
-        if issubclass(schema, RequirementBatch):
+        if "WORKER REQUIREMENT EXTRACTION" in content:
             value = RequirementBatch(
-                requirements=(
-                    self.artifacts.requirements
-                    if "p0001-c001" in content or "CANDIDATES" in content
-                    else []
-                )
+                requirements=self.artifacts.requirements if "p0001-c001" in content else []
             )
+        elif issubclass(schema, RequirementBatch):
+            value = RequirementBatch(requirements=self.artifacts.requirements)
         elif issubclass(schema, GeneratedCases):
             assigned = '"requirements":[]' not in content.replace(" ", "")
             value = GeneratedCases(
@@ -92,29 +91,21 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
     )
     assert sum("p0001-c001" not in call[0][0]["content"] for call in worker_calls) == 2
     case_calls = [call for call in provider.calls if issubclass(call[1], GeneratedCases)]
-    assert len(case_calls) == 3
+    assert len(case_calls) == 1
     assert all(
         call[1].model_json_schema()["properties"]["scenarios"]["maxItems"] == 8
         and call[1].model_json_schema()["properties"]["test_cases"]["maxItems"] == 8
         for call in case_calls
     )
-    reconcile_call = next(
-        call for call in provider.calls if "CANDIDATES JSON" in call[0][0]["content"]
-    )
-    assert reconcile_call[2] == 8_000
-    assert sum(
-        '"requirements":[]' in call[0][0]["content"].replace(" ", "")
-        for call in case_calls
-    ) == 2
+    assert not any("WORKER REQUIREMENT REVIEW" in call[0][0]["content"] for call in provider.calls)
+    assert not any("REVIEWED CANDIDATES JSON" in call[0][0]["content"] for call in provider.calls)
 
 
 def test_centralized_routes_each_agent_role_to_its_provider() -> None:
     analyst = CentralProvider()
     generator = CentralProvider()
-    reviewer = CentralProvider()
     analyst.model = "analyst-model"
     generator.model = "generator-model"
-    reviewer.model = "reviewer-model"
     activity = []
 
     result = run_centralized_multi_agent(
@@ -123,7 +114,6 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
             providers={
                 "analyst": analyst,
                 "test_generator": generator,
-                "reviewer": reviewer,
             },
             progress=activity.append,
         ),
@@ -136,10 +126,8 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
         "WORKER REQUIREMENT EXTRACTION" in call[0][0]["content"]
         for call in analyst.calls
     )
-    assert len(generator.calls) == 3
+    assert len(generator.calls) == 1
     assert all(issubclass(call[1], GeneratedCases) for call in generator.calls)
-    assert len(reviewer.calls) == 1
-    assert "CANDIDATES JSON" in reviewer.calls[0][0][0]["content"]
     assert {
         event.model
         for event in activity
@@ -150,11 +138,6 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
         for event in activity
         if getattr(event, "role", "") == "Test designer"
     } == {"generator-model"}
-    assert {
-        event.model
-        for event in activity
-        if getattr(event, "role", "") == "Requirements curator"
-    } == {"reviewer-model"}
 
 
 def test_centralized_activity_reports_orchestrator_handoffs() -> None:
@@ -165,7 +148,7 @@ def test_centralized_activity_reports_orchestrator_handoffs() -> None:
     )
 
     assert activity[0] == "Orchestrator: spawning Analyzer 1, Analyzer 2, and Analyzer 3."
-    assert "Orchestrator: reconciling the analysts' requirement findings." in activity
+    assert "Orchestrator: reconciled 1 canonical requirements." in activity
     assert (
         "Orchestrator: spawning Test Generator 1, Test Generator 2, and Test Generator 3."
         in activity
@@ -338,7 +321,7 @@ def generated_with_requirement_ids(
 
 
 @pytest.mark.parametrize("target", ["scenario", "test_case"])
-def test_worker_cases_reject_dependency_only_artifacts(target: str) -> None:
+def test_worker_cases_allow_dependency_only_artifacts(target: str) -> None:
     assigned = ["REQ-001"]
     dependency = ["REQ-002"]
     batch = generated_with_requirement_ids(
@@ -346,14 +329,11 @@ def test_worker_cases_reject_dependency_only_artifacts(target: str) -> None:
         dependency if target == "test_case" else assigned,
     )
 
-    with pytest.raises(
-        PipelineOutputError, match="must include an assigned requirement"
-    ):
-        pipeline_module._validate_worker_cases(0, batch, assigned, dependency)
+    pipeline_module._validate_worker_cases(0, batch, [*assigned, *dependency])
 
 
 @pytest.mark.parametrize("target", ["scenario", "test_case"])
-def test_worker_cases_reject_unknown_requirement_links(target: str) -> None:
+def test_worker_cases_reject_unknown_canonical_requirement_links(target: str) -> None:
     assigned = ["REQ-001"]
     batch = generated_with_requirement_ids(
         ["REQ-001", "REQ-003"] if target == "scenario" else assigned,
@@ -362,19 +342,55 @@ def test_worker_cases_reject_unknown_requirement_links(target: str) -> None:
 
     with pytest.raises(
         PipelineOutputError,
-        match="outside assigned requirements and dependency context",
+        match="outside the canonical requirement catalog",
     ):
-        pipeline_module._validate_worker_cases(0, batch, assigned, ["REQ-002"])
+        pipeline_module._validate_worker_cases(0, batch, [*assigned, "REQ-002"])
 
 
-def test_worker_cases_allow_assigned_and_dependency_links() -> None:
+def test_worker_cases_allow_canonical_links_from_another_worker() -> None:
     batch = generated_with_requirement_ids(
-        ["REQ-001", "REQ-002"], ["REQ-001", "REQ-002"]
+        ["REQ-001", "REQ-003"], ["REQ-001", "REQ-003"]
     )
 
-    pipeline_module._validate_worker_cases(
-        0, batch, ["REQ-001"], ["REQ-002"]
+    pipeline_module._validate_worker_cases(0, batch, ["REQ-001", "REQ-002", "REQ-003"])
+
+
+def test_worker_cases_schema_rejects_invented_requirement_ids() -> None:
+    artifacts = bundle()
+    invalid_scenario = artifacts.scenarios[0].model_copy(
+        update={"scenario_id": "SCN-1006", "requirement_ids": ["REQ-009"]}
     )
+    invalid_case = artifacts.test_cases[0].model_copy(
+        update={
+            "test_case_id": "TC-1006",
+            "scenario_id": "SCN-1006",
+            "requirement_ids": ["REQ-009"],
+        }
+    )
+
+    schema = pipeline_module._scoped_worker_cases_schema(["REQ-001"])
+
+    with pytest.raises(ValidationError):
+        schema.model_validate(
+            GeneratedCases(
+            scenarios=[artifacts.scenarios[0], invalid_scenario],
+            test_cases=[artifacts.test_cases[0], invalid_case],
+            ).model_dump(mode="json")
+        )
+
+
+def test_worker_cases_namespace_local_ids_for_each_worker() -> None:
+    artifacts = bundle()
+    batch = GeneratedCases(
+        scenarios=[artifacts.scenarios[0]], test_cases=[artifacts.test_cases[0]]
+    )
+
+    namespaced = pipeline_module._namespace_worker_case_ids(1, batch)
+
+    assert [item.scenario_id for item in namespaced.scenarios] == ["SCN-1001"]
+    assert [item.test_case_id for item in namespaced.test_cases] == ["TC-1001"]
+    assert [item.scenario_id for item in namespaced.test_cases] == ["SCN-1001"]
+    pipeline_module._validate_worker_cases(1, namespaced, ["REQ-001"])
 
 
 class CancellationAwareContext(PipelineContext):
@@ -514,6 +530,53 @@ def test_dependency_context_is_transitive_stable_and_read_only() -> None:
     assert [item.chunk_id for item in evidence] == [item.chunk_id for item in chunks]
 
 
+def test_worker_requirement_merge_deduplicates_and_remaps_dependencies() -> None:
+    _chunks, requirements = dependent_inputs()
+    duplicate = requirements[0].model_copy(update={"requirement_id": "REQ-1001"})
+
+    merged = pipeline_module._merge_worker_requirements(
+        [
+            RequirementBatch(requirements=[requirements[0], requirements[1]]),
+            RequirementBatch(requirements=[duplicate, requirements[2]]),
+        ]
+    )
+
+    assert [item.requirement_id for item in merged.requirements] == [
+        "REQ-001",
+        "REQ-002",
+        "REQ-003",
+    ]
+    assert [item.dependency_ids for item in merged.requirements] == [
+        ["REQ-002"],
+        ["REQ-003"],
+        ["REQ-001"],
+    ]
+
+
+def test_worker_bundle_normalization_aligns_links_and_discards_orphans() -> None:
+    artifacts = bundle()
+    second_requirement = artifacts.requirements[0].model_copy(
+        update={"requirement_id": "REQ-002", "title": "Second requirement"}
+    )
+    orphan = artifacts.scenarios[0].model_copy(update={"scenario_id": "SCN-002"})
+    test_case = artifacts.test_cases[0].model_copy(
+        update={"requirement_ids": ["REQ-001", "REQ-002"]}
+    )
+
+    normalized = pipeline_module._normalize_worker_bundle(
+        artifacts.model_copy(
+            update={
+                "requirements": [artifacts.requirements[0], second_requirement],
+                "scenarios": [artifacts.scenarios[0], orphan],
+                "test_cases": [test_case],
+            }
+        )
+    )
+
+    assert [item.scenario_id for item in normalized.scenarios] == ["SCN-001"]
+    assert normalized.scenarios[0].requirement_ids == ["REQ-001", "REQ-002"]
+
+
 def test_balance_is_deterministic_and_preserves_every_item_once() -> None:
     groups = pipeline_module._balance([6, 5, 4, 3, 2, 1], lambda item: item)
 
@@ -535,13 +598,10 @@ class MergeProvider:
         content = messages[-1]["content"]
         with self.lock:
             self.calls.append((messages, schema, max_output_tokens))
-        if issubclass(schema, RequirementBatch) and "CANDIDATES" in content:
-            value = RequirementBatch(requirements=self.requirements)
-        elif issubclass(schema, RequirementBatch):
+        if issubclass(schema, RequirementBatch):
+            label = "WORKER REQUIREMENT EXTRACTION"
             worker = next(
-                index
-                for index in range(3)
-                if f"WORKER REQUIREMENT EXTRACTION {index + 1}/3" in content
+                index for index in range(3) if f"{label} {index + 1}/3" in content
             )
             value = RequirementBatch(
                 requirements=[
@@ -743,7 +803,7 @@ def test_standalone_prompt_builder_embeds_payload() -> None:
     assert "<<<BEGIN PDF EVIDENCE DATA>>>" in prompt
 
 
-def test_schema_repair_preserves_raw_output_as_assistant_turn() -> None:
+def test_schema_repair_uses_a_compact_correction_message() -> None:
     raw = "RAW_INVALID_PAYLOAD"
     provider = ScriptedProvider([StructuredOutputError(raw), bundle()])
 
@@ -752,12 +812,18 @@ def test_schema_repair_preserves_raw_output_as_assistant_turn() -> None:
     )
 
     repair_messages = provider.calls[1][0]
-    assert [message["role"] for message in repair_messages[-2:]] == [
-        "assistant",
-        "user",
-    ]
-    assert repair_messages[-2]["content"] == raw
+    assert [message["role"] for message in repair_messages] == ["user", "user"]
     assert raw not in repair_messages[-1]["content"]
+    assert "RESPONSE SCHEMA JSON" not in repair_messages[-1]["content"]
+
+
+def test_local_context_budget_caps_output_before_provider_call() -> None:
+    provider = ScriptedProvider([bundle()])
+    context = PipelineContext(provider=provider, max_request_tokens=8_000)
+
+    run_single_prompt(context, [chunk()])
+
+    assert provider.calls[0][2] < 16_000
 
 
 def test_staged_condition_skips_speculative_model_reviews() -> None:
