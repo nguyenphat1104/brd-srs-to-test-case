@@ -586,7 +586,9 @@ class OllamaProvider:
             raise ProviderError(
                 "Invalid Ollama URL.", code=None, retryable=False
             ) from error
-        reservation = self.ledger.reserve(len(encoded) + max_output_tokens)
+        # ponytail: byte estimate; use a model tokenizer if this becomes inaccurate.
+        input_estimate = max(1, (len(encoded) + 3) // 4)
+        reservation = self.ledger.reserve(input_estimate + max_output_tokens)
         started = time.perf_counter()
         try:
             response = urlopen(request, timeout=self.timeout)

@@ -220,6 +220,47 @@ def test_canonicalizes_excerpt_with_explicit_omission() -> None:
     assert verify_source_reference(fixed.requirements[0].source_references[0], chunks)
 
 
+def test_canonicalizes_substantial_exact_passage_from_composite_excerpt() -> None:
+    chunks = chunk_pages(
+        [
+            (
+                7,
+                "The requirements specify access controls for system records. "
+                "The System must allow the user to limit access to cases to "
+                "specified users or user groups.",
+            )
+        ]
+    )
+    claimed_excerpt = (
+        "The System must allow the user to limit access to cases to specified "
+        "users or user groups. The requirements specify unrelated controls "
+        "for correspondences, files, records, and system functionality."
+    )
+    requirement = Requirement(
+        requirement_id="REQ-001",
+        title="Limit case access",
+        description="Limit case access to specified users or groups.",
+        requirement_type=RequirementType.FUNCTIONAL,
+        module="Access",
+        priority=RequirementPriority.HIGH,
+        source_references=[
+            SourceReference(
+                chunk_id=chunks[0].chunk_id,
+                page_number=7,
+                excerpt=claimed_excerpt,
+            )
+        ],
+    )
+
+    fixed = canonicalize_source_references(
+        RequirementBatch(requirements=[requirement]), chunks
+    )
+    reference = fixed.requirements[0].source_references[0]
+
+    assert reference.excerpt != claimed_excerpt
+    assert verify_source_reference(reference, chunks)
+
+
 def test_empty_pdf_text_is_rejected() -> None:
     with pytest.raises(DocumentError, match="extractable text"):
         chunk_pages([(1, "  "), (2, "")])

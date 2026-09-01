@@ -8,6 +8,7 @@ from brd_srs_testgen.browser_settings import AppSettings, BrowserSettingsResult
 from brd_srs_testgen.models import (
     AgentSetup,
     ActivityEvent,
+    CoverageScore,
     FailureCategory,
     RequirementBatch,
     RunHistoryItem,
@@ -770,6 +771,32 @@ def test_completed_detail_groups_artifacts_and_configuration() -> None:
     assert "Citation coverage" in text
     assert "Positive scenario coverage" in text
     assert "Non-positive scenario coverage" in text
+
+
+def test_completed_detail_renders_coverage_charts() -> None:
+    result = _detailed_run().model_copy(
+        update={
+            "coverage": CoverageScore(
+                precision=0,
+                recall=0,
+                f1=0,
+                true_positive_count=0,
+                false_positive_count=1,
+                false_negative_count=1,
+                total_coverage_units=1,
+                total_test_cases=1,
+                uncovered_unit_ids=["CU-001"],
+                unmapped_test_case_ids=["TC-001"],
+            )
+        }
+    )
+    at = _app_test()
+    _show_detail(at, result)
+
+    at.run()
+
+    assert not at.exception
+    assert "### Coverage analysis (F1)" in [item.value for item in at.markdown]
 
 
 def test_quality_chart_surfaces_the_lowest_coverage_gap() -> None:

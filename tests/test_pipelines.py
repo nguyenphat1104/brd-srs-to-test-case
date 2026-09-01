@@ -101,6 +101,51 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
     assert not any("REVIEWED CANDIDATES JSON" in call[0][0]["content"] for call in provider.calls)
 
 
+def test_local_centralized_run_uses_bounded_serial_tasks() -> None:
+    base = chunk()
+    chunks = [
+        base.model_copy(
+            update={
+                "chunk_id": base.chunk_id if index == 0 else f"p000{index + 1}-c001-local",
+                "page_number": index + 1,
+                "text": f"{base.text} {'x' * 2_950}",
+                "content_hash": f"{index + 1:x}" * 64,
+            }
+        )
+        for index in range(4)
+    ]
+    activity = []
+    provider = CentralProvider()
+
+    run_centralized_multi_agent(
+        PipelineContext(
+            provider=provider,
+            progress=activity.append,
+            bounded_tasks=True,
+            worker_limit=1,
+        ),
+        chunks,
+    )
+
+    extraction_calls = [
+        call
+        for call in provider.calls
+        if "WORKER REQUIREMENT EXTRACTION" in call[0][0]["content"]
+    ]
+    assert len(extraction_calls) == 2
+    assert all("/2" in call[0][0]["content"] for call in extraction_calls)
+    assert chunks[0].chunk_id in extraction_calls[0][0][0]["content"]
+    assert chunks[1].chunk_id in extraction_calls[0][0][0]["content"]
+    assert chunks[2].chunk_id not in extraction_calls[0][0][0]["content"]
+    first_done = activity.index(
+        "Analyzer 1: done — handed requirements to the orchestrator."
+    )
+    second_started = activity.index(
+        "Analyzer 2: working — extracting requirements."
+    )
+    assert first_done < second_started
+
+
 def test_centralized_routes_each_agent_role_to_its_provider() -> None:
     analyst = CentralProvider()
     generator = CentralProvider()
@@ -147,10 +192,10 @@ def test_centralized_activity_reports_orchestrator_handoffs() -> None:
         PipelineContext(provider=CentralProvider(), progress=activity.append), [chunk()]
     )
 
-    assert activity[0] == "Orchestrator: spawning Analyzer 1, Analyzer 2, and Analyzer 3."
+    assert activity[0] == "Orchestrator: queued 3 requirement extraction tasks."
     assert "Orchestrator: reconciled 1 canonical requirements." in activity
     assert (
-        "Orchestrator: spawning Test Generator 1, Test Generator 2, and Test Generator 3."
+        "Orchestrator: queued 3 test generation tasks."
         in activity
     )
     assert activity[-1] == "Orchestrator: merging the generated artifacts."
@@ -575,6 +620,12 @@ def test_worker_bundle_normalization_aligns_links_and_discards_orphans() -> None
 
     assert [item.scenario_id for item in normalized.scenarios] == ["SCN-001"]
     assert normalized.scenarios[0].requirement_ids == ["REQ-001", "REQ-002"]
+    assert normalized.scenarios[0].source_references == [
+        artifacts.requirements[0].source_references[0]
+    ]
+    assert normalized.test_cases[0].source_references == [
+        artifacts.requirements[0].source_references[0]
+    ]
 
 
 def test_balance_is_deterministic_and_preserves_every_item_once() -> None:

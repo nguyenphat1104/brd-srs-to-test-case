@@ -155,7 +155,7 @@ class InvalidCentralProvider(CentralProvider):
         result = super().generate(messages, schema, max_output_tokens=max_output_tokens)
         if (
             issubclass(schema, RequirementBatch)
-            and "WORKER REQUIREMENT EXTRACTION 1/3" in messages[-1]["content"]
+            and "WORKER REQUIREMENT EXTRACTION 1/" in messages[-1]["content"]
             and result.value.requirements
         ):
             invalid = result.value.requirements[0].model_copy(
@@ -880,6 +880,8 @@ def test_centralized_builds_configured_agent_models_with_one_budget(monkeypatch)
         "test_generator": "generator",
         "reviewer": "reviewer",
     }
+    assert captured[0].bounded_tasks is True
+    assert captured[0].worker_limit == 1
 
 
 def test_actual_ollama_timeout_survives_budget_blocked_retry(monkeypatch) -> None:
@@ -903,7 +905,7 @@ def test_actual_ollama_timeout_survives_budget_blocked_retry(monkeypatch) -> Non
         repository=repository,
     )
 
-    assert calls == 1
+    assert calls == 3
     assert result.manifest.failure_category is FailureCategory.TIMEOUT
     assert result.manifest.failure_message == "ollama timed out"
     assert result.metrics.charged_tokens > 30_000

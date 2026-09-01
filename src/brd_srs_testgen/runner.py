@@ -34,6 +34,7 @@ from .models import (
 )
 from .pipelines import (
     PROMPT_VERSION,
+    WORKER_COUNT,
     PipelineContext,
     PipelineOutputError,
     run_centralized_multi_agent,
@@ -56,6 +57,7 @@ from .validation import build_rtm, compute_metrics, validate_bundle
 
 SCHEMA_VERSION = "research-core-v1"
 LOCAL_REQUEST_TOKEN_BUDGET = 12_000
+LOCAL_PROVIDERS = {"lm_studio", "llama_cpp", "ollama"}
 ProviderFactory = Callable[[RunType, BudgetLedger], StructuredProvider]
 Progress = Callable[[str], None]
 
@@ -92,9 +94,7 @@ class ProviderSettings:
     def validate(self) -> None:
         if not isinstance(self.provider, str) or self.provider not in {
             "gemini",
-            "lm_studio",
-            "llama_cpp",
-            "ollama",
+            *LOCAL_PROVIDERS,
         }:
             raise ValueError("Provider must be gemini, LM Studio, llama.cpp, or ollama.")
         if not isinstance(self.model, str) or not self.model.strip():
@@ -114,7 +114,7 @@ class ProviderSettings:
                 )
         if self.provider == "gemini" and not self.api_key.strip():
             raise ValueError("Gemini API key is required.")
-        if self.provider in {"lm_studio", "llama_cpp", "ollama"}:
+        if self.provider in LOCAL_PROVIDERS:
             provider_name = {
                 "lm_studio": "LM Studio",
                 "llama_cpp": "llama.cpp",
@@ -487,6 +487,7 @@ def run_generation(
                     )
                 providers[agent] = agent_provider
 
+        local_provider = settings.provider in LOCAL_PROVIDERS
         context = PipelineContext(
             provider=provider,
             providers=providers,
@@ -497,6 +498,8 @@ def run_generation(
                 if settings.provider == "llama_cpp"
                 else None
             ),
+            worker_limit=1 if local_provider else WORKER_COUNT,
+            bounded_tasks=local_provider,
         )
         bundle = canonicalize_source_references(
             PIPELINES[run_type](context, chunks), chunks

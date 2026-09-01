@@ -1401,7 +1401,7 @@ def _render_coverage(coverage, *, key_prefix: str, run_id: str) -> None:
             y="Count",
             x_label="Category",
             y_label="Artifacts",
-            color=["#15803d", "#b91c1c", "#b45309"],
+            color="#2563eb",
             horizontal=True,
             height=220,
         )

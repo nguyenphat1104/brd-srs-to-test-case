@@ -696,7 +696,7 @@ def test_ollama_url_errors_charge_reservation_and_classify_reason(
 
     assert error.value.retryable is retryable
     assert error.value.timed_out is isinstance(reason, TimeoutError)
-    assert ledger.used == len(opened.call_args.args[0].data) + 40
+    assert ledger.used == (len(opened.call_args.args[0].data) + 3) // 4 + 40
     assert ledger.reserved == 0
 
 
@@ -714,7 +714,7 @@ def test_ollama_missing_usage_charges_reservation() -> None:
                 max_output_tokens=40,
             )
 
-    assert ledger.used == len(opened.call_args.args[0].data) + 40
+    assert ledger.used == (len(opened.call_args.args[0].data) + 3) // 4 + 40
     assert ledger.reserved == 0
 
 

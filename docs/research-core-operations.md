@@ -87,6 +87,12 @@ Start the local server from LM Studio's Developer tab and load a model. In **Set
 
 For `centralized_multi_agent`, optional Analyst, Test generator, and Reviewer model IDs route each role to a different model; blank fields use the primary Model. LM Studio does not load these IDs on demand, so load every selected model before generating. All roles share the configured token ceiling.
 
+### Local multi-model execution
+
+Local `centralized_multi_agent` runs keep requests small and predictable: requirement extraction uses consecutive evidence batches targeting about 6,000 characters, and test generation handles at most three consecutive canonical requirements per task. Local requests run one at a time so llama.cpp, Ollama, or LM Studio does not receive three simultaneous generations for the same role model. Role-specific models are still used at their respective pipeline phase.
+
+A run remains one immutable transaction; completed task outputs are not resumable after a later task fails. Retry/resume storage should be added only if bounded local tasks still fail often enough to justify the extra schema and UI state.
+
 ## Offline verification
 
 Tests use fake providers and make no live provider calls. `TEST_DATABASE_URL` must target the dedicated local `brd_srs_test` database; never point it at the application database or a remote database. Source the existing `.env` so the current local DSN is exported:

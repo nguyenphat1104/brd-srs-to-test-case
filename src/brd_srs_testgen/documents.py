@@ -83,7 +83,16 @@ def _grounded_excerpt(excerpt: str, evidence: str) -> str | None:
                 (coverage, start + matches[0].b, start + final.b + final.size - 1)
             )
     if not candidates:
-        return None
+        match = SequenceMatcher(
+            None, words, evidence_words, autojunk=False
+        ).find_longest_match()
+        if match.size < 8 or match.size * 5 < len(words) * 2:
+            return None
+        return normalized[
+            evidence_tokens[match.b].start() : evidence_tokens[
+                match.b + match.size - 1
+            ].end()
+        ]
     _coverage, first, last = max(
         candidates, key=lambda item: (item[0], -(item[2] - item[1]))
     )
