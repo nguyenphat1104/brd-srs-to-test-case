@@ -5,6 +5,7 @@ import socket
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import PurePath
 from typing import Generic, Protocol, TypeVar
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -248,7 +249,7 @@ def _ollama_url(base_url: str) -> str:
     return url
 
 
-def _lm_studio_url(base_url: str, endpoint: str) -> str:
+def _openai_compatible_url(base_url: str, endpoint: str) -> str:
     url = f"{base_url.rstrip('/')}/{endpoint}"
     parsed = urlsplit(url)
     if (
@@ -256,7 +257,7 @@ def _lm_studio_url(base_url: str, endpoint: str) -> str:
         or not parsed.netloc
         or any(char.isspace() for char in parsed.netloc)
     ):
-        raise ValueError("Invalid LM Studio URL.")
+        raise ValueError("Invalid OpenAI-compatible API URL.")
     return url
 
 
@@ -264,7 +265,7 @@ def _lm_studio_native_url(base_url: str, endpoint: str) -> str:
     base_url = base_url.rstrip("/")
     if base_url.endswith("/v1"):
         base_url = base_url[:-3].rstrip("/")
-    return _lm_studio_url(base_url, f"api/v1/{endpoint}")
+    return _openai_compatible_url(base_url, f"api/v1/{endpoint}")
 
 
 def _lm_studio_error_message(error: HTTPError) -> str:
@@ -415,13 +416,13 @@ def _unload_lm_studio_model(
         raise _provider_error(error) from error
 
 
-def list_lm_studio_models(
+def list_openai_models(
     base_url: str, api_key: str = "", *, timeout: int = 10
 ) -> list[str]:
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         request = Request(
-            _lm_studio_url(base_url, "models"),
+            _openai_compatible_url(base_url, "models"),
             headers=headers,
             method="GET",
         )
@@ -438,7 +439,7 @@ def list_lm_studio_models(
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ProviderError(
-            "LM Studio returned an invalid model list.",
+            "The local model API returned an invalid model list.",
             code=None,
             retryable=False,
         ) from error
@@ -446,9 +447,51 @@ def list_lm_studio_models(
         raise _provider_error(error) from error
     if not models:
         raise ProviderError(
-            "LM Studio returned no available models.", code=None, retryable=False
+            "The local model API returned no available models.",
+            code=None,
+            retryable=False,
         )
     return models
+
+
+def list_llama_cpp_models(
+    base_url: str, *, timeout: int = 10
+) -> list[tuple[str, str]]:
+    models = list_openai_models(base_url, timeout=timeout)
+    server_url = base_url.rstrip("/")
+    if server_url.endswith("/v1"):
+        server_url = server_url[:-3].rstrip("/")
+    try:
+        request = Request(
+            _openai_compatible_url(server_url, "props"),
+            method="GET",
+        )
+        with urlopen(request, timeout=timeout) as response:
+            props = json.load(response)
+        alias = props["model_alias"]
+        name = PurePath(props["model_path"]).stem
+        if not isinstance(alias, str) or not alias or not name:
+            raise ValueError
+    except (KeyError, TypeError, ValueError) as error:
+        raise ProviderError(
+            "llama.cpp returned invalid model metadata.",
+            code=None,
+            retryable=False,
+        ) from error
+    except Exception as error:
+        raise _provider_error(error) from error
+    def display_name(model: str) -> str:
+        label = name if model == alias else PurePath(model).stem
+        quantization = label.rsplit("-", 1)[-1].upper()
+        if quantization.startswith(("Q", "IQ")) or quantization in {
+            "F16",
+            "F32",
+            "BF16",
+        }:
+            label = label.rsplit("-", 1)[0]
+        return label
+
+    return [(model, display_name(model)) for model in models]
 
 
 class GeminiProvider:
@@ -741,7 +784,7 @@ class LMStudioProvider:
             headers["Authorization"] = f"Bearer {self.api_key}"
         try:
             request = Request(
-                _lm_studio_url(self.base_url, "chat/completions"),
+                _openai_compatible_url(self.base_url, "chat/completions"),
                 data=encoded,
                 headers=headers,
                 method="POST",

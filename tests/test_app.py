@@ -1,10 +1,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from brd_srs_testgen.browser_settings import AppSettings, BrowserSettingsResult
 from brd_srs_testgen.models import (
     AgentSetup,
     ActivityEvent,
@@ -24,6 +24,17 @@ from tests.factories import completed_run
 
 
 APP = Path(__file__).parents[1] / "app.py"
+LOCAL_TEST_MODELS = (
+    ("gemma", "Gemma 4 26B"),
+    ("phi", "Phi 4 Mini Instruct"),
+    ("qwen", "Qwen 3 4B"),
+)
+
+
+@pytest.fixture(autouse=True)
+def _provider_connections(monkeypatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setenv("LLAMA_CPP_BASE_URL", "http://llama.cpp:8080/v1")
 
 
 class FakeRepository:
@@ -79,66 +90,10 @@ class FakeRepository:
         self.agent_setups = {setup.agent: setup for setup in setups}
 
 
-class FakeBrowserSettings:
-    def __init__(
-        self,
-        payload=None,
-        error=None,
-        *,
-        confirm_saves: bool = True,
-        loaded: bool = True,
-    ) -> None:
-        self.payload = payload
-        self.error = error
-        self.confirm_saves = confirm_saves
-        self.loaded = loaded
-        self.pending = None
-        self.saved: list[dict[str, object]] = []
-
-    def __call__(self, *, save, revision) -> BrowserSettingsResult:
-        if save is not None:
-            if save != self.pending:
-                self.saved.append(save)
-            self.pending = save
-            if not self.confirm_saves:
-                return BrowserSettingsResult(
-                    self.payload,
-                    self.error,
-                    loaded=True,
-                    revision=revision - 1,
-                )
-            self.payload = self.pending
-            self.pending = None
-        return BrowserSettingsResult(
-            self.payload,
-            self.error,
-            loaded=self.loaded,
-            revision=revision,
-        )
-
-
-def _saved_settings(**overrides) -> dict[str, object]:
-    values: dict[str, object] = {
-        "version": 1,
-        "provider": "gemini",
-        "model": "gemini-3.6-flash",
-        "api_key": "browser-secret",
-        "base_url": "",
-        "token_ceiling": 200_000,
-    }
-    values.update(overrides)
-    return values
-
-
-def _app_test(
-    repository: FakeRepository | None = None,
-    browser: FakeBrowserSettings | None = None,
-) -> AppTest:
+def _app_test(repository: FakeRepository | None = None) -> AppTest:
     at = AppTest.from_file(APP, default_timeout=10)
     at.session_state["_repository"] = repository or FakeRepository()
-    at.session_state["_browser_settings_sync"] = browser or FakeBrowserSettings(
-        _saved_settings()
-    )
+    at.session_state["_model_loader"] = lambda _url: LOCAL_TEST_MODELS
     return at
 
 
@@ -170,6 +125,20 @@ def _show_detail(at: AppTest, result: RunResult) -> None:
     at.session_state["view"] = "detail"
     at.session_state["selected_run_id"] = result.manifest.run_id
     at.session_state["selected_run"] = result
+
+
+def _open_settings_step(at: AppTest, run_type: RunType) -> None:
+    _element(at.button, "Create new run").click()
+    at.run()
+    _element(at.radio, "Run type").set_value(run_type)
+    _element(at.button, "Continue to settings").click()
+    at.run()
+
+
+def _open_document_step(at: AppTest, run_type: RunType) -> None:
+    _open_settings_step(at, run_type)
+    _element(at.button, "Continue to document").click()
+    at.run()
 
 
 def _failed_run(message: str = "PDF text could not be parsed.") -> RunResult:
@@ -292,7 +261,7 @@ def _history_item(result: RunResult) -> RunHistoryItem:
     )
 
 
-def test_runs_home_restores_settings_and_shows_run_item_list() -> None:
+def test_runs_home_shows_run_item_list_without_global_settings() -> None:
     completed = _detailed_run()
     interrupted = _interrupted_run()
     repository = FakeRepository(
@@ -304,12 +273,9 @@ def test_runs_home_restores_settings_and_shows_run_item_list() -> None:
 
     assert not at.exception
     assert at.session_state["view"] == "runs"
-    assert at.session_state["app_settings"] == AppSettings(**_saved_settings())
     assert not at.tabs
-    assert {button.label for button in at.button} >= {
-        "Settings",
-        "Create new run",
-    }
+    assert "Settings" not in {button.label for button in at.button}
+    assert _element(at.button, "Create new run")
     text = _rendered_text(at)
     assert not at.dataframe
     assert {button.label for button in at.button} >= {
@@ -319,7 +285,7 @@ def test_runs_home_restores_settings_and_shows_run_item_list() -> None:
     for expected in (
         "interrupted.pdf",
         "sample.pdf",
-        "Centralized multi-agent",
+        "Multi agents",
         "Interrupted",
         "Completed",
         "Not recorded",
@@ -328,198 +294,106 @@ def test_runs_home_restores_settings_and_shows_run_item_list() -> None:
         assert expected in text
 
 
-def test_settings_save_is_explicit_and_activates_after_storage_confirms() -> None:
-    browser = FakeBrowserSettings(_saved_settings())
-    at = _app_test(browser=browser)
-    at.run()
-
-    _element(at.button, "Settings").click()
-    at.run()
-    assert (
-        "Scripts running on the same app origin can read stored credentials."
-        in _rendered_text(at)
-    )
-    _element(at.text_input, "Model").set_value("gemini-cancelled")
-    at.run()
-    assert browser.saved == []
-
-    _element(at.button, "Cancel").click()
-    at.run()
-    assert at.session_state["app_settings"].model == "gemini-3.6-flash"
-
-    _element(at.button, "Settings").click()
-    at.run()
-    _element(at.text_input, "Model").set_value("gemini-saved")
-    _element(at.text_input, "Analyst model (optional)").set_value("analyst-model")
-    _element(at.text_input, "Test generator model (optional)").set_value(
-        "generator-model"
-    )
-    _element(at.text_input, "Reviewer model (optional)").set_value("reviewer-model")
-    at.run()
-    _element(at.button, "Save settings").click()
-    at.run()
-
-    assert browser.saved[-1]["model"] == "gemini-saved"
-    assert browser.saved[-1]["analyst_model"] == "analyst-model"
-    assert browser.saved[-1]["test_generator_model"] == "generator-model"
-    assert browser.saved[-1]["reviewer_model"] == "reviewer-model"
-    assert "run_type" not in browser.saved[-1]
-    assert at.session_state["app_settings"].model == "gemini-saved"
-
-
-def test_settings_wait_for_matching_browser_confirmation() -> None:
-    browser = FakeBrowserSettings(_saved_settings(), confirm_saves=False)
-    at = _app_test(browser=browser)
-    at.run()
-    _element(at.button, "Settings").click()
-    at.run()
-    _element(at.text_input, "Model").set_value("gemini-3.6-pro")
-    at.run()
-    _element(at.button, "Save settings").click()
-    at.run()
-
-    assert at.session_state["app_settings"].model == "gemini-3.6-flash"
-    assert at.session_state["settings_save_request"]["model"] == "gemini-3.6-pro"
-    _element(at.button, "Create new run").click()
-    at.run()
-
-    assert at.session_state["view"] == "runs"
-    assert "Saving browser settings…" in _rendered_text(at)
-
-    browser.confirm_saves = True
-    at.run()
-
-    assert at.session_state["app_settings"].model == "gemini-3.6-pro"
-    assert "settings_save_request" not in at.session_state
-    _element(at.button, "Create new run").click()
-    at.run()
-    assert at.session_state["view"] == "create"
-
-
-def test_create_waits_for_initial_browser_settings_load() -> None:
-    browser = FakeBrowserSettings(_saved_settings(), loaded=False)
-    at = _app_test(browser=browser)
-    at.run()
-
-    _element(at.button, "Create new run").click()
-    at.run()
-
-    assert at.session_state["view"] == "runs"
-    assert "Browser settings are still loading." in _rendered_text(at)
-
-    browser.loaded = True
-    at.run()
-    _element(at.button, "Create new run").click()
-    at.run()
-    assert at.session_state["view"] == "create"
-
-
-def test_create_explains_why_settings_open() -> None:
-    at = _app_test(browser=FakeBrowserSettings(_saved_settings(api_key="")))
-    at.run()
-
-    _element(at.button, "Create new run").click()
-    at.run()
-
-    assert at.session_state["settings_after_persist"] == "create"
-    assert (
-        "Gemini API key is required. Add it in Settings before creating a run."
-        in _rendered_text(at)
-    )
-
-
-def test_ollama_settings_use_local_defaults() -> None:
+def test_create_starts_with_run_type_before_settings_or_upload() -> None:
     at = _app_test()
     at.run()
-    _element(at.button, "Settings").click()
+
+    _element(at.button, "Create new run").click()
     at.run()
 
-    _element(at.selectbox, "Provider").set_value("ollama")
-    at.run()
-
-    assert _element(at.text_input, "Model").value == "gemma4"
-    assert _element(at.text_input, "Ollama base URL").value == (
-        "http://localhost:11434"
-    )
-
-
-def test_lm_studio_settings_load_and_assign_models_automatically(monkeypatch) -> None:
-    monkeypatch.setenv("LM_STUDIO_API_TOKEN", "lm-studio-from-env")
-    monkeypatch.setenv("LM_STUDIO_BASE_URL", "http://lm-studio:1234/v1")
-    at = _app_test()
-    at.session_state["_model_loader"] = lambda *_: [
-        "google/gemma-4-26b-a4b-qat",
-        "qwen/qwen3-4b",
+    assert _element(at.radio, "Run type").options == [
+        "Single prompt",
+        "Staged prompt",
+        "Multi agents",
     ]
-    at.run()
-
-    _element(at.button, "Settings").click()
-    at.run()
-    _element(at.selectbox, "Provider").set_value("lm_studio")
-    at.run()
-
-    assert _element(at.text_input, "LM Studio API token").value == (
-        "lm-studio-from-env"
-    )
-    assert _element(at.text_input, "LM Studio base URL").value == (
-        "http://lm-studio:1234/v1"
-    )
-    assert _element(at.selectbox, "Model").value == "google/gemma-4-26b-a4b-qat"
-    assert _element(at.selectbox, "Analyst model").value == (
-        "google/gemma-4-26b-a4b-qat"
-    )
-    assert _element(at.selectbox, "Test generator model").value == "qwen/qwen3-4b"
-    assert _element(at.selectbox, "Reviewer model").value == "google/gemma-4-26b-a4b-qat"
-    assert "Load available models" not in {button.label for button in at.button}
-
-    _element(at.selectbox, "Model").set_value("qwen/qwen3-4b")
-    at.run()
-    assert _element(at.selectbox, "Model").value == "qwen/qwen3-4b"
+    assert not at.file_uploader
+    assert not at.text_area
 
 
-def test_lm_studio_model_error_redacts_token_and_base_url(monkeypatch) -> None:
-    token = "lm-secret-token"
-    base_url = "http://secret-lm-studio:1234/v1"
-    monkeypatch.setenv("LM_STUDIO_API_TOKEN", token)
-    monkeypatch.setenv("LM_STUDIO_BASE_URL", base_url)
+def test_single_settings_default_to_one_gemini_35_agent() -> None:
     at = _app_test()
-
-    def fail_loader(*_):
-        raise RuntimeError(f"connection failed: {token} {base_url}")
-
-    at.session_state["_model_loader"] = fail_loader
     at.run()
-    _element(at.button, "Settings").click()
-    at.run()
-    _element(at.selectbox, "Provider").set_value("lm_studio")
-    at.run()
+    _open_settings_step(at, RunType.SINGLE_PROMPT)
 
-    text = _rendered_text(at)
-    assert "Could not load models: connection failed" in text
-    assert token not in text
-    assert base_url not in text
+    assert len(at.selectbox) == 2
+    assert _element(at.selectbox, "Agent provider").value == "gemini"
+    assert _element(at.selectbox, "Agent provider").options == [
+        "Gemini",
+        "llama.cpp",
+    ]
+    assert _element(at.selectbox, "Agent model").value == "gemini-3.5-flash"
+    assert _element(at.selectbox, "Agent model").options == [
+        "Gemini 3.7 Flash",
+        "Gemini 3.6 Flash",
+        "Gemini 3.5 Flash",
+        "Gemini 2.5 Flash",
+        "Gemini 2.5 Pro",
+    ]
+    assert len(at.text_area) == 1
+    assert _element(at.text_area, "Agent prompt").value
+    assert "Gemini API key" not in {item.label for item in at.text_input}
+    assert "Provider access is managed by the deployment environment" in _rendered_text(at)
 
 
-def test_missing_settings_can_be_saved_before_create() -> None:
-    result = _detailed_run()
-    browser = FakeBrowserSettings()
-    at = _app_test(
-        FakeRepository(runs=[_history_item(result)]),
-        browser,
-    )
+def test_staged_settings_share_gemini_36_model_and_have_three_prompts() -> None:
+    at = _app_test()
     at.run()
+    _open_settings_step(at, RunType.STAGED_SINGLE_AGENT)
 
-    assert _element_starting(at.button, "Open sample.pdf")
-    _element(at.button, "Create new run").click()
-    at.run()
-    _element(at.text_input, "Gemini API key").set_value("new-secret")
-    at.run()
-    _element(at.button, "Save settings").click()
-    at.run()
+    assert len(at.selectbox) == 2
+    assert _element(at.selectbox, "Agent provider").value == "gemini"
+    assert _element(at.selectbox, "Agent model").value == "gemini-3.6-flash"
+    assert {area.label for area in at.text_area} == {
+        "Requirements step prompt",
+        "Scenarios step prompt",
+        "Test cases step prompt",
+    }
+    assert "Gemini API key" not in {item.label for item in at.text_input}
 
-    assert at.session_state["view"] == "create"
-    assert _element(at.file_uploader, "BRD/SRS PDF")
-    assert _element(at.selectbox, "Run type")
+
+def test_multi_agent_settings_keep_local_defaults_for_every_agent() -> None:
+    at = _app_test()
+    at.run()
+    _open_settings_step(at, RunType.CENTRALIZED_MULTI_AGENT)
+
+    assert {
+        item.value for item in at.selectbox if item.label.endswith(" provider")
+    } == {"llama_cpp"}
+    assert {
+        item.label: item.value
+        for item in at.selectbox
+        if item.label.endswith(" model")
+    } == {
+        "Analyst model": "qwen",
+        "Test generator model": "gemma",
+        "Reviewer model": "phi",
+        "Coverage analyzer model": "qwen",
+    }
+    assert {
+        tuple(item.options)
+        for item in at.selectbox
+        if item.label.endswith(" model")
+    } == {tuple(label for _model, label in LOCAL_TEST_MODELS)}
+    assert len(at.text_area) == 4
+    assert "llama.cpp base URL" not in {item.label for item in at.text_input}
+
+
+def test_llama_cpp_model_api_error_disables_model_selection() -> None:
+    def unavailable(_url):
+        raise ConnectionError("private backend detail")
+
+    at = _app_test()
+    at.session_state["_model_loader"] = unavailable
+    at.run()
+    _open_settings_step(at, RunType.CENTRALIZED_MULTI_AGENT)
+
+    model_selects = [
+        item for item in at.selectbox if item.label.endswith(" model")
+    ]
+    assert model_selects
+    assert all(item.disabled for item in model_selects)
+    assert "llama.cpp models are unavailable" in _rendered_text(at)
+    assert "private backend detail" not in _rendered_text(at)
 
 
 def test_empty_runs_still_offers_create() -> None:
@@ -527,7 +401,7 @@ def test_empty_runs_still_offers_create() -> None:
 
     at.run()
 
-    assert "No saved runs yet." in _rendered_text(at)
+    assert "No test suites yet. Add your first PDF to get started." in _rendered_text(at)
     assert _element(at.button, "Create new run")
     assert not at.dataframe
 
@@ -629,22 +503,6 @@ def test_selecting_a_run_uses_the_displayed_row_snapshot() -> None:
     assert at.session_state["selected_run_id"] == intended.manifest.run_id
 
 
-def test_browser_storage_error_warns_without_blocking_history() -> None:
-    result = _detailed_run()
-    at = _app_test(
-        FakeRepository(runs=[_history_item(result)]),
-        FakeBrowserSettings(error="secret browser failure"),
-    )
-
-    at.run()
-
-    assert at.warning
-    assert "Browser settings storage is unavailable" in _rendered_text(at)
-    assert "secret" not in _rendered_text(at)
-    assert _element_starting(at.button, "Open sample.pdf")
-    assert _element(at.button, "Create new run")
-
-
 def test_list_error_is_safe_actionable_and_create_remains_available() -> None:
     repository = FakeRepository(
         list_error=StorageError("postgresql://user:list-secret@localhost/database")
@@ -704,13 +562,7 @@ def test_database_initialization_failure_remains_blocking() -> None:
 
 def test_completed_detail_groups_artifacts_and_configuration() -> None:
     result = _detailed_run()
-    secret = "browser-only-secret"
-    base_url = "http://browser-only.invalid:43114"
-    at = _app_test(
-        browser=FakeBrowserSettings(
-            _saved_settings(api_key=secret, base_url=base_url)
-        )
-    )
+    at = _app_test()
     _show_detail(at, result)
 
     at.run()
@@ -725,15 +577,9 @@ def test_completed_detail_groups_artifacts_and_configuration() -> None:
         "Requirements (1)",
         "Scenarios (1)",
     ]
-    assert "### Quality and traceability" in headings
-    assert not any(expander.label == "Quality and traceability" for expander in at.expander)
+    assert "### Quality and traceability" not in headings
+    assert _element(at.toggle, "Show quality details")
     assert _element(at.expander, "Run configuration")
-    for expected in (
-        "Staged single agent",
-        "Ollama",
-        "gemma4",
-    ):
-        assert expected in text
     assert _element(at.button, "Open test case TC-001 detail")
     assert _element(at.button, "Open requirement REQ-001 detail")
     assert _element(at.button, "Open scenario SCN-001 detail")
@@ -744,7 +590,7 @@ def test_completed_detail_groups_artifacts_and_configuration() -> None:
     )
     assert snapshot.to_dict("records") == [
         {"Setting": "Run ID", "Value": result.manifest.run_id},
-        {"Setting": "Run type", "Value": "Staged single agent"},
+        {"Setting": "Run type", "Value": "Staged prompt"},
         {"Setting": "Provider", "Value": "Ollama"},
         {"Setting": "Model", "Value": "gemma4"},
         {"Setting": "Temperature", "Value": "0"},
@@ -758,15 +604,17 @@ def test_completed_detail_groups_artifacts_and_configuration() -> None:
         {"Setting": "Completed", "Value": result.manifest.completed_at.isoformat()},
     ]
     tables = "\n".join(str(table.value) for table in at.table)
-    assert secret not in text
-    assert base_url not in text
-    assert secret not in tables
-    assert base_url not in tables
+    assert "test-gemini-key" not in text
+    assert "test-gemini-key" not in tables
     assert {button.key for button in at.download_button} == {
         f"detail-{result.manifest.run_id}-rtm",
         f"detail-{result.manifest.run_id}-bundle",
     }
     assert _element(at.metric, "Charged tokens").value == "30"
+    _element(at.toggle, "Show quality details").set_value(True)
+    at.run()
+    text = _rendered_text(at)
+    assert "### Quality and traceability" in [element.value for element in at.markdown]
     assert "Latency 0.10 s · 0 retries" in text
     assert "Citation coverage" in text
     assert "Positive scenario coverage" in text
@@ -796,6 +644,8 @@ def test_completed_detail_renders_coverage_charts() -> None:
     at.run()
 
     assert not at.exception
+    _element(at.toggle, "Show quality details").set_value(True)
+    at.run()
     assert "### Coverage analysis (F1)" in [item.value for item in at.markdown]
 
 
@@ -819,6 +669,8 @@ def test_quality_chart_surfaces_the_lowest_coverage_gap() -> None:
     at = _app_test()
     _show_detail(at, result)
 
+    at.run()
+    _element(at.toggle, "Show quality details").set_value(True)
     at.run()
 
     text = _rendered_text(at)
@@ -894,8 +746,15 @@ def test_failed_semantic_result_keeps_artifact_details_and_diagnostics() -> None
 
     text = _rendered_text(at)
     assert _element(at.button, "Open test case TC-001 detail")
-    assert "LM Studio" in text
     assert "Run configuration" in text
+    snapshot = next(
+        table.value
+        for table in at.table
+        if list(table.value.columns) == ["Setting", "Value"]
+    )
+    assert dict(zip(snapshot["Setting"], snapshot["Value"], strict=True))[
+        "Provider"
+    ] == "LM Studio"
     assert [element.value for element in at.markdown].index(
         "#### Test cases"
     ) < [element.value for element in at.markdown].index("#### Requirements")
@@ -943,11 +802,7 @@ def test_create_runs_one_selected_type_and_opens_returned_detail() -> None:
     at = _app_test(repository)
     at.session_state["_runner"] = fake_runner
     at.run()
-    _element(at.button, "Create new run").click()
-    at.run()
-    _element(at.selectbox, "Run type").set_value(
-        RunType.STAGED_SINGLE_AGENT
-    )
+    _open_document_step(at, RunType.STAGED_SINGLE_AGENT)
     _element(at.file_uploader, "BRD/SRS PDF").set_value(
         [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
     )
@@ -960,7 +815,12 @@ def test_create_runs_one_selected_type_and_opens_returned_detail() -> None:
     assert filename == "customer-login.pdf"
     assert run_type is RunType.STAGED_SINGLE_AGENT
     assert settings.model == "gemini-3.6-flash"
-    assert settings.api_key == "browser-secret"
+    assert settings.api_key == "test-gemini-key"
+    assert set(settings.agent_prompts) == {
+        "requirements",
+        "scenarios",
+        "test_cases",
+    }
     assert passed_repository is repository
     assert repository.load_calls == []
     assert at.session_state["view"] == "detail"
@@ -1000,11 +860,7 @@ def test_centralized_run_shows_plan_and_agent_activity() -> None:
     at = _app_test()
     at.session_state["_runner"] = fake_runner
     at.run()
-    _element(at.button, "Create new run").click()
-    at.run()
-    _element(at.selectbox, "Run type").set_value(
-        RunType.CENTRALIZED_MULTI_AGENT
-    )
+    _open_document_step(at, RunType.CENTRALIZED_MULTI_AGENT)
     _element(at.file_uploader, "BRD/SRS PDF").set_value(
         [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
     )
@@ -1012,7 +868,8 @@ def test_centralized_run_shows_plan_and_agent_activity() -> None:
     at.run()
 
     text = _rendered_text(at)
-    assert "Agent activity" in text
+    assert "Live agent details" in text
+    assert "Generation progress" in text
     assert "Plan complete" in text
     assert "Prepare document" in text
     assert "Analyzer 1" in text
@@ -1020,11 +877,12 @@ def test_centralized_run_shows_plan_and_agent_activity() -> None:
     assert "Extract testable business rules with source references." in text
     assert "1 assigned source chunk · pages 1" in text
     assert "Candidate requirements" in text
-    assert "Artifact panel" not in text
+    assert "Artifacts" in text
     assert at.session_state["timeline_activity"][0].artifact_label == (
         "Candidate requirements"
     )
-    assert "TC-001 · Sign in with valid credentials" not in text
+    assert "TC-001 · Sign in with valid credentials" in text
+    assert "Open artifact" not in {button.label for button in at.button}
     _element(at.button, "View result").click()
     at.run()
     assert _element(at.button, "Open test case TC-001 detail")
@@ -1044,11 +902,7 @@ def test_centralized_returned_failure_stops_the_plan_and_keeps_diagnostics() -> 
     at = _app_test()
     at.session_state["_runner"] = lambda *args, **kwargs: result
     at.run()
-    _element(at.button, "Create new run").click()
-    at.run()
-    _element(at.selectbox, "Run type").set_value(
-        RunType.CENTRALIZED_MULTI_AGENT
-    )
+    _open_document_step(at, RunType.CENTRALIZED_MULTI_AGENT)
     _element(at.file_uploader, "BRD/SRS PDF").set_value(
         [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
     )
@@ -1084,8 +938,7 @@ def test_returned_failed_generation_opens_detail_with_diagnostics_only(
     at = _app_test()
     at.session_state["_runner"] = lambda *args, **kwargs: result
     at.run()
-    _element(at.button, "Create new run").click()
-    at.run()
+    _open_document_step(at, RunType.SINGLE_PROMPT)
     _element(at.file_uploader, "BRD/SRS PDF").set_value(
         [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
     )
@@ -1109,33 +962,29 @@ def test_returned_failed_generation_opens_detail_with_diagnostics_only(
     assert base_url not in diagnostics
 
 
-def test_unexpected_generation_error_stays_in_create_and_redacts_settings() -> None:
+def test_unexpected_generation_error_stays_in_create_and_redacts_settings(
+    monkeypatch,
+) -> None:
     token = "runner-secret"
-    base_url = "http://private-lm-studio:1234/v1"
+    base_url = "http://private-llama:8080/v1"
     calls = 0
+    monkeypatch.setenv("GEMINI_API_KEY", token)
+    monkeypatch.setenv("LLAMA_CPP_BASE_URL", base_url)
 
     def fail_runner(*args, **kwargs):
         nonlocal calls
         calls += 1
         raise RuntimeError(f"runner stopped: {token} {base_url}")
 
-    at = _app_test(
-        browser=FakeBrowserSettings(
-            _saved_settings(
-                provider="lm_studio",
-                model="gemma-4",
-                api_key=token,
-                base_url=base_url,
-            )
-        )
-    )
+    at = _app_test()
     at.session_state["_runner"] = fail_runner
     at.run()
-    _element(at.button, "Create new run").click()
+    _open_settings_step(at, RunType.SINGLE_PROMPT)
+    _element(at.selectbox, "Agent provider").set_value("llama_cpp")
     at.run()
-    _element(at.selectbox, "Run type").set_value(
-        RunType.CENTRALIZED_MULTI_AGENT
-    )
+    assert _element(at.selectbox, "Agent model").value == LOCAL_TEST_MODELS[0][0]
+    _element(at.button, "Continue to document").click()
+    at.run()
     _element(at.file_uploader, "BRD/SRS PDF").set_value(
         [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
     )
@@ -1153,113 +1002,59 @@ def test_unexpected_generation_error_stays_in_create_and_redacts_settings() -> N
     assert _element(at.file_uploader, "BRD/SRS PDF").value.name == (
         "customer-login.pdf"
     )
-    assert _element(at.selectbox, "Run type").value is (
-        RunType.CENTRALIZED_MULTI_AGENT
-    )
+    assert at.session_state["run_type"] is RunType.SINGLE_PROMPT
 
 
-def test_edit_settings_from_create_preserves_upload_and_run_type() -> None:
+def test_edit_run_settings_preserves_upload_and_run_type() -> None:
     at = _app_test()
     at.run()
-    _element(at.button, "Create new run").click()
-    at.run()
-    _element(at.selectbox, "Run type").set_value(
-        RunType.STAGED_SINGLE_AGENT
-    )
+    _open_document_step(at, RunType.STAGED_SINGLE_AGENT)
     _element(at.file_uploader, "BRD/SRS PDF").set_value(
         [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
     )
     at.run()
-    _element(at.button, "Edit settings").click()
+    _element(at.button, "Edit run settings").click()
     at.run()
-    _element(at.text_input, "Model").set_value("gemini-3.6-pro")
-    at.run()
-    _element(at.button, "Save settings").click()
+    _element(at.selectbox, "Agent model").set_value("gemini-2.5-pro")
+    _element(at.button, "Continue to document").click()
     at.run()
 
     assert at.session_state["view"] == "create"
-    assert "Gemini · gemini-3.6-pro · 200,000 token ceiling" in _rendered_text(at)
-    assert _element(at.file_uploader, "BRD/SRS PDF").value.name == (
-        "customer-login.pdf"
-    )
-    assert _element(at.selectbox, "Run type").value is RunType.STAGED_SINGLE_AGENT
+    assert at.session_state["run_provider_settings"].model == "gemini-2.5-pro"
+    assert at.session_state["retained_pdf"].name == "customer-login.pdf"
+    assert not _element(at.button, "Generate test cases").disabled
+    assert at.session_state["run_type"] is RunType.STAGED_SINGLE_AGENT
 
 
-def test_settings_save_shared_agent_setup_in_postgres_repository() -> None:
+def test_multi_agent_prompts_start_from_shared_agent_setup() -> None:
     repository = FakeRepository()
+    repository.agent_setups["analyst"] = AgentSetup(
+        agent="analyst",
+        role="Payments requirement specialist",
+        instructions="Prioritize validation and exception rules.",
+    )
     at = _app_test(repository)
     at.run()
+    _open_settings_step(at, RunType.CENTRALIZED_MULTI_AGENT)
 
-    _element(at.button, "Settings").click()
-    at.run()
-    assert any(
-        expander.label.startswith("Analyst · Requirement analyst")
-        for expander in at.expander
-    )
-    _element(at.text_input, "Analyst role").set_value(
-        "Payments requirement specialist"
-    )
-    _element(at.text_area, "Analyst additional instructions").set_value(
+    assert _element(at.text_area, "Analyst prompt").value == (
         "Prioritize validation and exception rules."
     )
-    _element(at.button, "Save settings").click()
-    at.run()
-
-    analyst = repository.agent_setups["analyst"]
-    assert analyst.role == "Payments requirement specialist"
-    assert analyst.instructions == "Prioritize validation and exception rules."
 
 
-def test_create_waits_for_settings_save_without_losing_inputs() -> None:
-    browser = FakeBrowserSettings(_saved_settings())
-    calls = 0
-
-    def fake_runner(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-
-    at = _app_test(browser=browser)
-    at.session_state["_runner"] = fake_runner
+def test_run_settings_capture_custom_prompts_without_credentials() -> None:
+    at = _app_test()
     at.run()
-    _element(at.button, "Create new run").click()
-    at.run()
-    _element(at.selectbox, "Run type").set_value(
-        RunType.CENTRALIZED_MULTI_AGENT
-    )
-    _element(at.file_uploader, "BRD/SRS PDF").set_value(
-        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
-    )
-    at.run()
-    _element(at.button, "Edit settings").click()
-    at.run()
-    _element(at.text_input, "Model").set_value("gemini-3.6-pro")
-    at.run()
-    browser.confirm_saves = False
-    _element(at.button, "Save settings").click()
+    _open_settings_step(at, RunType.STAGED_SINGLE_AGENT)
+    _element(at.text_area, "Scenarios step prompt").set_value("Focus on edge cases.")
+    _element(at.button, "Continue to document").click()
     at.run()
 
-    assert at.session_state["view"] == "create"
-    assert "Saving browser settings…" in _rendered_text(at)
-    assert not any(button.label == "Generate test cases" for button in at.button)
-    assert calls == 0
-    assert _element(at.file_uploader, "BRD/SRS PDF").value.name == (
-        "customer-login.pdf"
-    )
-    assert _element(at.selectbox, "Run type").value is (
-        RunType.CENTRALIZED_MULTI_AGENT
-    )
-
-    browser.confirm_saves = True
-    at.run()
-
-    assert "Gemini · gemini-3.6-pro · 200,000 token ceiling" in _rendered_text(at)
-    assert _element(at.button, "Generate test cases")
-    assert _element(at.file_uploader, "BRD/SRS PDF").value.name == (
-        "customer-login.pdf"
-    )
-    assert _element(at.selectbox, "Run type").value is (
-        RunType.CENTRALIZED_MULTI_AGENT
-    )
+    settings = at.session_state["run_provider_settings"]
+    assert settings.agent_prompts["scenarios"] == "Focus on edge cases."
+    snapshot = settings.snapshot(RunType.STAGED_SINGLE_AGENT)
+    assert snapshot["agents"]["scenarios"]["prompt"] == "Focus on edge cases."
+    assert "test-gemini-key" not in str(snapshot)
 
 
 def test_missing_upload_stays_in_create_without_calling_runner() -> None:
@@ -1272,46 +1067,31 @@ def test_missing_upload_stays_in_create_without_calling_runner() -> None:
     at = _app_test()
     at.session_state["_runner"] = fake_runner
     at.run()
-    _element(at.button, "Create new run").click()
-    at.run()
-    _element(at.button, "Generate test cases").click()
-    at.run()
+    _open_document_step(at, RunType.SINGLE_PROMPT)
 
     assert calls == 0
     assert at.session_state["view"] == "create"
-    assert (
-        "Upload one text-extractable PDF before generating test cases."
-        in _rendered_text(at)
-    )
+    assert _element(at.button, "Generate test cases").disabled
+    assert "Add a PDF to continue." in _rendered_text(at)
 
 
-def test_invalid_settings_during_create_reopens_settings_without_running() -> None:
+def test_invalid_run_settings_stay_in_settings_without_running(monkeypatch) -> None:
     calls = 0
 
     def fake_runner(*args, **kwargs):
         nonlocal calls
         calls += 1
 
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     at = _app_test()
     at.session_state["_runner"] = fake_runner
     at.run()
-    _element(at.button, "Create new run").click()
-    at.run()
-    _element(at.file_uploader, "BRD/SRS PDF").set_value(
-        [("customer-login.pdf", b"%PDF-1.4\n", "application/pdf")]
-    )
-    at.session_state["app_settings"] = AppSettings.model_construct(
-        provider="gemini",
-        model="gemini-3.6-flash",
-        api_key="",
-        base_url="",
-        token_ceiling=200_000,
-    )
-    _element(at.button, "Generate test cases").click()
+    _open_settings_step(at, RunType.SINGLE_PROMPT)
+    _element(at.button, "Continue to document").click()
     at.run()
 
     assert calls == 0
     assert at.session_state["view"] == "create"
+    assert at.session_state["create_step"] == 2
     assert "Gemini API key is required." in _rendered_text(at)
-    assert at.session_state["settings_after_persist"] == "create"
-    assert _element(at.text_input, "Gemini API key")
+    assert "Gemini API key" not in {item.label for item in at.text_input}

@@ -755,6 +755,22 @@ def test_single_prompt_returns_one_bundle() -> None:
     assert provider.calls[0][2] == 16_000
 
 
+def test_run_specific_prompt_is_sent_to_its_agent() -> None:
+    provider = ScriptedProvider([bundle()])
+    context = PipelineContext(
+        provider=provider,
+        agent_prompts={"single": "Prioritize account-lockout edge cases."},
+        sleep=lambda _seconds: None,
+    )
+
+    run_single_prompt(context, [chunk()])
+
+    messages = provider.calls[0][0]
+    assert len(messages) == 2
+    assert "Prioritize account-lockout edge cases." in messages[0]["content"]
+    assert "PDF EVIDENCE" in messages[1]["content"]
+
+
 def test_staged_condition_passes_validated_artifacts_between_steps() -> None:
     artifacts = bundle()
     provider = ScriptedProvider(

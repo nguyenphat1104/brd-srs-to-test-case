@@ -263,6 +263,7 @@ class RunManifest(StrictModel):
     token_ceiling: int = Field(ge=1)
     prompt_version: str = Field(min_length=1)
     schema_version: str = Field(min_length=1)
+    configuration: dict[str, JsonValue] = Field(default_factory=dict)
     started_at: AwareDatetime
     completed_at: AwareDatetime | None = None
     failure_category: FailureCategory | None = None

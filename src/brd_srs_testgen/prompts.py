@@ -18,6 +18,42 @@ from .models import (
 
 WORKER_COUNT = 3
 
+RUN_PROMPT_DEFAULTS = {
+    "single": (
+        "Generate one complete, evidence-grounded test suite. Include functional, "
+        "nonfunctional, and business requirements plus positive, negative, boundary, "
+        "edge, and state-transition coverage wherever the source supports them."
+    ),
+    "requirements": (
+        "Extract all supported functional, nonfunctional, and business requirements. "
+        "Preserve dependencies, ambiguities, and exact source citations."
+    ),
+    "scenarios": (
+        "Create traceable positive, negative, boundary, edge, and state-transition "
+        "scenarios for every supported requirement."
+    ),
+    "test_cases": (
+        "Create executable manual test cases with ordered actions and observable "
+        "expected results. Cover every requirement and scenario."
+    ),
+    "analyst": (
+        "Extract supported functional, nonfunctional, and business requirements from "
+        "assigned evidence. Preserve dependencies, ambiguities, and exact citations."
+    ),
+    "test_generator": (
+        "Generate traceable scenarios and executable manual test cases for each assigned "
+        "requirement, including supported negative and boundary behavior."
+    ),
+    "reviewer": (
+        "Review artifacts against source evidence for groundedness, traceability, "
+        "completeness, duplicate IDs, and valid relationships."
+    ),
+    "coverage_analyzer": (
+        "Extract atomic testable coverage units, then map generated test cases to those "
+        "units for precision, recall, and F1 scoring."
+    ),
+}
+
 
 RULES = """Rules:
 - Write in English only.
@@ -248,4 +284,3 @@ Revise the {label} because the ReviewResult rejected it. Address every listed is
 Return every original artifact, including unaffected ones. Before returning, verify every requirement is covered by a scenario and test case, every scenario has a test case, and every citation copies a real chunk ID and excerpt verbatim.
 
 {payload}"""
-

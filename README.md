@@ -16,7 +16,7 @@ uv pip install --python .venv/bin/python -r requirements.txt
 env PYTHONPATH=src .venv/bin/python -m streamlit run app.py
 ```
 
-The home page lists PostgreSQL-backed runs newest first. Use **Settings** to save provider defaults in this browser, then choose **Create new run** to upload one PDF and execute exactly one generation type. Selecting a saved row opens its detailed test cases and immutable configuration snapshot.
+The home page lists PostgreSQL-backed runs newest first. Choose **Create new run**, select a run type, configure its agents, then upload one PDF. The UI offers Gemini and a local llama.cpp backend with provider-aware model dropdowns. Single-prompt runs default to Gemini 3.5 Flash, staged runs default to Gemini 2.5 Flash, and multi-agent runs default to llama.cpp using the first model reported by its API. Provider credentials and base URLs come from `.env`; users adjust only the provider, model, prompts, and token ceiling. Every run stores an immutable settings snapshot without connection details.
 
 ## Existing prototypes
 

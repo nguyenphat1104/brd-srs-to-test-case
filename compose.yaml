@@ -5,7 +5,6 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://brd_srs:brd_srs_local@db:5432/brd_srs
-      LM_STUDIO_BASE_URL: ${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
       LLAMA_CPP_BASE_URL: ${LLAMA_CPP_BASE_URL:-http://host.docker.internal:8081/v1}
     ports:
       - 127.0.0.1:8501:8501

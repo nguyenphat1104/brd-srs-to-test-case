@@ -103,6 +103,7 @@ class PipelineContext:
     provider: StructuredProvider
     providers: dict[str, StructuredProvider] = field(default_factory=dict)
     agent_setups: dict[str, AgentSetup] = field(default_factory=default_agent_setups)
+    agent_prompts: dict[str, str] = field(default_factory=dict)
     sleep: Callable[[float], None] = time.sleep
     progress: Callable[[str], None] | None = None
     retries: int = 0
@@ -128,6 +129,9 @@ class PipelineContext:
 
     def agent_setup(self, agent: str) -> AgentSetup:
         return self.agent_setups.get(agent, default_agent_setups()[agent])
+
+    def prompt_for(self, agent: str) -> str:
+        return self.agent_prompts.get(agent, "").strip()
 
     def _record(self, result: GenerationResult | StructuredOutputError) -> None:
         with self._lock:
@@ -197,6 +201,14 @@ class PipelineContext:
         agent: str = "default",
     ) -> T:
         current_messages = [message.copy() for message in messages]
+        if prompt := self.prompt_for(agent):
+            current_messages.insert(
+                0,
+                _user(
+                    "Trusted run-specific prompt instructions. Apply these after "
+                    "the core evidence, safety, and output-schema rules:\n" + prompt
+                ),
+            )
         transport_retries = 0
         schema_repair_count = 0
         observed_timeout: ProviderError | None = None
@@ -289,7 +301,10 @@ def run_single_prompt(
     chunks = list(chunks)
     return canonicalize_source_references(
         context.generate(
-            [_user(single_prompt(chunks))], ArtifactBundle, max_output_tokens=16_000
+            [_user(single_prompt(chunks))],
+            ArtifactBundle,
+            max_output_tokens=16_000,
+            agent="single",
         ),
         chunks,
     )
@@ -303,21 +318,30 @@ def run_staged_single_agent(
     prompt = _user(requirements_prompt(chunks))
     requirements = canonicalize_source_references(
         context.generate(
-            [prompt], RequirementBatch, max_output_tokens=4_000
+            [prompt],
+            RequirementBatch,
+            max_output_tokens=4_000,
+            agent="requirements",
         ),
         chunks,
     )
     prompt = _user(scenarios_prompt(requirements, chunks))
     scenarios = canonicalize_source_references(
         context.generate(
-            [prompt], ScenarioBatch, max_output_tokens=4_000
+            [prompt],
+            ScenarioBatch,
+            max_output_tokens=4_000,
+            agent="scenarios",
         ),
         chunks,
     )
     prompt = _user(test_cases_prompt(requirements, scenarios, chunks))
     test_cases = canonicalize_source_references(
         context.generate(
-            [prompt], TestCaseBatch, max_output_tokens=8_000
+            [prompt],
+            TestCaseBatch,
+            max_output_tokens=8_000,
+            agent="test_cases",
         ),
         chunks,
     )

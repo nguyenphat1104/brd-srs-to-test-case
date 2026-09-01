@@ -19,7 +19,8 @@ from brd_srs_testgen.providers import (
     OllamaProvider,
     ProviderError,
     StructuredOutputError,
-    list_lm_studio_models,
+    list_llama_cpp_models,
+    list_openai_models,
 )
 
 
@@ -477,7 +478,7 @@ def test_lm_studio_model_load_error_keeps_server_message() -> None:
     assert ledger.used == 0
 
 
-def test_lm_studio_lists_models_with_auth() -> None:
+def test_openai_compatible_api_lists_models_with_auth() -> None:
     response = io.BytesIO(
         json.dumps(
             {"data": [{"id": "gemma-3-12b"}, {"id": "gemma-3-4b"}]}
@@ -485,7 +486,7 @@ def test_lm_studio_lists_models_with_auth() -> None:
     )
 
     with patch("brd_srs_testgen.providers.urlopen", return_value=response) as opened:
-        models = list_lm_studio_models(
+        models = list_openai_models(
             "http://localhost:1234/v1", "local-token"
         )
 
@@ -493,6 +494,47 @@ def test_lm_studio_lists_models_with_auth() -> None:
     assert request.full_url == "http://localhost:1234/v1/models"
     assert request.get_header("Authorization") == "Bearer local-token"
     assert models == ["gemma-3-12b", "gemma-3-4b"]
+
+
+def test_llama_cpp_models_replace_local_alias_with_loaded_model_name() -> None:
+    models = io.BytesIO(b'{"data":[{"id":"local"}]}')
+    props = io.BytesIO(
+        json.dumps(
+            {
+                "model_alias": "local",
+                "model_path": "/models/Phi-4-mini-instruct-Q4_K_M.gguf",
+            }
+        ).encode()
+    )
+
+    with patch(
+        "brd_srs_testgen.providers.urlopen", side_effect=[models, props]
+    ) as opened:
+        options = list_llama_cpp_models("http://localhost:8080/v1")
+
+    assert [call.args[0].full_url for call in opened.call_args_list] == [
+        "http://localhost:8080/v1/models",
+        "http://localhost:8080/props",
+    ]
+    assert options == [("local", "Phi-4-mini-instruct")]
+
+
+def test_llama_cpp_router_models_hide_quantization_from_labels() -> None:
+    models = io.BytesIO(
+        b'{"data":[{"id":"Qwen3-4B-Instruct-2507-Q4_K_M"},'
+        b'{"id":"gemma-4-E4B-it-Q4_0"}]}'
+    )
+    props = io.BytesIO(
+        b'{"role":"router","model_alias":"llama-server","model_path":"none"}'
+    )
+
+    with patch("brd_srs_testgen.providers.urlopen", side_effect=[models, props]):
+        options = list_llama_cpp_models("http://localhost:8080/v1")
+
+    assert options == [
+        ("Qwen3-4B-Instruct-2507-Q4_K_M", "Qwen3-4B-Instruct-2507"),
+        ("gemma-4-E4B-it-Q4_0", "gemma-4-E4B-it"),
+    ]
 
 
 def test_invalid_json_is_charged_before_schema_error() -> None:

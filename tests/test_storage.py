@@ -407,6 +407,24 @@ def test_chunks_round_trip_in_page_and_chunk_order(repository: RunRepository) ->
     assert repository.load_chunks("run-1") == [chunks()[2], chunks()[1], chunks()[0]]
 
 
+def test_run_configuration_snapshot_round_trips(repository: RunRepository) -> None:
+    configuration = {
+        "agents": {
+            "single": {
+                "provider": "gemini",
+                "model": "gemini-3.5-flash",
+                "prompt": "Focus on boundary behavior.",
+            }
+        },
+        "token_ceiling": 10_000,
+    }
+    running = manifest(configuration=configuration)
+
+    repository.create_run(running)
+
+    assert repository.load_run(running.run_id).manifest.configuration == configuration
+
+
 def test_events_load_in_sequence_order(repository: RunRepository) -> None:
     repository.create_run(manifest())
     occurred_at = datetime(2026, 8, 12, tzinfo=UTC)
@@ -927,6 +945,7 @@ def test_finalize_rejects_running_result(repository: RunRepository) -> None:
         {"token_ceiling": 200_000},
         {"prompt_version": "changed-prompt"},
         {"schema_version": "changed-schema"},
+        {"configuration": {"agents": {}}},
         {"started_at": datetime(2026, 8, 11, tzinfo=UTC)},
     ],
 )

@@ -865,10 +865,10 @@ def test_centralized_builds_configured_agent_models_with_one_budget(monkeypatch)
 
     assert result.manifest.status is RunStatus.COMPLETED
     assert [model for model, _ledger in built] == [
-        "primary",
         "analyst",
         "generator",
         "reviewer",
+        "primary",
     ]
     assert {id(ledger) for _model, ledger in built} == {
         id(captured[0].provider.ledger)
@@ -876,12 +876,32 @@ def test_centralized_builds_configured_agent_models_with_one_budget(monkeypatch)
     assert {
         agent: provider.model for agent, provider in captured[0].providers.items()
     } == {
-        "analyst": "analyst",
         "test_generator": "generator",
         "reviewer": "reviewer",
+        "coverage_analyzer": "primary",
     }
     assert captured[0].bounded_tasks is True
     assert captured[0].worker_limit == 1
+
+
+def test_run_snapshot_keeps_each_agent_config_but_not_credentials() -> None:
+    configured = settings(
+        agent_providers={"requirements": "gemini", "scenarios": "ollama"},
+        agent_models={"requirements": "gemini-2.5-flash", "scenarios": "gemma4"},
+        agent_prompts={"requirements": "Extract rules.", "scenarios": "Find edges."},
+        provider_api_keys={"gemini": "never-store-this"},
+        provider_base_urls={"ollama": "http://localhost:11434"},
+    )
+
+    snapshot = configured.snapshot(RunType.STAGED_SINGLE_AGENT)
+
+    assert snapshot["agents"]["requirements"] == {
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
+        "prompt": "Extract rules.",
+    }
+    assert snapshot["agents"]["scenarios"]["prompt"] == "Find edges."
+    assert "never-store-this" not in str(snapshot)
 
 
 def test_actual_ollama_timeout_survives_budget_blocked_retry(monkeypatch) -> None:

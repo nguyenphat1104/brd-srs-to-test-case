@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS runs (
     token_ceiling integer NOT NULL CHECK (token_ceiling > 0),
     prompt_version text NOT NULL CHECK (prompt_version <> ''),
     schema_version text NOT NULL CHECK (schema_version <> ''),
+    configuration jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(configuration) = 'object'),
     started_at timestamptz NOT NULL,
     completed_at timestamptz,
     failure_category text CHECK (failure_category IN (
@@ -24,6 +25,9 @@ CREATE TABLE IF NOT EXISTS runs (
         OR (status = 'failed' AND completed_at IS NOT NULL AND failure_category IS NOT NULL)
     )
 );
+
+ALTER TABLE runs
+    ADD COLUMN IF NOT EXISTS configuration jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS runs_started_at_idx ON runs (started_at DESC);
 

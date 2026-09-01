@@ -58,6 +58,16 @@ from .validation import build_rtm, compute_metrics, validate_bundle
 SCHEMA_VERSION = "research-core-v1"
 LOCAL_REQUEST_TOKEN_BUDGET = 12_000
 LOCAL_PROVIDERS = {"lm_studio", "llama_cpp", "ollama"}
+RUN_AGENTS = {
+    RunType.SINGLE_PROMPT: ("single",),
+    RunType.STAGED_SINGLE_AGENT: ("requirements", "scenarios", "test_cases"),
+    RunType.CENTRALIZED_MULTI_AGENT: (
+        "analyst",
+        "test_generator",
+        "reviewer",
+        "coverage_analyzer",
+    ),
+}
 ProviderFactory = Callable[[RunType, BudgetLedger], StructuredProvider]
 Progress = Callable[[str], None]
 
@@ -78,10 +88,56 @@ class ProviderSettings:
     reviewer_model: str = ""
     coverage_analyzer_model: str = ""
     agent_setups: dict[str, AgentSetup] = field(default_factory=dict)
+    agent_providers: dict[str, str] = field(default_factory=dict)
+    agent_models: dict[str, str] = field(default_factory=dict)
+    agent_prompts: dict[str, str] = field(default_factory=dict)
+    provider_api_keys: dict[str, str] = field(default_factory=dict, repr=False)
+    provider_base_urls: dict[str, str] = field(default_factory=dict, repr=False)
+
+    def provider_for(self, agent: str) -> str:
+        return self.agent_providers.get(agent, self.provider).strip()
 
     def model_for(self, agent: str) -> str:
+        if configured := self.agent_models.get(agent, "").strip():
+            return configured
         configured = getattr(self, f"{agent}_model", "")
         return configured.strip() or self.model
+
+    def prompt_for(self, agent: str) -> str:
+        return self.agent_prompts.get(agent, "").strip()
+
+    def api_key_for(self, provider: str) -> str:
+        return self.provider_api_keys.get(
+            provider, self.api_key if provider == self.provider else ""
+        )
+
+    def base_url_for(self, provider: str) -> str:
+        return self.provider_base_urls.get(
+            provider, self.base_url if provider == self.provider else ""
+        )
+
+    def for_agent(self, agent: str) -> ProviderSettings:
+        provider = self.provider_for(agent)
+        return replace(
+            self,
+            provider=provider,
+            model=self.model_for(agent),
+            api_key=self.api_key_for(provider),
+            base_url=self.base_url_for(provider),
+        )
+
+    def snapshot(self, run_type: RunType) -> dict[str, object]:
+        return {
+            "agents": {
+                agent: {
+                    "provider": self.provider_for(agent),
+                    "model": self.model_for(agent),
+                    "prompt": self.prompt_for(agent),
+                }
+                for agent in RUN_AGENTS[run_type]
+            },
+            "token_ceiling": self.token_ceiling,
+        }
 
     def with_model(self, model: str) -> ProviderSettings:
         return replace(self, model=model)
@@ -92,42 +148,57 @@ class ProviderSettings:
         return replace(self, agent_setups=agent_setups)
 
     def validate(self) -> None:
-        if not isinstance(self.provider, str) or self.provider not in {
+        if (
+            not isinstance(self.token_ceiling, int)
+            or isinstance(self.token_ceiling, bool)
+            or self.token_ceiling < 1
+        ):
+            raise ValueError("Token ceiling must be positive.")
+        agent_names = set(self.agent_providers) | set(self.agent_models) | set(
+            self.agent_prompts
+        )
+        if any(not isinstance(agent, str) or not agent for agent in agent_names):
+            raise ValueError("Agent configuration keys must be non-empty strings.")
+        for agent in ("default", *sorted(agent_names)):
+            provider = self.provider if agent == "default" else self.provider_for(agent)
+            model = self.model if agent == "default" else self.model_for(agent)
+            self._validate_provider(provider, model)
+            if agent != "default" and not isinstance(self.agent_prompts.get(agent, ""), str):
+                raise ValueError("Agent prompt must be a string.")
+
+    def _validate_provider(self, provider: str, model: str) -> None:
+        if not isinstance(provider, str) or provider not in {
             "gemini",
             *LOCAL_PROVIDERS,
         }:
             raise ValueError("Provider must be gemini, LM Studio, llama.cpp, or ollama.")
-        if not isinstance(self.model, str) or not self.model.strip():
+        if not isinstance(model, str) or not model.strip():
             raise ValueError("Model must not be blank.")
-        if (
-            isinstance(self.token_ceiling, bool)
-            or not isinstance(self.token_ceiling, int)
-            or self.token_ceiling < 1
-        ):
-            raise ValueError("Token ceiling must be positive.")
-        if not isinstance(self.api_key, str):
+        api_key = self.api_key_for(provider)
+        base_url = self.base_url_for(provider)
+        if not isinstance(api_key, str):
             raise ValueError("API key must be a string.")
         for agent in ("analyst", "test_generator", "reviewer", "coverage_analyzer"):
             if not isinstance(getattr(self, f"{agent}_model"), str):
                 raise ValueError(
                     f"{agent.replace('_', ' ').title()} model must be a string."
                 )
-        if self.provider == "gemini" and not self.api_key.strip():
+        if provider == "gemini" and not api_key.strip():
             raise ValueError("Gemini API key is required.")
-        if self.provider in LOCAL_PROVIDERS:
+        if provider in LOCAL_PROVIDERS:
             provider_name = {
                 "lm_studio": "LM Studio",
                 "llama_cpp": "llama.cpp",
                 "ollama": "Ollama",
-            }[self.provider]
-            if not isinstance(self.base_url, str) or any(
-                character.isspace() for character in self.base_url
+            }[provider]
+            if not isinstance(base_url, str) or any(
+                character.isspace() for character in base_url
             ):
                 raise ValueError(
                     f"{provider_name} base URL must be an HTTP(S) URL."
                 )
             try:
-                parsed = urlsplit(self.base_url)
+                parsed = urlsplit(base_url)
                 hostname = parsed.hostname
                 parsed.port
             except (TypeError, ValueError) as error:
@@ -139,8 +210,8 @@ class ProviderSettings:
                 or not hostname
                 or parsed.username is not None
                 or parsed.password is not None
-                or "?" in self.base_url
-                or "#" in self.base_url
+                or "?" in base_url
+                or "#" in base_url
             ):
                 raise ValueError(
                     f"{provider_name} base URL cannot contain credentials, "
@@ -246,19 +317,25 @@ PIPELINES = {
 
 def _safe_message(error: Exception, settings: ProviderSettings) -> str:
     message = str(error)
-    secrets = [settings.api_key, settings.base_url]
-    try:
-        parsed = urlsplit(settings.base_url)
-        secrets.extend(
-            [
-                parsed.username or "",
-                parsed.password or "",
-                *(value for _key, value in parse_qsl(parsed.query)),
-                parsed.fragment,
-            ]
-        )
-    except (TypeError, ValueError):
-        pass
+    secrets = [
+        settings.api_key,
+        settings.base_url,
+        *settings.provider_api_keys.values(),
+        *settings.provider_base_urls.values(),
+    ]
+    for base_url in [settings.base_url, *settings.provider_base_urls.values()]:
+        try:
+            parsed = urlsplit(base_url)
+            secrets.extend(
+                [
+                    parsed.username or "",
+                    parsed.password or "",
+                    *(value for _key, value in parse_qsl(parsed.query)),
+                    parsed.fragment,
+                ]
+            )
+        except (TypeError, ValueError):
+            pass
     for secret in sorted(filter(None, secrets), key=len, reverse=True):
         message = message.replace(secret, "[REDACTED]")
     return re.sub(
@@ -403,6 +480,8 @@ def run_generation(
     provider_factory: ProviderFactory | None = None,
 ) -> RunResult:
     settings.validate()
+    primary_agent = RUN_AGENTS[run_type][0]
+    primary_settings = settings.for_agent(primary_agent)
     display_name = (
         PurePosixPath(source_filename.replace("\\", "/")).name.strip()
         if isinstance(source_filename, str)
@@ -420,12 +499,13 @@ def run_generation(
         document_hash=document_hash,
         run_type=run_type,
         status=RunStatus.RUNNING,
-        provider=settings.provider,
-        model=settings.model,
+        provider=primary_settings.provider,
+        model=primary_settings.model,
         temperature=0.0,
         token_ceiling=settings.token_ceiling,
         prompt_version=PROMPT_VERSION,
         schema_version=SCHEMA_VERSION,
+        configuration=settings.snapshot(run_type),
         started_at=_now(),
     )
     repository.create_run(manifest)
@@ -453,7 +533,7 @@ def run_generation(
     _notify(progress, "Generating artifacts")
 
     provider_factory = provider_factory or (
-        lambda _run_type, ledger: _make_provider(settings, ledger)
+        lambda _run_type, ledger: _make_provider(primary_settings, ledger)
     )
     ledger = BudgetLedger(settings.token_ceiling)
     context: PipelineContext | None = None
@@ -469,33 +549,39 @@ def run_generation(
             raise ConfigurationError(str(error)) from error
         if getattr(provider, "ledger", None) is not ledger:
             raise ConfigurationError("Provider must use the run budget ledger.")
-        if getattr(provider, "model", None) != settings.model:
+        if getattr(provider, "model", None) != primary_settings.model:
             raise ConfigurationError("Provider model must match the run model.")
 
         providers: dict[str, StructuredProvider] = {}
-        if run_type is RunType.CENTRALIZED_MULTI_AGENT:
-            for agent in ("analyst", "test_generator", "reviewer", "coverage_analyzer"):
-                model = settings.model_for(agent)
-                if model == settings.model:
-                    continue
-                agent_provider = _make_provider(settings.with_model(model), ledger)
-                if getattr(agent_provider, "ledger", None) is not ledger:
-                    raise ConfigurationError("Provider must use the run budget ledger.")
-                if getattr(agent_provider, "model", None) != model:
-                    raise ConfigurationError(
-                        "Agent provider model must match its configured model."
-                    )
-                providers[agent] = agent_provider
+        for agent in RUN_AGENTS[run_type][1:]:
+            agent_settings = settings.for_agent(agent)
+            if (
+                agent_settings.provider == primary_settings.provider
+                and agent_settings.model == primary_settings.model
+            ):
+                continue
+            agent_provider = _make_provider(agent_settings, ledger)
+            if getattr(agent_provider, "ledger", None) is not ledger:
+                raise ConfigurationError("Provider must use the run budget ledger.")
+            if getattr(agent_provider, "model", None) != agent_settings.model:
+                raise ConfigurationError(
+                    "Agent provider model must match its configured model."
+                )
+            providers[agent] = agent_provider
 
-        local_provider = settings.provider in LOCAL_PROVIDERS
+        configured_providers = {
+            settings.provider_for(agent) for agent in RUN_AGENTS[run_type]
+        }
+        local_provider = bool(configured_providers & LOCAL_PROVIDERS)
         context = PipelineContext(
             provider=provider,
             providers=providers,
             agent_setups=settings.agent_setups,
+            agent_prompts=settings.agent_prompts,
             progress=progress,
             max_request_tokens=(
                 LOCAL_REQUEST_TOKEN_BUDGET
-                if settings.provider == "llama_cpp"
+                if "llama_cpp" in configured_providers
                 else None
             ),
             worker_limit=1 if local_provider else WORKER_COUNT,

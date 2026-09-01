@@ -8,52 +8,82 @@ from typing import Any
 
 import streamlit as st
 import streamlit.components.v1 as components
-
-from brd_srs_testgen.browser_settings import (
-    AppSettings,
-    parse_settings,
-    sync_browser_settings,
-)
 from brd_srs_testgen.models import (
     AgentSetup,
     ActivityEvent,
+    ArtifactBundle,
+    CoverageScore,
+    CoverageUnitBatch,
     FailureCategory,
+    GeneratedCases,
+    RequirementBatch,
     RunHistoryItem,
     RunMetrics,
     RunResult,
     RunStatus,
     RunType,
+    ScenarioBatch,
+    TestCaseBatch,
     default_agent_setups,
 )
-from brd_srs_testgen.providers import list_lm_studio_models
+from brd_srs_testgen.prompts import RUN_PROMPT_DEFAULTS
+from brd_srs_testgen.providers import list_llama_cpp_models
 from brd_srs_testgen.runner import ProviderSettings, run_generation
 from brd_srs_testgen.storage import RunRepository, StorageError
 
 
 GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
+SINGLE_DEFAULT_MODEL = "gemini-3.5-flash"
+STAGED_DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_TOKEN_CEILING = 200_000
 PROVIDER_LABELS = {
     "gemini": "Gemini",
     "lm_studio": "LM Studio",
     "llama_cpp": "llama.cpp",
     "ollama": "Ollama",
 }
+RUN_PROVIDERS = ("gemini", "llama_cpp")
+PROVIDER_MODELS = {
+    "gemini": (
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+    ),
+}
+MODEL_LABELS = {
+    "gemini-3.7-flash": "Gemini 3.7 Flash",
+    "gemini-3.6-flash": "Gemini 3.6 Flash",
+    "gemini-3.5-flash": "Gemini 3.5 Flash",
+    "gemini-2.5-flash": "Gemini 2.5 Flash",
+    "gemini-2.5-pro": "Gemini 2.5 Pro",
+}
 LOCAL_BASE_URLS = {
-    "lm_studio": "http://localhost:1234/v1",
     "llama_cpp": "http://localhost:8080/v1",
-    "ollama": "http://localhost:11434",
 }
 RUN_TYPE_COPY = {
     RunType.SINGLE_PROMPT: (
         "Single prompt",
-        "One structured generation call from source document to complete test suite.",
+        "Fastest. Creates a complete first draft in one pass.",
     ),
     RunType.STAGED_SINGLE_AGENT: (
-        "Staged single agent",
-        "One agent generates requirements, scenarios, and cases in sequence before deterministic review.",
+        "Staged prompt",
+        "Builds requirements, scenarios, and test cases step by step before checking them.",
     ),
     RunType.CENTRALIZED_MULTI_AGENT: (
-        "Centralized multi-agent",
-        "A coordinator delegates bounded work to three workers before deterministic review.",
+        "Multi agents",
+        "Most thorough. Several specialists generate and cross-check the test suite.",
+    ),
+}
+RUN_CONFIG_AGENTS = {
+    RunType.SINGLE_PROMPT: ("single",),
+    RunType.STAGED_SINGLE_AGENT: ("requirements", "scenarios", "test_cases"),
+    RunType.CENTRALIZED_MULTI_AGENT: (
+        "analyst",
+        "test_generator",
+        "reviewer",
+        "coverage_analyzer",
     ),
 }
 AGENT_LABELS = {
@@ -61,6 +91,19 @@ AGENT_LABELS = {
     "test_generator": "Test generator",
     "reviewer": "Reviewer",
     "coverage_analyzer": "Coverage analyzer",
+}
+LOCAL_AGENT_MODEL_HINTS = {
+    "analyst": "qwen",
+    "test_generator": "gemma",
+    "reviewer": "phi",
+    "coverage_analyzer": "qwen",
+}
+RUN_AGENT_LABELS = {
+    "single": "Test suite generator",
+    "requirements": "Requirements step",
+    "scenarios": "Scenarios step",
+    "test_cases": "Test cases step",
+    **AGENT_LABELS,
 }
 ACTIVITY_PLAN = (
     ("Prepare document", "Source ready"),
@@ -86,11 +129,35 @@ def _env(name: str) -> str:
 
 
 def _base_url(provider: str) -> str:
-    if provider == "lm_studio":
-        return _env("LM_STUDIO_BASE_URL") or LOCAL_BASE_URLS[provider]
-    if provider == "llama_cpp":
-        return _env("LLAMA_CPP_BASE_URL") or LOCAL_BASE_URLS[provider]
-    return LOCAL_BASE_URLS[provider]
+    return _env("LLAMA_CPP_BASE_URL") or LOCAL_BASE_URLS[provider]
+
+
+def _api_key(provider: str) -> str:
+    return _env("GEMINI_API_KEY") if provider == "gemini" else ""
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _llama_cpp_models(base_url: str) -> tuple[tuple[str, str], ...]:
+    try:
+        return tuple(list_llama_cpp_models(base_url))
+    except Exception:
+        return ()
+
+
+def _models_for_provider(
+    provider: str,
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    if provider == "gemini":
+        models = PROVIDER_MODELS[provider]
+        return models, {model: _model_label(model) for model in models}
+    try:
+        loader = st.session_state.get("_model_loader", _llama_cpp_models)
+        options = tuple(loader(_base_url(provider)))
+    except Exception:
+        options = ()
+    if not options:
+        st.session_state["_llama_cpp_model_error"] = True
+    return tuple(model for model, _label in options), dict(options)
 
 
 @st.cache_resource
@@ -122,7 +189,7 @@ def _apply_theme() -> None:
             --color-surface: #ffffff;
             --color-foreground: #0f172a;
             --color-muted: #475569;
-            --color-faint: #94a3b8;
+            --color-faint: #64748b;
             --color-border: #dbe3ee;
             --color-focus: #1d4ed8;
             --color-success: #15803d;
@@ -139,16 +206,15 @@ def _apply_theme() -> None:
             color: var(--color-foreground);
             font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont,
                 "Segoe UI", sans-serif;
-            background:
-                radial-gradient(circle at 85% 0%, #eaf2ff 0, transparent 28rem),
-                var(--color-background);
+            background: var(--color-background);
         }
         [data-testid="stHeader"] {
             background: transparent;
         }
         [data-testid="stMainBlockContainer"] {
-            max-width: none !important;
+            max-width: 78rem !important;
             width: 100%;
+            margin-inline: auto;
             padding-top: 1.5rem;
             padding-bottom: 4rem;
             padding-left: clamp(1.5rem, 5vw, 6rem);
@@ -158,7 +224,7 @@ def _apply_theme() -> None:
             border-color: var(--color-border);
             border-radius: 1rem;
             background: rgba(255, 255, 255, 0.94);
-            box-shadow: 0 8px 30px rgba(15, 23, 42, 0.04);
+            box-shadow: none;
         }
         [data-testid="stMetric"] {
             min-height: 7rem;
@@ -176,6 +242,7 @@ def _apply_theme() -> None:
             font-variant-numeric: tabular-nums;
         }
         .stButton > button {
+            min-height: 2.75rem;
             border-radius: 0.65rem;
             font-weight: 600;
         }
@@ -185,7 +252,7 @@ def _apply_theme() -> None:
             border-color: var(--color-accent);
             background: var(--color-accent);
             font-weight: 700;
-            box-shadow: 0 6px 16px rgba(37, 99, 235, 0.22);
+            box-shadow: none;
         }
         .stButton > button[kind="primary"]:hover {
             border-color: var(--color-accent-strong);
@@ -214,10 +281,10 @@ def _apply_theme() -> None:
             border-radius: 0.65rem;
             background: var(--color-accent);
             color: #ffffff;
-            font-size: 0.72rem;
+            font-size: 0.75rem;
             font-weight: 850;
             letter-spacing: 0.02em;
-            box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+            box-shadow: none;
         }
         .app-bar__name {
             color: var(--color-foreground);
@@ -228,7 +295,7 @@ def _apply_theme() -> None:
         .app-bar__tag {
             margin-top: 0.05rem;
             color: var(--color-muted);
-            font-size: 0.72rem;
+            font-size: 0.75rem;
         }
         /* ---------- Runs hero ---------- */
         .runs-hero {
@@ -236,7 +303,7 @@ def _apply_theme() -> None:
         }
         .runs-hero__kicker {
             color: var(--color-accent);
-            font-size: 0.72rem;
+            font-size: 0.75rem;
             font-weight: 800;
             letter-spacing: 0.09em;
             text-transform: uppercase;
@@ -254,6 +321,73 @@ def _apply_theme() -> None:
             max-width: 44rem;
             color: var(--color-muted);
             font-size: 0.92rem;
+            line-height: 1.55;
+        }
+        .simple-steps {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin: 1.25rem 0 1.5rem;
+        }
+        .simple-step {
+            padding: 0.9rem 1rem;
+            border: 1px solid var(--color-border);
+            border-radius: 0.8rem;
+            background: var(--color-surface);
+        }
+        .simple-step__number {
+            color: var(--color-accent);
+            font-size: 0.75rem;
+            font-weight: 800;
+        }
+        .simple-step__title {
+            margin-top: 0.15rem;
+            color: var(--color-foreground);
+            font-size: 0.9rem;
+            font-weight: 750;
+        }
+        .simple-step__detail {
+            margin-top: 0.2rem;
+            color: var(--color-muted);
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+        .wizard-steps {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin: 1rem 0 1.5rem;
+            border: 1px solid var(--color-border);
+            border-radius: 0.8rem;
+            overflow: hidden;
+            background: var(--color-surface);
+        }
+        .wizard-step {
+            padding: 0.75rem 0.9rem;
+            border-right: 1px solid var(--color-border);
+            color: var(--color-muted);
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+        .wizard-step:last-child {
+            border-right: 0;
+        }
+        .wizard-step--active {
+            color: var(--color-accent-strong);
+            background: var(--color-accent-soft);
+        }
+        .wizard-step--complete {
+            color: var(--color-success);
+            background: var(--color-success-soft);
+        }
+        .artifact-reader__empty {
+            min-height: 12rem;
+            display: grid;
+            place-items: center;
+            padding: 1.5rem;
+            border: 1px dashed var(--color-border);
+            border-radius: 0.8rem;
+            color: var(--color-muted);
+            text-align: center;
         }
         /* ---------- Run list ---------- */
         [class*="st-key-run-item-"],
@@ -333,7 +467,7 @@ def _apply_theme() -> None:
         }
         .run-list-item__label {
             color: var(--color-faint);
-            font-size: 0.68rem;
+            font-size: 0.75rem;
             font-weight: 800;
             letter-spacing: 0.07em;
             text-transform: uppercase;
@@ -351,7 +485,7 @@ def _apply_theme() -> None:
             border-radius: 999px;
             color: var(--color-accent-strong);
             background: var(--color-accent-soft);
-            font-size: 0.74rem;
+            font-size: 0.75rem;
             font-weight: 750;
             white-space: nowrap;
         }
@@ -389,35 +523,22 @@ def _apply_theme() -> None:
             font-size: 0.78rem;
         }
         @media (max-width: 640px) {
+            .simple-steps {
+                grid-template-columns: 1fr;
+            }
+            .wizard-steps {
+                grid-template-columns: 1fr;
+            }
+            .wizard-step {
+                border-right: 0;
+                border-bottom: 1px solid var(--color-border);
+            }
+            .wizard-step:last-child {
+                border-bottom: 0;
+            }
             .run-list-item__header {
                 align-items: flex-start;
             }
-        }
-        /* ---------- Run detail ---------- */
-        .run-context {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
-            gap: 0.75rem 1.25rem;
-            margin: 0.75rem 0 1.25rem;
-            padding: 0.85rem 1rem;
-            border: 1px solid var(--color-border);
-            border-radius: 0.85rem;
-            background: rgba(255, 255, 255, 0.72);
-        }
-        .run-context__label {
-            color: var(--color-faint);
-            font-size: 0.68rem;
-            font-weight: 800;
-            letter-spacing: 0.07em;
-            text-transform: uppercase;
-        }
-        .run-context__value {
-            margin-top: 0.15rem;
-            color: var(--color-foreground);
-            font-size: 0.84rem;
-            font-weight: 700;
-            font-variant-numeric: tabular-nums;
-            overflow-wrap: anywhere;
         }
         .quality-chart {
             display: grid;
@@ -477,35 +598,6 @@ def _apply_theme() -> None:
                 grid-column: 1 / -1;
                 grid-row: 2;
             }
-        }
-        /* ---------- Section heading ---------- */
-        .section-heading {
-            margin: 1.6rem 0 0.2rem;
-            padding-bottom: 0.45rem;
-            border-bottom: 1px solid var(--color-border);
-            color: var(--color-foreground);
-            font-size: 0.78rem;
-            font-weight: 800;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-        [data-baseweb="popover"] {
-            position: fixed !important;
-            top: 1rem !important;
-            right: 1rem !important;
-            bottom: 1rem !important;
-            left: auto !important;
-            transform: none !important;
-        }
-        [data-baseweb="popover"] [data-testid="stPopoverBody"] {
-            width: min(34rem, calc(100vw - 2rem));
-            max-width: none;
-            height: 100%;
-            max-height: none;
-            overflow-y: auto;
-            border: 1px solid var(--color-border);
-            border-radius: 1rem;
-            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18);
         }
         [data-testid="stFileUploader"] button,
         [data-testid="stTextInputRootElement"],
@@ -669,7 +761,7 @@ def _apply_theme() -> None:
         }
         .timeline-result-card__eyebrow {
             color: var(--color-muted);
-            font-size: 0.72rem;
+            font-size: 0.75rem;
             font-weight: 800;
             letter-spacing: 0.08em;
             text-transform: uppercase;
@@ -745,7 +837,7 @@ def _apply_theme() -> None:
         .seamless-stage__eyebrow {
             margin-bottom: 0.12rem;
             color: var(--color-faint);
-            font-size: 0.68rem;
+            font-size: 0.75rem;
             font-weight: 800;
             letter-spacing: 0.08em;
             text-transform: uppercase;
@@ -782,76 +874,12 @@ def _apply_theme() -> None:
     )
 
 
-def _default_model(provider: str) -> str:
-    if provider == "gemini":
-        return GEMINI_DEFAULT_MODEL
-    return "gemma4" if provider == "ollama" else ""
-
-
-def _reset_provider() -> None:
-    provider = st.session_state["settings_provider"]
-    st.session_state["settings_model"] = _default_model(provider)
-    st.session_state["settings_api_key"] = (
-        _env("GEMINI_API_KEY")
-        if provider == "gemini"
-        else _env("LM_STUDIO_API_TOKEN") if provider == "lm_studio" else ""
-    )
-    st.session_state["settings_base_url"] = (
-        _base_url(provider) if provider in LOCAL_BASE_URLS else ""
-    )
-    for agent in ("analyst", "test_generator", "reviewer", "coverage_analyzer"):
-        st.session_state[f"settings_{agent}_model"] = ""
-    st.session_state.pop("lm_studio_models", None)
-    st.session_state.pop("lm_studio_model_error", None)
-
-
-def _clear_lm_studio_models() -> None:
-    st.session_state["settings_model"] = ""
-    st.session_state.pop("lm_studio_models", None)
-    st.session_state.pop("lm_studio_model_error", None)
-
-
-def _assign_lm_studio_models(models: list[str]) -> None:
-    if not models:
-        return
-    if st.session_state.get("settings_model") not in models:
-        st.session_state["settings_model"] = models[0]
-    for index, agent in enumerate(("analyst", "test_generator", "reviewer", "coverage_analyzer")):
-        key = f"settings_{agent}_model"
-        if st.session_state.get(key) not in models:
-            st.session_state[key] = models[index % len(models)]
-
-
-def _refresh_lm_studio_models() -> None:
-    api_key = st.session_state.get("settings_api_key", "")
-    try:
-        loader = st.session_state.get("_model_loader", list_lm_studio_models)
-        models = loader(
-            st.session_state.get("settings_base_url", _base_url("lm_studio")),
-            api_key,
-        )
-    except Exception as error:
-        message = str(error)
-        for secret in (
-            api_key,
-            st.session_state.get("settings_base_url", ""),
-        ):
-            if secret:
-                message = message.replace(secret, "[REDACTED]")
-        st.session_state["settings_model"] = ""
-        st.session_state["lm_studio_models"] = []
-        st.session_state["lm_studio_model_error"] = message
-    else:
-        st.session_state["lm_studio_models"] = models
-        _assign_lm_studio_models(models)
-        if models:
-            st.session_state.pop("lm_studio_model_error", None)
-        else:
-            st.session_state["lm_studio_model_error"] = "No models were reported."
-
-
 def _provider_label(provider: str) -> str:
     return PROVIDER_LABELS[provider]
+
+
+def _model_label(model: str) -> str:
+    return MODEL_LABELS.get(model, model)
 
 
 def _run_type_label(run_type: RunType) -> str:
@@ -876,7 +904,13 @@ def _download(label: str, value: Any, filename: str, key: str) -> None:
 
 def _safe_error(error: Exception, settings: ProviderSettings) -> str:
     message = str(error)
-    for secret in (settings.api_key, settings.base_url):
+    protected = (
+        settings.api_key,
+        settings.base_url,
+        *settings.provider_api_keys.values(),
+        *settings.provider_base_urls.values(),
+    )
+    for secret in protected:
         if secret:
             message = message.replace(secret, "[REDACTED]")
     return message
@@ -941,22 +975,84 @@ def _render_activity_plan(
     )
 
 
-def _artifact_popover_key(event: ActivityEvent) -> str:
-    return f"artifact-{event.agent}-{event.artifact_label}"
+def _render_artifact_content(artifact: Any) -> None:
+    if isinstance(artifact, RequirementBatch):
+        for requirement in artifact.requirements:
+            st.markdown(f"##### {requirement.requirement_id} · {requirement.title}")
+            _render_requirement_detail(requirement)
+        return
+    if isinstance(artifact, ScenarioBatch):
+        for scenario in artifact.scenarios:
+            st.markdown(f"##### {scenario.scenario_id} · {scenario.title}")
+            _render_scenario_detail(scenario)
+        return
+    if isinstance(artifact, TestCaseBatch):
+        for test_case in artifact.test_cases:
+            st.markdown(f"##### {test_case.test_case_id} · {test_case.title}")
+            _render_test_case_detail(test_case)
+        return
+    if isinstance(artifact, GeneratedCases):
+        st.markdown(f"##### Scenarios · {len(artifact.scenarios)}")
+        for scenario in artifact.scenarios:
+            st.markdown(f"**{scenario.scenario_id} · {scenario.title}**")
+            _render_scenario_detail(scenario)
+        st.markdown(f"##### Test cases · {len(artifact.test_cases)}")
+        for test_case in artifact.test_cases:
+            st.markdown(f"**{test_case.test_case_id} · {test_case.title}**")
+            _render_test_case_detail(test_case)
+        return
+    if isinstance(artifact, ArtifactBundle):
+        _render_artifact_content(
+            RequirementBatch(requirements=artifact.requirements)
+        )
+        _render_artifact_content(ScenarioBatch(scenarios=artifact.scenarios))
+        _render_artifact_content(TestCaseBatch(test_cases=artifact.test_cases))
+        return
+    if isinstance(artifact, CoverageUnitBatch):
+        for unit in artifact.units:
+            st.markdown(f"##### {unit.unit_id} · {unit.title}")
+            st.markdown(unit.description)
+            st.caption(
+                f"{unit.unit_type.replace('_', ' ').title()} · "
+                f"Sources: {', '.join(unit.source_chunk_ids)}"
+            )
+        return
+    if isinstance(artifact, CoverageScore):
+        columns = st.columns(3)
+        columns[0].metric("F1", f"{artifact.f1:.2f}")
+        columns[1].metric("Precision", f"{artifact.precision:.2f}")
+        columns[2].metric("Recall", f"{artifact.recall:.2f}")
+        st.caption(
+            f"{artifact.total_test_cases} test cases · "
+            f"{artifact.total_coverage_units} coverage units"
+        )
 
 
-def _render_artifact_popover(event: ActivityEvent) -> None:
-    label = event.artifact_label or "Published artifact"
-    with st.popover(
-        f"Open artifact · {label}",
-        type="primary",
-        icon=":material/description:",
-        key=_artifact_popover_key(event),
-    ):
-        st.markdown(f"#### {event.agent or 'Agent'} · {label}")
-        if event.task:
-            st.caption(f"Produced while: {event.task}")
-        st.json(event.artifact.model_dump(mode="json"), expanded=False)
+def _render_artifact_reader(target, events: list[str]) -> None:
+    published = [
+        event
+        for event in events
+        if isinstance(event, ActivityEvent) and event.artifact is not None
+    ]
+    with target.container():
+        st.markdown("#### Artifacts")
+        if not published:
+            st.markdown(
+                "<div class='artifact-reader__empty'>Generated artifacts will "
+                "appear here in full as agents publish them.</div>",
+                unsafe_allow_html=True,
+            )
+            return
+        st.caption(f"{len(published)} published · newest last")
+        with st.container(height=720):
+            for position, event in enumerate(published):
+                if position:
+                    st.divider()
+                st.markdown(
+                    f"##### {event.artifact_label or 'Published artifact'}"
+                )
+                st.caption(event.agent or "Agent")
+                _render_artifact_content(event.artifact)
 
 
 def _render_activity(activity, event: str) -> None:
@@ -995,8 +1091,7 @@ def _render_activity(activity, event: str) -> None:
                 unsafe_allow_html=True,
             )
             if event.artifact is not None:
-                st.caption("Artifact published")
-                _render_artifact_popover(event)
+                st.caption(f"Published to Artifacts · {event.artifact_label}")
 
 
 def _scroll_live_feed() -> None:
@@ -1098,23 +1193,6 @@ def _result_status(result: RunResult) -> tuple[str, str]:
     if result.manifest.status is RunStatus.FAILED:
         return "Generation failed", "error"
     return "Generation interrupted", "error"
-
-
-def _run_context_html(result: RunResult) -> str:
-    manifest = result.manifest
-    facts = (
-        ("Run type", _run_type_label(manifest.run_type)),
-        ("Provider", _provider_label(manifest.provider)),
-        ("Model", manifest.model),
-        ("Started", manifest.started_at.strftime("%Y-%m-%d %H:%M UTC")),
-    )
-    return "<div class='run-context'>" + "".join(
-        "<div>"
-        f"<div class='run-context__label'>{label}</div>"
-        f"<div class='run-context__value'>{html.escape(value)}</div>"
-        "</div>"
-        for label, value in facts
-    ) + "</div>"
 
 
 def _quality_chart_html(metrics: RunMetrics) -> str:
@@ -1485,13 +1563,34 @@ def _render_snapshot(result: RunResult) -> None:
             },
         ]
     )
+    agents = manifest.configuration.get("agents")
+    if not isinstance(agents, dict) or not agents:
+        return
+    st.markdown("#### Agent settings snapshot")
+    st.caption("This is the exact provider, model, and prompt setup used for the run.")
+    for agent, raw in agents.items():
+        if not isinstance(raw, dict):
+            continue
+        label = RUN_AGENT_LABELS.get(agent, agent.replace("_", " ").title())
+        with st.container(border=True):
+            st.markdown(f"**{label}**")
+            st.caption(
+                f"{_provider_label(str(raw.get('provider', manifest.provider)))} · "
+                f"{raw.get('model', manifest.model)}"
+            )
+            st.text_area(
+                f"{label} prompt",
+                value=str(raw.get("prompt", "")),
+                disabled=True,
+                key=f"snapshot-{manifest.run_id}-{agent}",
+            )
 
 
 def _render_result(
     result: RunResult, *, key_prefix: str = "result", in_dialog: bool = False
 ) -> None:
     manifest = result.manifest
-    st.markdown(_run_context_html(result), unsafe_allow_html=True)
+    st.caption(f"Source · {manifest.source_filename}")
 
     if manifest.failure_category is not None or manifest.failure_message:
         category = _failure_name(manifest.failure_category)
@@ -1516,7 +1615,7 @@ def _render_result(
                 f"{key_prefix}-{manifest.run_id}-diagnostics",
             )
     elif manifest.status is RunStatus.COMPLETED:
-        st.success("Completed and validated.")
+        st.success("Your test suite is ready and passed validation.")
     else:
         st.warning("Generation was interrupted. Review diagnostics before retrying.")
         with st.expander(
@@ -1541,12 +1640,6 @@ def _render_result(
         columns[1].metric("Scenarios", metrics.scenario_count)
         columns[2].metric("Test cases", metrics.test_case_count)
         columns[3].metric(token_label, f"{token_value:,}")
-        st.markdown("### Quality and traceability")
-        st.markdown(_quality_chart_html(metrics), unsafe_allow_html=True)
-        st.caption(
-            f"Latency {metrics.latency_seconds:.2f} s · "
-            f"{metrics.retries} retries"
-        )
 
     if manifest.status is RunStatus.COMPLETED and result.bundle is not None:
         download_columns = st.columns(2)
@@ -1565,11 +1658,27 @@ def _render_result(
                 f"{key_prefix}-{manifest.run_id}-bundle",
             )
 
-    if result.coverage is not None:
-        _render_coverage(result.coverage, key_prefix=key_prefix, run_id=manifest.run_id)
-
     if result.bundle is not None:
         _render_bundle(result, key_prefix=key_prefix, in_dialog=in_dialog)
+
+    if metrics is not None or result.coverage is not None:
+        if st.toggle(
+            "Show quality details",
+            key=f"{key_prefix}-{manifest.run_id}-show-quality",
+        ):
+            st.markdown("### Quality and traceability")
+            if metrics is not None:
+                st.markdown(_quality_chart_html(metrics), unsafe_allow_html=True)
+                st.caption(
+                    f"Latency {metrics.latency_seconds:.2f} s · "
+                    f"{metrics.retries} retries"
+                )
+            if result.coverage is not None:
+                _render_coverage(
+                    result.coverage,
+                    key_prefix=key_prefix,
+                    run_id=manifest.run_id,
+                )
 
     with st.expander(
         "Run configuration",
@@ -1605,254 +1714,6 @@ def _render_timeline_result_action(result: RunResult) -> None:
         _result_dialog(result)
 
 
-def _fallback_settings() -> AppSettings:
-    return AppSettings(
-        provider="gemini",
-        model=GEMINI_DEFAULT_MODEL,
-        api_key=_env("GEMINI_API_KEY"),
-        base_url="",
-        token_ceiling=200_000,
-    )
-
-
-def _warn_once(key: str, message: str) -> None:
-    if not st.session_state.get(key):
-        st.session_state[key] = True
-        st.session_state["flash_warning"] = message
-
-
-def _sync_app_settings() -> None:
-    fallback = _fallback_settings()
-    st.session_state.setdefault("app_settings", fallback)
-    revision = st.session_state.get("settings_revision", 0)
-    pending = st.session_state.get("settings_save_request")
-    result = sync_browser_settings(save=pending, revision=revision)
-    st.session_state["browser_settings_loaded"] = (
-        result.loaded and result.revision == revision
-    )
-    if not st.session_state["browser_settings_loaded"]:
-        return
-    if st.session_state.get("settings_loaded") and pending is None:
-        return
-
-    if result.error:
-        _warn_once(
-            "browser_storage_warning_shown",
-            "Browser settings storage is unavailable. Using app defaults for this session.",
-        )
-        st.session_state["settings_loaded"] = True
-        st.session_state.pop("settings_save_request", None)
-        st.session_state.pop("settings_after_persist", None)
-        return
-
-    settings, warning = parse_settings(result.payload, fallback)
-    if warning:
-        _warn_once("invalid_settings_warning_shown", warning)
-    if pending is not None and result.payload != pending:
-        _warn_once(
-            "browser_save_warning_shown",
-            "Browser settings could not be confirmed; the previous settings remain active.",
-        )
-    else:
-        st.session_state["app_settings"] = settings
-        if pending is not None and (
-            destination := st.session_state.get("settings_after_persist")
-        ):
-            st.session_state["view"] = destination
-    st.session_state["settings_loaded"] = True
-    st.session_state.pop("settings_save_request", None)
-    st.session_state.pop("settings_after_persist", None)
-
-
-def _settings_error() -> str | None:
-    try:
-        st.session_state["app_settings"].provider_settings()
-    except ValueError as error:
-        return str(error)
-    return None
-
-
-def _open_settings(after_save: str | None = None) -> None:
-    settings = st.session_state["app_settings"]
-    st.session_state["settings_provider"] = settings.provider
-    st.session_state["settings_model"] = settings.model
-    st.session_state["settings_api_key"] = settings.api_key
-    st.session_state["settings_base_url"] = settings.base_url
-    st.session_state["settings_token_ceiling"] = settings.token_ceiling
-    for agent in ("analyst", "test_generator", "reviewer", "coverage_analyzer"):
-        st.session_state[f"settings_{agent}_model"] = getattr(
-            settings, f"{agent}_model"
-        )
-    st.session_state.pop("agent_setup_form_loaded", None)
-    st.session_state["show_settings"] = True
-    if after_save is None:
-        st.session_state.pop("settings_after_persist", None)
-    else:
-        st.session_state["settings_after_persist"] = after_save
-
-
-def _load_agent_setup_form(repository: RunRepository) -> bool:
-    if st.session_state.get("agent_setup_form_loaded"):
-        return True
-    try:
-        setups = repository.load_agent_setups()
-    except StorageError:
-        st.error("Shared agent setup is unavailable. Check PostgreSQL and try again.")
-        return False
-    for agent, setup in setups.items():
-        st.session_state[f"agent_setup_{agent}_role"] = setup.role
-        st.session_state[f"agent_setup_{agent}_instructions"] = setup.instructions
-    st.session_state["agent_setup_form_loaded"] = True
-    return True
-
-
-def _agent_setups_from_form() -> dict[str, AgentSetup]:
-    return {
-        agent: AgentSetup(
-            agent=agent,
-            role=st.session_state[f"agent_setup_{agent}_role"],
-            instructions=st.session_state[f"agent_setup_{agent}_instructions"],
-        )
-        for agent in default_agent_setups()
-    }
-
-
-@st.dialog("App settings", width="large")
-def _settings_dialog(repository: RunRepository) -> None:
-    if not _load_agent_setup_form(repository):
-        return
-    if message := st.session_state.pop("settings_required_message", None):
-        st.error(message)
-    st.markdown(
-        "<div class='section-heading' style='margin-top:0'>Provider</div>",
-        unsafe_allow_html=True,
-    )
-    provider = st.selectbox(
-        "Provider",
-        list(PROVIDER_LABELS),
-        key="settings_provider",
-        format_func=_provider_label,
-        on_change=_reset_provider,
-    )
-    if provider == "lm_studio":
-        if "lm_studio_models" not in st.session_state:
-            _refresh_lm_studio_models()
-        models = st.session_state.get("lm_studio_models", [])
-        st.selectbox(
-            "Model",
-            models,
-            index=0 if models else None,
-            key="settings_model",
-            placeholder="Models load automatically from LM Studio",
-        )
-        st.text_input(
-            "LM Studio API token",
-            type="password",
-            key="settings_api_key",
-            on_change=_clear_lm_studio_models,
-        )
-    else:
-        st.text_input("Model", key="settings_model")
-        if provider == "gemini":
-            st.text_input(
-                "Gemini API key", type="password", key="settings_api_key"
-            )
-
-    if provider in LOCAL_BASE_URLS:
-        st.text_input(
-            f"{_provider_label(provider)} base URL",
-            key="settings_base_url",
-            on_change=_clear_lm_studio_models if provider == "lm_studio" else None,
-        )
-    if provider == "lm_studio":
-        if error := st.session_state.get("lm_studio_model_error"):
-            st.error(f"Could not load models: {error}")
-        elif models:
-            st.success(f"Loaded {len(models)} models.")
-
-    st.markdown("#### Centralized agents")
-    st.caption(
-        "Select an agent to edit its model routing, role, and prompt instructions. "
-        "Roles and instructions are shared in PostgreSQL; provider credentials stay in this browser."
-    )
-    if provider == "lm_studio" and models:
-        st.caption(
-            "LM Studio loads each selected agent model automatically when its task begins."
-        )
-    else:
-        st.caption("Leave a model override blank to use the default Model above.")
-    for agent, label in AGENT_LABELS.items():
-        configured_model = st.session_state[f"settings_{agent}_model"].strip()
-        model_summary = configured_model or "Uses default model"
-        role = st.session_state[f"agent_setup_{agent}_role"]
-        with st.expander(f"{label} · {role} · {model_summary}"):
-            st.text_input(f"{label} role", key=f"agent_setup_{agent}_role")
-            if provider == "lm_studio" and models:
-                st.selectbox(f"{label} model", models, key=f"settings_{agent}_model")
-            else:
-                st.text_input(
-                    f"{label} model (optional)", key=f"settings_{agent}_model"
-                )
-            st.text_area(
-                f"{label} additional instructions",
-                key=f"agent_setup_{agent}_instructions",
-                max_chars=4_000,
-                placeholder="Optional instructions applied only to this agent's prompt.",
-            )
-
-    st.markdown(
-        "<div class='section-heading'>Limits</div>",
-        unsafe_allow_html=True,
-    )
-    st.number_input(
-        "Token ceiling",
-        min_value=1000,
-        step=1000,
-        key="settings_token_ceiling",
-    )
-    st.warning(
-        "Credentials are stored in this browser's local storage. "
-        "Scripts running on the same app origin can read stored credentials. "
-        "Use a dedicated browser profile and do not save credentials on a shared machine."
-    )
-    save_column, cancel_column = st.columns(2)
-    save = save_column.button("Save settings", type="primary", width="stretch")
-    cancel = cancel_column.button("Cancel", width="stretch")
-    if cancel:
-        st.session_state["show_settings"] = False
-        st.session_state.pop("settings_after_persist", None)
-        st.session_state.pop("agent_setup_form_loaded", None)
-        st.rerun()
-    if not save:
-        return
-
-    try:
-        settings = AppSettings(
-            provider=provider,
-            model=st.session_state["settings_model"],
-            api_key=st.session_state.get("settings_api_key", ""),
-            base_url=st.session_state.get("settings_base_url", ""),
-            token_ceiling=st.session_state["settings_token_ceiling"],
-            analyst_model=st.session_state["settings_analyst_model"],
-            test_generator_model=st.session_state["settings_test_generator_model"],
-            reviewer_model=st.session_state["settings_reviewer_model"],
-            coverage_analyzer_model=st.session_state["settings_coverage_analyzer_model"],
-        )
-        settings.provider_settings()
-        agent_setups = _agent_setups_from_form()
-        repository.save_agent_setups(agent_setups.values())
-    except (StorageError, ValueError) as error:
-        st.error(str(error))
-        return
-    st.session_state["settings_revision"] = (
-        st.session_state.get("settings_revision", 0) + 1
-    )
-    st.session_state["settings_save_request"] = settings.model_dump(mode="json")
-    st.session_state["show_settings"] = False
-    st.session_state.pop("agent_setup_form_loaded", None)
-    st.rerun()
-
-
 def _go_home() -> None:
     st.session_state["view"] = "runs"
     st.session_state.pop("selected_run_id", None)
@@ -1860,11 +1721,14 @@ def _go_home() -> None:
     st.session_state.pop("timeline_result", None)
     st.session_state.pop("timeline_activity", None)
     st.session_state.pop("timeline_current_step", None)
+    st.session_state.pop("create_step", None)
+    st.session_state.pop("run_provider_settings", None)
+    st.session_state.pop("pdf", None)
+    st.session_state.pop("retained_pdf", None)
 
 
 def _render_top_nav() -> None:
-    brand, settings = st.columns([9, 1], vertical_alignment="center")
-    brand.markdown(
+    st.markdown(
         "<div class='app-bar'>"
         "<span class='app-bar__mark'>TC</span>"
         "<div>"
@@ -1874,7 +1738,6 @@ def _render_top_nav() -> None:
         "</div>",
         unsafe_allow_html=True,
     )
-    settings.button("Settings", on_click=_open_settings, width="stretch")
     st.markdown("<div class='app-bar__rule'></div>", unsafe_allow_html=True)
 
 
@@ -1898,15 +1761,11 @@ def _run_item_html(item: RunHistoryItem) -> str:
         f"{item.display_status}</span>"
         "</div>"
         "<div class='run-list-item__facts'>"
-        "<div><div class='run-list-item__label'>Run type</div>"
+        "<div><div class='run-list-item__label'>Method</div>"
         f"<div class='run-list-item__value'>{html.escape(_run_type_label(item.run_type))}</div></div>"
-        "<div><div class='run-list-item__label'>Provider</div>"
-        f"<div class='run-list-item__value'>{html.escape(_provider_label(item.provider))}</div></div>"
-        "<div><div class='run-list-item__label'>Model</div>"
-        f"<div class='run-list-item__value'>{html.escape(item.model)}</div></div>"
-        "<div><div class='run-list-item__label'>Started</div>"
+        "<div><div class='run-list-item__label'>Created</div>"
         f"<div class='run-list-item__value'>{item.started_at.strftime('%Y-%m-%d %H:%M UTC')}</div></div>"
-        "<div><div class='run-list-item__label'>Test cases</div>"
+        "<div><div class='run-list-item__label'>Output</div>"
         f"<div class='run-list-item__value'>{test_cases}</div></div>"
         "</div>"
         "</div>"
@@ -1914,19 +1773,12 @@ def _run_item_html(item: RunHistoryItem) -> str:
 
 
 def _request_create() -> None:
-    if st.session_state.get("settings_save_request") is not None:
-        st.session_state["runs_notice"] = "Saving browser settings…"
-    elif not st.session_state.get("browser_settings_loaded"):
-        st.session_state["runs_notice"] = "Browser settings are still loading."
-    else:
-        error = _settings_error()
-        if error is None:
-            st.session_state["view"] = "create"
-            return
-        message = f"{error} Add it in Settings before creating a run."
-        st.session_state["flash_toast"] = message
-        st.session_state["settings_required_message"] = message
-        _open_settings("create")
+    for key in tuple(st.session_state):
+        if key.startswith("run_"):
+            st.session_state.pop(key)
+    st.session_state["view"] = "create"
+    st.session_state["create_step"] = 1
+    st.session_state.pop("retained_pdf", None)
 
 
 def _render_runs(repository: RunRepository) -> None:
@@ -1937,12 +1789,26 @@ def _render_runs(repository: RunRepository) -> None:
 
     st.markdown(
         "<div class='runs-hero'>"
-        "<div class='runs-hero__kicker'>Dashboard</div>"
-        "<div class='runs-hero__title'>Runs</div>"
+        "<div class='runs-hero__kicker'>Document to test cases</div>"
+        "<div class='runs-hero__title'>Turn a BRD or SRS into test cases</div>"
         "<div class='runs-hero__sub'>"
-        "Upload a BRD or SRS, generate a traceable test suite, and reopen any "
-        "saved result. Newest runs appear first."
+        "Add one PDF and get a test suite with requirements, scenarios, source "
+        "references, and coverage checks."
         "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div class='simple-steps' aria-label='How it works'>"
+        "<div class='simple-step'><div class='simple-step__number'>1</div>"
+        "<div class='simple-step__title'>Add your PDF</div>"
+        "<div class='simple-step__detail'>Use a text-based BRD or SRS.</div></div>"
+        "<div class='simple-step'><div class='simple-step__number'>2</div>"
+        "<div class='simple-step__title'>Generate</div>"
+        "<div class='simple-step__detail'>We extract, organize, and check the coverage.</div></div>"
+        "<div class='simple-step'><div class='simple-step__number'>3</div>"
+        "<div class='simple-step__title'>Review or download</div>"
+        "<div class='simple-step__detail'>Open each test case or export the full bundle.</div></div>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -1960,9 +1826,10 @@ def _render_runs(repository: RunRepository) -> None:
         )
         return
     if not runs:
-        st.info("No saved runs yet.")
+        st.info("No test suites yet. Add your first PDF to get started.")
         return
 
+    st.markdown("### Recent test suites")
     for item in runs:
         with st.container(border=True, key=f"run-item-{item.run_id}"):
             st.markdown(_run_item_html(item), unsafe_allow_html=True)
@@ -1975,15 +1842,13 @@ def _render_runs(repository: RunRepository) -> None:
 
 
 def _render_centralized_create(
-    repository: RunRepository, settings: AppSettings
+    repository: RunRepository,
+    settings: ProviderSettings,
+    upload,
+    generate: bool,
 ) -> None:
-    try:
-        agent_setups = repository.load_agent_setups()
-    except StorageError:
-        st.error("Shared agent setup is unavailable. Check PostgreSQL and try again.")
-        return
     with st.container():
-        st.markdown("#### Run timeline")
+        st.markdown("#### Progress")
         st.markdown(
             "<div class='timeline-spine' aria-hidden='true'></div>",
             unsafe_allow_html=True,
@@ -1992,57 +1857,11 @@ def _render_centralized_create(
         with source_stage.container():
             _render_timeline_stage(
                 1,
-                "Configure and start",
-                "Choose a source document, confirm the run settings, then start generation.",
-                state="active",
-            )
-        with st.container(border=True):
-            st.markdown("##### Source document")
-            upload = st.file_uploader(
-                "BRD/SRS PDF",
-                type=["pdf"],
-                key="pdf",
-                help="Use a text-extractable PDF.",
-            )
-            st.markdown("##### Run settings")
-            st.caption(
-                f"{_provider_label(settings.provider)} · {settings.model} · "
-                f"{settings.token_ceiling:,} token ceiling"
-            )
-            if any(
-                settings.model_for(agent) != settings.model
-                for agent in ("analyst", "test_generator", "reviewer", "coverage_analyzer")
-            ):
-                st.caption(
-                    "Routing: "
-                    f"Analyst {settings.model_for('analyst')} · "
-                    f"Generator {settings.model_for('test_generator')} · "
-                    f"Reviewer {settings.model_for('reviewer')} · "
-                    f"Coverage {settings.model_for('coverage_analyzer')}"
-                )
-            st.caption(
-                "Agents: "
-                + " · ".join(
-                    f"{AGENT_LABELS[agent]} — {setup.role}"
-                    for agent, setup in agent_setups.items()
-                )
-            )
-            st.button("Edit settings", on_click=_open_settings, args=("create",))
-            settings_pending = st.session_state.get("settings_save_request") is not None
-            settings_loaded = st.session_state.get("browser_settings_loaded")
-            if settings_pending:
-                st.info("Saving browser settings…")
-            elif not settings_loaded:
-                st.info("Browser settings are still loading.")
-            generate = (
-                False
-                if settings_pending or not settings_loaded
-                else st.button(
-                    "Generate test cases",
-                    type="primary",
-                    key="run",
-                    width="stretch",
-                )
+                "Document ready" if upload is not None else "Add a document",
+                "Your PDF is ready for generation."
+                if upload is not None
+                else "Choose a text-based BRD or SRS PDF above.",
+                state="complete" if upload is not None else "active",
             )
 
         live_stage = st.empty()
@@ -2050,7 +1869,7 @@ def _render_centralized_create(
             _render_timeline_stage(
                 2,
                 "Generate and validate",
-                "Agents will publish their task, scope, checkpoint, and artifact here.",
+                "We will extract, organize, and cross-check your test cases.",
                 state="pending",
             )
         live_panel = st.empty()
@@ -2077,7 +1896,10 @@ def _render_centralized_create(
             source_stage.empty()
             with source_stage.container():
                 _render_timeline_stage(
-                    1, "Configure and start", "Source locked for this saved run.", state="complete"
+                    1,
+                    "Document ready",
+                    "Source locked for this saved run.",
+                    state="complete",
                 )
             live_stage.empty()
             with live_stage.container():
@@ -2103,21 +1925,24 @@ def _render_centralized_create(
             if activity_events:
                 live_panel.empty()
                 with live_panel.container(border=True):
-                    feed_column, plan_column = st.columns((1.7, 0.9), gap="large")
-                    with feed_column:
-                        st.markdown("#### Agent activity")
-                        st.caption("Live handoffs, current tasks, scopes, and checkpoints.")
-                        activity = st.container(height=420, key="live-feed")
-                        for event in activity_events:
-                            _render_activity(activity, event)
-                        _scroll_live_feed()
-                    with plan_column:
-                        st.markdown("#### Plan")
+                    progress_column, artifact_column = st.columns(
+                        (1, 1.15), gap="large"
+                    )
+                    with progress_column:
+                        st.markdown("#### Generation progress")
                         plan = st.empty()
                         _render_activity_plan(
                             plan, current_step, stopped=not completed
                         )
-                        st.caption("Private model reasoning is not displayed.")
+                        with st.expander("Live agent details"):
+                            st.caption("Agent handoffs, tasks, scopes, and checkpoints.")
+                            activity = st.container(height=420, key="live-feed")
+                            for event in activity_events:
+                                _render_activity(activity, event)
+                            _scroll_live_feed()
+                            st.caption("Private model reasoning is not displayed.")
+                    with artifact_column:
+                        _render_artifact_reader(st.empty(), activity_events)
             with result_panel.container(border=True):
                 _render_timeline_result_action(result)
         else:
@@ -2128,12 +1953,7 @@ def _render_centralized_create(
         st.error("Upload one text-extractable PDF before generating test cases.")
         return
 
-    try:
-        provider_settings = settings.provider_settings().with_agent_setups(agent_setups)
-    except ValueError as error:
-        st.error(str(error))
-        _open_settings(after_save="create")
-        return
+    provider_settings = settings
 
     st.session_state.pop("timeline_result", None)
     activity_events: list[str] = []
@@ -2142,7 +1962,10 @@ def _render_centralized_create(
     source_stage.empty()
     with source_stage.container():
         _render_timeline_stage(
-            1, "Configure and start", "Source and settings are locked for this run.", state="complete"
+            1,
+            "Document ready",
+            "Source and settings are locked for this run.",
+            state="complete",
         )
     live_stage.empty()
     with live_stage.container():
@@ -2156,15 +1979,17 @@ def _render_centralized_create(
 
     try:
         with live_panel.container(border=True):
-            feed_column, plan_column = st.columns((1.7, 0.9), gap="large")
-            with feed_column:
-                st.markdown("#### Agent activity")
-                st.caption("Agent handoffs, current tasks, scopes, and checkpoints.")
-                activity = st.container(height=420, key="live-feed")
-            with plan_column:
-                st.markdown("#### Plan")
+            progress_column, artifact_column = st.columns((1, 1.15), gap="large")
+            with progress_column:
+                st.markdown("#### Generation progress")
                 plan = st.empty()
-                st.caption("Private model reasoning is not displayed.")
+                with st.expander("Live agent details"):
+                    st.caption("Agent handoffs, tasks, scopes, and checkpoints.")
+                    activity = st.container(height=420, key="live-feed")
+                    st.caption("Private model reasoning is not displayed.")
+            with artifact_column:
+                artifact_reader = st.empty()
+                _render_artifact_reader(artifact_reader, activity_events)
 
             current_step = 0
             _render_activity_plan(plan, current_step)
@@ -2176,6 +2001,7 @@ def _render_centralized_create(
                 _render_activity_plan(plan, current_step)
                 _render_activity(activity, event)
                 activity_events.append(event)
+                _render_artifact_reader(artifact_reader, activity_events)
                 _scroll_live_feed()
 
             runner = st.session_state.get("_runner", run_generation)
@@ -2198,6 +2024,23 @@ def _render_centralized_create(
             )
         st.error(f"Generation failed: {_safe_error(error, provider_settings)}")
         return
+
+    if result.bundle is not None and not any(
+        isinstance(event, ActivityEvent)
+        and isinstance(event.artifact, ArtifactBundle)
+        for event in activity_events
+    ):
+        activity_events.append(
+            ActivityEvent(
+                "Final artifact bundle published.",
+                agent="Orchestrator",
+                role="Policy coordinator",
+                state="complete",
+                artifact=result.bundle,
+                artifact_label="Final artifact bundle",
+            )
+        )
+        _render_artifact_reader(artifact_reader, activity_events)
 
     completed = result.manifest.status is RunStatus.COMPLETED
     if completed:
@@ -2229,62 +2072,338 @@ def _render_centralized_create(
     st.session_state["timeline_result"] = result
     with result_panel.container(border=True):
         _render_timeline_result_action(result)
+def _render_create_steps(active_step: int) -> None:
+    labels = ("Choose run type", "Configure agents", "Upload and run")
+    steps = []
+    for position, label in enumerate(labels, 1):
+        state = "active" if position == active_step else "complete" if position < active_step else "pending"
+        steps.append(
+            f"<div class='wizard-step wizard-step--{state}'>"
+            f"Step {position} · {label}</div>"
+        )
+    st.markdown(
+        f"<div class='wizard-steps'>{''.join(steps)}</div>",
+        unsafe_allow_html=True,
+    )
 
 
-def _render_create(repository: RunRepository, settings: AppSettings) -> None:
+def _default_run_model(provider: str, run_type: RunType) -> str:
+    if provider == "gemini":
+        return (
+            SINGLE_DEFAULT_MODEL
+            if run_type is RunType.SINGLE_PROMPT
+            else STAGED_DEFAULT_MODEL
+        )
+    return ""
+
+
+def _reset_run_model(provider_key: str, model_key: str, run_type: RunType) -> None:
+    st.session_state[model_key] = _default_run_model(
+        st.session_state[provider_key], run_type
+    )
+
+
+def _initialize_run_settings(
+    run_type: RunType,
+    repository: RunRepository,
+) -> None:
+    if st.session_state.get("run_config_type") == run_type.value:
+        return
+    st.session_state["run_config_type"] = run_type.value
+    st.session_state["run_token_ceiling"] = DEFAULT_TOKEN_CEILING
+
+    if run_type is RunType.STAGED_SINGLE_AGENT:
+        st.session_state["run_staged_provider"] = "gemini"
+        st.session_state["run_staged_model"] = STAGED_DEFAULT_MODEL
+    elif run_type is RunType.SINGLE_PROMPT:
+        st.session_state["run_single_provider"] = "gemini"
+        st.session_state["run_single_model"] = SINGLE_DEFAULT_MODEL
+    else:
+        try:
+            setups = repository.load_agent_setups()
+        except StorageError:
+            setups = default_agent_setups()
+        st.session_state["run_agent_roles"] = {
+            agent: setups[agent].role for agent in AGENT_LABELS
+        }
+        for agent in AGENT_LABELS:
+            st.session_state[f"run_{agent}_provider"] = "llama_cpp"
+            st.session_state[f"run_{agent}_model"] = ""
+            st.session_state[f"run_{agent}_prompt"] = (
+                setups[agent].instructions.strip() or RUN_PROMPT_DEFAULTS[agent]
+            )
+
+    for agent in RUN_CONFIG_AGENTS[run_type]:
+        st.session_state.setdefault(
+            f"run_{agent}_prompt", RUN_PROMPT_DEFAULTS[agent]
+        )
+
+
+def _render_provider_model(
+    config_key: str, label: str, run_type: RunType
+) -> tuple[str, str]:
+    provider_key = f"run_{config_key}_provider"
+    model_key = f"run_{config_key}_model"
+    provider_column, model_column = st.columns(2)
+    with provider_column:
+        provider = st.selectbox(
+            f"{label} provider",
+            RUN_PROVIDERS,
+            key=provider_key,
+            format_func=_provider_label,
+            on_change=_reset_run_model,
+            args=(provider_key, model_key, run_type),
+        )
+    with model_column:
+        models, labels = _models_for_provider(provider)
+        if not models:
+            st.session_state[model_key] = ""
+            st.selectbox(
+                f"{label} model",
+                ("No models available",),
+                key=f"{model_key}_unavailable",
+                disabled=True,
+            )
+            model = ""
+        else:
+            if st.session_state.get(model_key) not in models:
+                default = _default_run_model(provider, run_type)
+                if hint := LOCAL_AGENT_MODEL_HINTS.get(config_key):
+                    default = next(
+                        (
+                            model
+                            for model in models
+                            if hint in f"{model} {labels[model]}".lower()
+                        ),
+                        default,
+                    )
+                st.session_state[model_key] = default if default in models else models[0]
+            model = st.selectbox(
+                f"{label} model",
+                models,
+                key=model_key,
+                format_func=lambda value: labels[value],
+            )
+    return provider, model
+
+
+def _render_run_settings(run_type: RunType) -> None:
+    st.session_state.pop("_llama_cpp_model_error", None)
+    if run_type is RunType.SINGLE_PROMPT:
+        with st.container(border=True):
+            st.markdown("#### Test suite generator")
+            _render_provider_model("single", "Agent", run_type)
+            st.text_area(
+                "Agent prompt",
+                key="run_single_prompt",
+                height=180,
+                help="Applied after the core evidence, safety, and output-schema rules.",
+            )
+    elif run_type is RunType.STAGED_SINGLE_AGENT:
+        with st.container(border=True):
+            st.markdown("#### Shared generation model")
+            _render_provider_model("staged", "Agent", run_type)
+        for agent in RUN_CONFIG_AGENTS[run_type]:
+            with st.container(border=True):
+                st.markdown(f"#### {RUN_AGENT_LABELS[agent]}")
+                st.text_area(
+                    f"{RUN_AGENT_LABELS[agent]} prompt",
+                    key=f"run_{agent}_prompt",
+                    height=150,
+                    help="Applied after the core evidence, safety, and output-schema rules.",
+                )
+    else:
+        for agent in RUN_CONFIG_AGENTS[run_type]:
+            with st.container(border=True):
+                st.markdown(f"#### {RUN_AGENT_LABELS[agent]}")
+                _render_provider_model(agent, RUN_AGENT_LABELS[agent], run_type)
+                st.text_area(
+                    f"{RUN_AGENT_LABELS[agent]} prompt",
+                    key=f"run_{agent}_prompt",
+                    height=150,
+                    help="Applied after the core evidence, safety, and output-schema rules.",
+                )
+    if st.session_state.pop("_llama_cpp_model_error", False):
+        st.warning(
+            "llama.cpp models are unavailable. Check LLAMA_CPP_BASE_URL and "
+            "the backend service."
+        )
+    st.number_input(
+        "Token ceiling",
+        min_value=1_000,
+        step=1_000,
+        key="run_token_ceiling",
+    )
+    st.caption("Provider access is managed by the deployment environment.")
+
+
+def _run_provider_settings(run_type: RunType) -> ProviderSettings:
+    agents = RUN_CONFIG_AGENTS[run_type]
+    if run_type is RunType.STAGED_SINGLE_AGENT:
+        provider = st.session_state["run_staged_provider"]
+        model = st.session_state["run_staged_model"]
+        agent_providers = {agent: provider for agent in agents}
+        agent_models = {agent: model for agent in agents}
+    else:
+        agent_providers = {
+            agent: st.session_state[f"run_{agent}_provider"] for agent in agents
+        }
+        agent_models = {
+            agent: st.session_state[f"run_{agent}_model"] for agent in agents
+        }
+        provider = agent_providers[agents[0]]
+        model = agent_models[agents[0]]
+
+    roles = st.session_state.get("run_agent_roles", {})
+    agent_setups = {
+        agent: AgentSetup(
+            agent=agent,
+            role=roles.get(agent, default_agent_setups()[agent].role),
+        )
+        for agent in AGENT_LABELS
+    }
+    settings = ProviderSettings(
+        provider=provider,
+        model=model,
+        token_ceiling=st.session_state["run_token_ceiling"],
+        api_key=_api_key(provider),
+        base_url=_base_url(provider) if provider in LOCAL_BASE_URLS else "",
+        agent_setups=agent_setups,
+        agent_providers=agent_providers,
+        agent_models=agent_models,
+        agent_prompts={
+            agent: st.session_state[f"run_{agent}_prompt"] for agent in agents
+        },
+        provider_api_keys={"gemini": _api_key("gemini")},
+        provider_base_urls={
+            provider_name: _base_url(provider_name)
+            for provider_name in LOCAL_BASE_URLS
+        },
+    )
+    settings.validate()
+    return settings
+
+
+def _restore_run_settings(run_type: RunType, settings: ProviderSettings) -> None:
+    st.session_state["run_token_ceiling"] = settings.token_ceiling
+    if run_type is RunType.STAGED_SINGLE_AGENT:
+        first_agent = RUN_CONFIG_AGENTS[run_type][0]
+        st.session_state["run_staged_provider"] = settings.provider_for(first_agent)
+        st.session_state["run_staged_model"] = settings.model_for(first_agent)
+    else:
+        for agent in RUN_CONFIG_AGENTS[run_type]:
+            st.session_state[f"run_{agent}_provider"] = settings.provider_for(agent)
+            st.session_state[f"run_{agent}_model"] = settings.model_for(agent)
+    for agent in RUN_CONFIG_AGENTS[run_type]:
+        st.session_state[f"run_{agent}_prompt"] = settings.prompt_for(agent)
+
+
+def _render_run_summary(run_type: RunType, settings: ProviderSettings) -> None:
+    st.markdown("#### Run settings")
+    st.table(
+        [
+            {
+                "Agent / step": RUN_AGENT_LABELS[agent],
+                "Provider": _provider_label(settings.provider_for(agent)),
+                "Model": settings.model_for(agent),
+            }
+            for agent in RUN_CONFIG_AGENTS[run_type]
+        ]
+    )
+    st.caption("The exact provider, model, and prompt configuration is saved with the run.")
+
+
+def _render_create(repository: RunRepository) -> None:
     st.button("Back to runs", on_click=_go_home)
     st.title("Create a test suite")
-    st.caption(
-        "Upload a BRD or SRS, confirm the generation strategy, and track every stage of the run."
-    )
-    run_type = st.selectbox(
-        "Run type",
-        list(RunType),
-        key="run_type",
-        format_func=_run_type_label,
-    )
-    st.caption(RUN_TYPE_COPY[run_type][1])
-    if run_type is RunType.CENTRALIZED_MULTI_AGENT:
-        st.caption(
-            "Live activity shows orchestrator handoffs and agent status, not private model reasoning."
+    active_step = st.session_state.setdefault("create_step", 1)
+    _render_create_steps(active_step)
+
+    if active_step == 1:
+        st.markdown("### Select a run type")
+        run_type = st.radio(
+            "Run type",
+            list(RunType),
+            key="run_type_choice",
+            format_func=_run_type_label,
+            horizontal=True,
         )
-        _render_centralized_create(repository, settings)
+        st.info(RUN_TYPE_COPY[run_type][1])
+        if st.button("Continue to settings", type="primary", width="stretch"):
+            st.session_state["run_type"] = run_type
+            _initialize_run_settings(run_type, repository)
+            st.session_state["create_step"] = 2
+            st.rerun()
         return
 
-    upload = st.file_uploader(
+    run_type = st.session_state["run_type"]
+    if active_step == 2:
+        st.markdown("### Configure this run")
+        st.caption("Each prompt starts with a working default and can be edited here.")
+        _render_run_settings(run_type)
+        back_column, continue_column = st.columns(2)
+        if back_column.button("Back to run type", width="stretch"):
+            st.session_state["create_step"] = 1
+            st.rerun()
+        if continue_column.button(
+            "Continue to document", type="primary", width="stretch"
+        ):
+            try:
+                st.session_state["run_provider_settings"] = _run_provider_settings(
+                    run_type
+                )
+            except ValueError as error:
+                st.error(str(error))
+                return
+            st.session_state["create_step"] = 3
+            st.rerun()
+        return
+
+    provider_settings = st.session_state.get("run_provider_settings")
+    if not isinstance(provider_settings, ProviderSettings):
+        st.session_state["create_step"] = 2
+        st.rerun()
+
+    st.markdown("### Add your source document")
+    _render_run_summary(run_type, provider_settings)
+    if st.button("Edit run settings"):
+        if current_upload := st.session_state.get("pdf"):
+            st.session_state["retained_pdf"] = current_upload
+        _restore_run_settings(run_type, provider_settings)
+        st.session_state["create_step"] = 2
+        st.rerun()
+    selected_upload = st.file_uploader(
         "BRD/SRS PDF",
         type=["pdf"],
         key="pdf",
         help="Use a text-extractable PDF.",
     )
-    st.markdown("### App settings")
-    st.caption(
-        f"{_provider_label(settings.provider)} · {settings.model} · "
-        f"{settings.token_ceiling:,} token ceiling"
-    )
-    st.button("Edit settings", on_click=_open_settings, args=("create",))
-    if st.session_state.get("settings_save_request") is not None:
-        st.info("Saving browser settings…")
-        return
-    if not st.session_state.get("browser_settings_loaded"):
-        st.info("Browser settings are still loading.")
-        return
-    if not st.button(
+    if selected_upload is not None:
+        st.session_state["retained_pdf"] = selected_upload
+    upload = selected_upload or st.session_state.get("retained_pdf")
+    if upload is None:
+        st.caption(
+            "Add a PDF to continue. Scanned PDFs without selectable text are not "
+            "supported."
+        )
+    elif selected_upload is None:
+        st.caption(f"Using your previously selected file: {upload.name}")
+    generate = st.button(
         "Generate test cases",
         type="primary",
         key="run",
         width="stretch",
-    ):
+        disabled=upload is None,
+    )
+
+    if run_type is RunType.CENTRALIZED_MULTI_AGENT:
+        _render_centralized_create(
+            repository, provider_settings, upload, generate
+        )
+        return
+    if not generate:
         return
     if upload is None:
-        st.error("Upload one text-extractable PDF before generating test cases.")
-        return
-
-    try:
-        provider_settings = settings.provider_settings()
-    except ValueError as error:
-        st.error(str(error))
-        _open_settings(after_save="create")
         return
 
     try:
@@ -2335,7 +2454,7 @@ def _render_detail(repository: RunRepository) -> None:
 
 def _render_flashes() -> None:
     if message := st.session_state.pop("flash_toast", None):
-        st.toast(message, icon="⚠️")
+        st.toast(message, icon=":material/warning:")
     if warning := st.session_state.pop("flash_warning", None):
         st.warning(warning)
     if error := st.session_state.pop("flash_error", None):
@@ -2350,7 +2469,6 @@ def main() -> None:
         initial_sidebar_state="collapsed",
     )
     _apply_theme()
-    _sync_app_settings()
     _render_top_nav()
     _render_flashes()
 
@@ -2366,15 +2484,11 @@ def main() -> None:
     st.session_state.setdefault("view", "runs")
     view = st.session_state["view"]
     if view == "create":
-        _render_create(repository, st.session_state["app_settings"])
+        _render_create(repository)
     elif view == "detail":
         _render_detail(repository)
     else:
         st.session_state["view"] = "runs"
         _render_runs(repository)
-
-    if st.session_state.get("show_settings"):
-        _settings_dialog(repository)
-
 
 main()

@@ -52,6 +52,7 @@ def _manifest(row: dict[str, object]) -> RunManifest:
         token_ceiling=row["token_ceiling"],
         prompt_version=row["prompt_version"],
         schema_version=row["schema_version"],
+        configuration=row["configuration"],
         started_at=row["started_at"],
         completed_at=row["completed_at"],
         failure_category=row["failure_category"],
@@ -141,7 +142,12 @@ class RunRepository:
         if manifest.status is not RunStatus.RUNNING:
             raise ImmutableRunError("Runs must start in running state.")
         fields = tuple(RunManifest.model_fields)
-        values = tuple(getattr(manifest, field) for field in fields)
+        values = tuple(
+            Jsonb(manifest.configuration)
+            if field == "configuration"
+            else getattr(manifest, field)
+            for field in fields
+        )
         try:
             with self._connect() as connection:
                 connection.execute(
@@ -160,7 +166,7 @@ class RunRepository:
         row = connection.execute(
             "SELECT run_id, source_filename, document_hash, run_type, status, "
             "provider, model, temperature, token_ceiling, prompt_version, "
-            "schema_version, started_at, completed_at, failure_category, "
+            "schema_version, configuration, started_at, completed_at, failure_category, "
             "failure_message FROM runs WHERE run_id = %s FOR UPDATE",
             (run_id,),
         ).fetchone()
@@ -272,6 +278,7 @@ class RunRepository:
                     "token_ceiling",
                     "prompt_version",
                     "schema_version",
+                    "configuration",
                     "started_at",
                 )
                 if any(
@@ -651,7 +658,7 @@ class RunRepository:
                 row = connection.execute(
                     "SELECT run_id, source_filename, document_hash, run_type, "
                     "status, provider, model, temperature, token_ceiling, "
-                    "prompt_version, schema_version, started_at, completed_at, "
+                    "prompt_version, schema_version, configuration, started_at, completed_at, "
                     "failure_category, failure_message FROM runs WHERE run_id = %s",
                     (run_id,),
                 ).fetchone()

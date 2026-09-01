@@ -24,11 +24,12 @@ PostgreSQL data remains in the Compose-managed `postgres_data` named volume.
 
 ## Generate and reopen a run
 
-1. Open **Settings** to set the provider, model, applicable credential, base URL, and token ceiling, then explicitly select **Save settings**.
-2. From **Runs**, select **Create new run**.
-3. Select exactly one run type: `single_prompt`, `staged_single_agent`, or `centralized_multi_agent`; upload one text-extractable BRD/SRS PDF; then select **Generate test cases**. Only the chosen type executes.
-4. A completed or failed run opens automatically. Review its test cases first, then supporting requirements and scenarios, metrics, downloads, diagnostics, and immutable configuration snapshot.
-5. Use **Back to runs** and select a row to reopen it. A running record left by a stopped process displays as **Interrupted**.
+1. From **Runs**, select **Create new run**.
+2. Select exactly one run type: `single_prompt`, `staged_single_agent`, or `centralized_multi_agent`.
+3. Configure the provider and model, review or edit each agent prompt, adjust the token ceiling, and select **Continue to document**. Provider connections come from the deployment environment and are not shown in the UI.
+4. Upload one text-extractable BRD/SRS PDF, then select **Generate test cases**. Only the chosen type executes.
+5. A completed or failed run opens automatically. Review its test cases first, then supporting requirements and scenarios, metrics, downloads, diagnostics, and immutable per-agent settings snapshot.
+6. Use **Back to runs** and select a row to reopen it. A running record left by a stopped process displays as **Interrupted**.
 
 Each accepted generation request creates a new immutable run. Correct a problem and retry rather than editing a saved run.
 
@@ -36,7 +37,7 @@ Each accepted generation request creates a new immutable run. Correct a problem 
 
 The application stores normalized run data in local PostgreSQL: the source basename and document hash, extracted text chunks, run configuration and lifecycle events, metrics, validation, requirements, scenarios, test cases, citations, and traceability data.
 
-Raw PDF bytes and provider credentials are never stored in PostgreSQL, downloads, URLs, or run snapshots. **Save settings** stores the active credential in this browser's `localStorage` only when explicitly selected; same-origin scripts can read it. Use a dedicated browser profile and origin, and do not use a shared machine. Known secrets and base URLs are redacted from displayed and persisted failures. Do not put secrets in the source PDF or in a local-provider URL.
+Raw PDF bytes, provider credentials, and base URLs are never stored in PostgreSQL, downloads, URLs, or run snapshots. Provider, model, custom prompt, and token-ceiling values are stored with each run. Credentials and base URLs are loaded from deployment environment variables and never rendered in the UI. Known secrets and base URLs are redacted from displayed and persisted failures. Do not put secrets in the source PDF or in a local-provider URL.
 
 The legacy `runs/` directory is ignored and left untouched. There is no import from that filesystem format.
 
@@ -52,44 +53,30 @@ Reported failure categories are parsing, configuration, provider rejection, tran
 
 An unexpected internal exception can leave a running database record. The **Runs** view labels that record **Interrupted** so its saved metadata remains inspectable.
 
-## Browser storage smoke test
+## Run configuration smoke test
 
-1. Start the app and open **Settings**.
-2. Save a non-production credential, model, applicable URL, and token ceiling.
-3. Refresh and confirm the settings are restored.
+1. Start the app and create a new run.
+2. Select the run type before any settings or upload control appears.
+3. Confirm connection fields are absent; select a model and token ceiling, then edit one prompt.
 4. Create a small run and confirm its dedicated detail page opens.
-5. Confirm the snapshot and downloaded JSON omit the credential and base URL.
-6. Select **Back to runs**, select the same row, and confirm its test cases reopen.
+5. Confirm the snapshot includes the selected provider, model, and edited prompt but omits the credential and base URL.
+6. Select **Back to runs**, select the same row, and confirm its test cases and settings snapshot reopen.
 
 ### Gemini
 
-In **Settings**, select `gemini`, use a supported model (the current default is `gemini-3.6-flash`), enter its API key, and select **Save settings**. Create one run, then verify its detail page and download.
+Set `GEMINI_API_KEY` in `.env`. In the run settings step, select Gemini and choose a model from the dropdown. Single-prompt runs default to `gemini-3.5-flash`; staged runs default to `gemini-3.6-flash` because Gemini no longer accepts `gemini-2.5-flash` for new users.
 
-### Ollama
+### llama.cpp
 
-Ollama is required only for this smoke path. Start the service and make the model available:
+Run an OpenAI-compatible llama.cpp backend that exposes `/v1/models` and `/v1/chat/completions`. Set `LLAMA_CPP_BASE_URL` in `.env` when the default `http://localhost:8080/v1` is unsuitable. The deployed Compose app defaults to `http://host.docker.internal:8081/v1`.
 
-```sh
-ollama serve
-```
-
-In another terminal:
-
-```sh
-ollama pull gemma4
-```
-
-In **Settings**, select `ollama`; the editable defaults are `http://localhost:11434` and `gemma4`. Select **Save settings**, create one run, and verify its detail page and saved **Runs** row. Ollama requests disable thinking output.
-
-### LM Studio
-
-Start the local server from LM Studio's Developer tab and load a model. In **Settings**, select `LM Studio` and keep the default OpenAI-compatible base URL, `http://localhost:1234/v1`. If authentication is enabled, enter a token created in LM Studio Server Settings. Select **Load available models**, choose the loaded model, select **Save settings**, create one run, and verify its detail page and saved **Runs** row.
-
-For `centralized_multi_agent`, optional Analyst, Test generator, and Reviewer model IDs route each role to a different model; blank fields use the primary Model. LM Studio does not load these IDs on demand, so load every selected model before generating. All roles share the configured token ceiling.
+In the run settings step, select llama.cpp and choose one of the models reported by `/v1/models`. Multi-agent runs prefer Qwen for analysis and coverage, Gemma for test generation, and Phi for review when those models are available.
 
 ### Local multi-model execution
 
-Local `centralized_multi_agent` runs keep requests small and predictable: requirement extraction uses consecutive evidence batches targeting about 6,000 characters, and test generation handles at most three consecutive canonical requirements per task. Local requests run one at a time so llama.cpp, Ollama, or LM Studio does not receive three simultaneous generations for the same role model. Role-specific models are still used at their respective pipeline phase.
+Local `centralized_multi_agent` runs keep requests small and predictable: requirement extraction uses consecutive evidence batches targeting about 6,000 characters, and test generation handles at most three consecutive canonical requirements per task. Local requests run one at a time so llama.cpp does not receive three simultaneous generations for the same role model. Role-specific models are still used at their respective pipeline phase.
+
+On a 32 GB Mac, run llama.cpp in router mode with `--models-max 1 --parallel 1 --ctx-size 16384`. The agents are queued together, but only one model and one inference request are active at a time.
 
 A run remains one immutable transaction; completed task outputs are not resumable after a later task fails. Retry/resume storage should be added only if bounded local tasks still fail often enough to justify the extra schema and UI state.
 
@@ -103,12 +90,12 @@ set -a
 set +a
 env PYTHONPATH=src .venv/bin/python -m pytest -q
 .venv/bin/python -m compileall -q app.py src tests
-env PYTHONPATH=src .venv/bin/python -c "from brd_srs_testgen.browser_settings import AppSettings; from brd_srs_testgen.runner import run_generation; print('imports ok')"
+env PYTHONPATH=src .venv/bin/python -c "from brd_srs_testgen.runner import run_generation; print('imports ok')"
 git diff --check
 git status --short
 ```
 
-The full gate requires all tests to pass and the PostgreSQL storage suite to run with no skips. Compilation must exit successfully, the import check must print `imports ok`, `git diff --check` must be empty, and status must contain only the intended changes before commit. The browser storage smoke test above is manual; it is not an automated verification.
+The full gate requires all tests to pass and the PostgreSQL storage suite to run with no skips. Compilation must exit successfully, the import check must print `imports ok`, `git diff --check` must be empty, and status must contain only the intended changes before commit. The run configuration smoke test above is manual; it is not an automated verification.
 
 ## First-slice limits
 
