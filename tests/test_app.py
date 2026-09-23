@@ -718,6 +718,7 @@ def test_completed_detail_renders_coverage_charts() -> None:
     result = _detailed_run().model_copy(
         update={
             "coverage": CoverageScore(
+                catalog_id="legacy-unversioned",
                 precision=0,
                 recall=0,
                 f1=0,

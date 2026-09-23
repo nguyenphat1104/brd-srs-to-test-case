@@ -185,6 +185,16 @@ class TestEvaluatorContracts:
                 units=[_units(1).units[0]],
                 created_at=now,
             )
+        with pytest.raises(ValueError, match="non-approved"):
+            CoverageCatalog(
+                catalog_id="cat-doc-v1",
+                document_hash="a" * 64,
+                evaluator_version="coverage-v2",
+                status=CoverageCatalogStatus.MACHINE_FROZEN,
+                units=[_units(1).units[0]],
+                created_at=now,
+                approved_at=now,
+            )
         with pytest.raises(ValueError, match="completed evaluations"):
             CoverageEvaluation(
                 run_id="run-1",
@@ -195,6 +205,86 @@ class TestEvaluatorContracts:
                 error="unexpected",
                 evaluated_at=now,
             )
+
+    def test_contracts_reject_whitespace_required_strings(self) -> None:
+        now = datetime.now(UTC)
+        catalog = CoverageCatalog(
+            catalog_id="cat-doc-v1",
+            document_hash="a" * 64,
+            evaluator_version="coverage-v2",
+            status=CoverageCatalogStatus.MACHINE_FROZEN,
+            units=[_units(1).units[0]],
+            created_at=now,
+        )
+        failed = CoverageEvaluation(
+            run_id="run-1",
+            catalog_id="cat-doc-v1",
+            status=CoverageEvaluationStatus.FAILED,
+            error="Provider unavailable.",
+            evaluated_at=now,
+        )
+        rating = HumanRating(
+            rating_id="rating-1",
+            run_id="run-1",
+            rater_id="rater-a",
+            dimension=HumanRatingDimension.COVERAGE,
+            score=4,
+            rubric_version="quality-rubric-v1",
+            created_at=now,
+        )
+        adjudication = HumanAdjudication(
+            adjudication_id="adj-1",
+            run_id="run-1",
+            dimension=HumanRatingDimension.COVERAGE,
+            score=4,
+            reason="Evidence supports the final rating.",
+            rubric_version="quality-rubric-v1",
+            created_at=now,
+        )
+        required_fields = (
+            (CoverageCatalog, catalog, ("catalog_id", "evaluator_version")),
+            (CoverageScore, _score(), ("catalog_id",)),
+            (CoverageEvaluation, failed, ("run_id", "catalog_id", "error")),
+            (HumanRating, rating, ("rating_id", "run_id", "rater_id", "rubric_version")),
+            (
+                HumanAdjudication,
+                adjudication,
+                ("adjudication_id", "run_id", "reason", "rubric_version"),
+            ),
+        )
+
+        for model, instance, fields in required_fields:
+            for field in fields:
+                with pytest.raises(ValueError):
+                    model.model_validate({**instance.model_dump(), field: " \t "})
+
+    def test_evaluation_enforces_complete_and_failed_payloads(self) -> None:
+        now = datetime.now(UTC)
+        completed = {
+            "run_id": "run-1",
+            "catalog_id": "cat-doc-v1",
+            "status": CoverageEvaluationStatus.COMPLETED,
+            "mappings": CoverageMappingBatch(mappings=[]),
+            "score": _score(),
+            "evaluated_at": now,
+        }
+        failed = {
+            "run_id": "run-1",
+            "catalog_id": "cat-doc-v1",
+            "status": CoverageEvaluationStatus.FAILED,
+            "error": "Provider unavailable.",
+            "evaluated_at": now,
+        }
+
+        for field in ("mappings", "score"):
+            with pytest.raises(ValueError):
+                CoverageEvaluation(**{**completed, field: None})
+        for field, value in (("mappings", CoverageMappingBatch(mappings=[])), ("score", _score())):
+            with pytest.raises(ValueError):
+                CoverageEvaluation(**{**failed, field: value})
+        for error in ("", " \t "):
+            with pytest.raises(ValueError):
+                CoverageEvaluation(**{**failed, "error": error})
 
     def test_human_rating_identifies_rater_dimension_and_round(self) -> None:
         rating = HumanRating(
@@ -210,6 +300,11 @@ class TestEvaluatorContracts:
         )
 
         assert rating.dimension is HumanRatingDimension.EXECUTABILITY
+        assert (rating.rating_id, rating.rater_id, rating.round) == (
+            "rating-1",
+            "rater-a",
+            1,
+        )
 
     def test_human_adjudication_records_final_dimension_score(self) -> None:
         adjudication = HumanAdjudication(

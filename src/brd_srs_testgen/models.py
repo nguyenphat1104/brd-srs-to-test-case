@@ -3,11 +3,25 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+def _nonblank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("must not be blank")
+    return value
 
 
 class ActivityEvent(str):
@@ -356,6 +370,8 @@ class CoverageCatalog(StrictModel):
     created_at: AwareDatetime
     approved_at: AwareDatetime | None = None
 
+    _validate_nonblank = field_validator("catalog_id", "evaluator_version")(_nonblank)
+
     @model_validator(mode="after")
     def validate_status(self) -> Self:
         if self.status is CoverageCatalogStatus.APPROVED:
@@ -392,6 +408,8 @@ class CoverageScore(StrictModel):
     uncovered_unit_ids: list[str] = Field(default_factory=list)
     unmapped_test_case_ids: list[str] = Field(default_factory=list)
 
+    _validate_nonblank = field_validator("catalog_id")(_nonblank)
+
 
 class CoverageEvaluation(StrictModel):
     run_id: str = Field(min_length=1)
@@ -402,12 +420,14 @@ class CoverageEvaluation(StrictModel):
     error: str = Field(default="", max_length=2_000)
     evaluated_at: AwareDatetime
 
+    _validate_nonblank = field_validator("run_id", "catalog_id")(_nonblank)
+
     @model_validator(mode="after")
     def validate_status(self) -> Self:
         if self.status is CoverageEvaluationStatus.COMPLETED:
             if self.mappings is None or self.score is None or self.error:
                 raise ValueError("completed evaluations require mappings and score with blank error")
-        elif self.mappings is not None or self.score is not None or not self.error:
+        elif self.mappings is not None or self.score is not None or not self.error.strip():
             raise ValueError("failed evaluations require no mappings or score and nonblank error")
         return self
 
@@ -423,6 +443,10 @@ class HumanRating(StrictModel):
     round: int = Field(default=1, ge=1)
     created_at: AwareDatetime
 
+    _validate_nonblank = field_validator(
+        "rating_id", "run_id", "rater_id", "rubric_version"
+    )(_nonblank)
+
 
 class HumanAdjudication(StrictModel):
     adjudication_id: str = Field(min_length=1)
@@ -432,6 +456,10 @@ class HumanAdjudication(StrictModel):
     reason: str = Field(min_length=1, max_length=2_000)
     rubric_version: str = Field(min_length=1)
     created_at: AwareDatetime
+
+    _validate_nonblank = field_validator(
+        "adjudication_id", "run_id", "reason", "rubric_version"
+    )(_nonblank)
 
 
 class HumanCoverageRating(StrictModel):

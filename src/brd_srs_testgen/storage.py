@@ -812,6 +812,7 @@ class RunRepository:
         if row is None:
             return None
         return CoverageScore(
+            catalog_id="legacy-unversioned",
             precision=row["precision"],
             recall=row["recall"],
             f1=row["f1"],

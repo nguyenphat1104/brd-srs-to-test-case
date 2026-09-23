@@ -1123,6 +1123,7 @@ def test_human_coverage_rating_is_immutable_and_round_trips(
     result = completed_run("human-rating").model_copy(
         update={
             "coverage": CoverageScore(
+                catalog_id="legacy-unversioned",
                 precision=0.8,
                 recall=0.8,
                 f1=0.8,
