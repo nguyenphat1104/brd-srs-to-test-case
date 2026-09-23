@@ -149,6 +149,7 @@ def compute_f1(
     ) + sorted(unmapped_from_batch)
 
     return CoverageScore(
+        catalog_id="legacy-unversioned",
         precision=precision,
         recall=recall,
         f1=f1,

@@ -321,12 +321,49 @@ class RunResult(StrictModel):
         }
 
 
+class CoverageCatalogStatus(StrEnum):
+    MACHINE_FROZEN = "machine_frozen"
+    APPROVED = "approved"
+    SUPERSEDED = "superseded"
+
+
+class CoverageEvaluationStatus(StrEnum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class HumanRatingDimension(StrEnum):
+    COVERAGE = "coverage"
+    GROUNDEDNESS = "groundedness"
+    EXECUTABILITY = "executability"
+    REDUNDANCY_CONTROL = "redundancy_control"
+
+
 class CoverageUnit(StrictModel):
     unit_id: str = Field(pattern=r"^CU-\d{3,}$")
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
     unit_type: str = Field(min_length=1)
-    source_chunk_ids: list[str] = Field(min_length=1)
+    source_references: list[SourceReference] = Field(min_length=1)
+
+
+class CoverageCatalog(StrictModel):
+    catalog_id: str = Field(min_length=1)
+    document_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluator_version: str = Field(min_length=1)
+    status: CoverageCatalogStatus
+    units: list[CoverageUnit] = Field(min_length=1)
+    created_at: AwareDatetime
+    approved_at: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def validate_status(self) -> Self:
+        if self.status is CoverageCatalogStatus.APPROVED:
+            if self.approved_at is None:
+                raise ValueError("approved catalogs require approved_at")
+        elif self.approved_at is not None:
+            raise ValueError("non-approved catalogs cannot have approved_at")
+        return self
 
 
 class CoverageUnitBatch(StrictModel):
@@ -343,6 +380,7 @@ class CoverageMappingBatch(StrictModel):
 
 
 class CoverageScore(StrictModel):
+    catalog_id: str = Field(min_length=1)
     precision: float = Field(ge=0, le=1)
     recall: float = Field(ge=0, le=1)
     f1: float = Field(ge=0, le=1)
@@ -353,6 +391,47 @@ class CoverageScore(StrictModel):
     total_test_cases: int = Field(ge=0)
     uncovered_unit_ids: list[str] = Field(default_factory=list)
     unmapped_test_case_ids: list[str] = Field(default_factory=list)
+
+
+class CoverageEvaluation(StrictModel):
+    run_id: str = Field(min_length=1)
+    catalog_id: str = Field(min_length=1)
+    status: CoverageEvaluationStatus
+    mappings: CoverageMappingBatch | None = None
+    score: CoverageScore | None = None
+    error: str = Field(default="", max_length=2_000)
+    evaluated_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def validate_status(self) -> Self:
+        if self.status is CoverageEvaluationStatus.COMPLETED:
+            if self.mappings is None or self.score is None or self.error:
+                raise ValueError("completed evaluations require mappings and score with blank error")
+        elif self.mappings is not None or self.score is not None or not self.error:
+            raise ValueError("failed evaluations require no mappings or score and nonblank error")
+        return self
+
+
+class HumanRating(StrictModel):
+    rating_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    rater_id: str = Field(min_length=1, max_length=120)
+    dimension: HumanRatingDimension
+    score: int = Field(ge=1, le=4)
+    reason: str = Field(default="", max_length=2_000)
+    rubric_version: str = Field(min_length=1)
+    round: int = Field(default=1, ge=1)
+    created_at: AwareDatetime
+
+
+class HumanAdjudication(StrictModel):
+    adjudication_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    dimension: HumanRatingDimension
+    score: int = Field(ge=1, le=4)
+    reason: str = Field(min_length=1, max_length=2_000)
+    rubric_version: str = Field(min_length=1)
+    created_at: AwareDatetime
 
 
 class HumanCoverageRating(StrictModel):

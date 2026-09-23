@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from brd_srs_testgen.coverage import (
@@ -11,6 +13,10 @@ from brd_srs_testgen.models import (
     ArtifactBundle,
     CoverageMappingBatch,
     CoverageMappingEntry,
+    CoverageCatalog,
+    CoverageCatalogStatus,
+    CoverageEvaluation,
+    CoverageEvaluationStatus,
     CoverageScore,
     CoverageUnit,
     CoverageUnitBatch,
@@ -24,6 +30,9 @@ from brd_srs_testgen.models import (
     TestCase,
     TestPriority,
     TestStep,
+    HumanAdjudication,
+    HumanRating,
+    HumanRatingDimension,
 )
 
 
@@ -95,11 +104,125 @@ def _units(count: int = 3) -> CoverageUnitBatch:
                 title=f"Unit {i}",
                 description=f"Testable behavior {i}.",
                 unit_type="functional",
-                source_chunk_ids=["p0001-c001-ecac9f035813"],
+                source_references=[_source()],
             )
             for i in range(1, count + 1)
         ]
     )
+
+
+def _score() -> CoverageScore:
+    return CoverageScore(
+        catalog_id="cat-doc-v1",
+        precision=1,
+        recall=1,
+        f1=1,
+        true_positive_count=1,
+        false_positive_count=0,
+        false_negative_count=0,
+        total_coverage_units=1,
+        total_test_cases=1,
+    )
+
+
+class TestEvaluatorContracts:
+    def test_coverage_catalog_keeps_version_and_quoted_evidence(self) -> None:
+        catalog = CoverageCatalog(
+            catalog_id="cat-doc-v1",
+            document_hash="a" * 64,
+            evaluator_version="coverage-v2:gemini-3.6-flash:medium",
+            status=CoverageCatalogStatus.MACHINE_FROZEN,
+            units=[
+                CoverageUnit(
+                    unit_id="CU-001",
+                    title="Reject expired token",
+                    description="The API rejects an expired token.",
+                    unit_type="business_rule",
+                    source_references=[
+                        SourceReference(
+                            chunk_id="chunk-001",
+                            page_number=2,
+                            section="Authentication",
+                            excerpt="Expired tokens must be rejected.",
+                        )
+                    ],
+                )
+            ],
+            created_at=datetime.now(UTC),
+        )
+
+        assert catalog.units[0].source_references[0].excerpt.startswith("Expired")
+
+    def test_evaluation_accepts_completed_and_failed_shapes(self) -> None:
+        now = datetime.now(UTC)
+        completed = CoverageEvaluation(
+            run_id="run-1",
+            catalog_id="cat-doc-v1",
+            status=CoverageEvaluationStatus.COMPLETED,
+            mappings=CoverageMappingBatch(mappings=[]),
+            score=_score(),
+            evaluated_at=now,
+        )
+        failed = CoverageEvaluation(
+            run_id="run-2",
+            catalog_id="cat-doc-v1",
+            status=CoverageEvaluationStatus.FAILED,
+            error="Provider unavailable.",
+            evaluated_at=now,
+        )
+
+        assert completed.score is not None
+        assert failed.error == "Provider unavailable."
+
+    def test_catalog_and_evaluation_enforce_status_fields(self) -> None:
+        now = datetime.now(UTC)
+        with pytest.raises(ValueError, match="approved_at"):
+            CoverageCatalog(
+                catalog_id="cat-doc-v1",
+                document_hash="a" * 64,
+                evaluator_version="coverage-v2",
+                status=CoverageCatalogStatus.APPROVED,
+                units=[_units(1).units[0]],
+                created_at=now,
+            )
+        with pytest.raises(ValueError, match="completed evaluations"):
+            CoverageEvaluation(
+                run_id="run-1",
+                catalog_id="cat-doc-v1",
+                status=CoverageEvaluationStatus.COMPLETED,
+                mappings=CoverageMappingBatch(mappings=[]),
+                score=_score(),
+                error="unexpected",
+                evaluated_at=now,
+            )
+
+    def test_human_rating_identifies_rater_dimension_and_round(self) -> None:
+        rating = HumanRating(
+            rating_id="rating-1",
+            run_id="run-1",
+            rater_id="rater-a",
+            dimension=HumanRatingDimension.EXECUTABILITY,
+            score=4,
+            reason="Steps and outcomes are directly usable.",
+            rubric_version="quality-rubric-v1",
+            round=1,
+            created_at=datetime.now(UTC),
+        )
+
+        assert rating.dimension is HumanRatingDimension.EXECUTABILITY
+
+    def test_human_adjudication_records_final_dimension_score(self) -> None:
+        adjudication = HumanAdjudication(
+            adjudication_id="adj-1",
+            run_id="run-1",
+            dimension=HumanRatingDimension.COVERAGE,
+            score=3,
+            reason="The final rating resolves the evidence disagreement.",
+            rubric_version="quality-rubric-v1",
+            created_at=datetime.now(UTC),
+        )
+
+        assert adjudication.score == 3
 
 
 class TestComputeF1:
