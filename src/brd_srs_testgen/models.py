@@ -310,6 +310,7 @@ class RunResult(StrictModel):
     rtm: list[RTMRow] = Field(default_factory=list)
     metrics: RunMetrics | None = None
     coverage: CoverageScore | None = None
+    coverage_evaluation: CoverageEvaluation | None = None
 
     def download_bundle(self) -> dict[str, JsonValue]:
         bundle = self.bundle
@@ -332,6 +333,11 @@ class RunResult(StrictModel):
             "rtm": [item.model_dump(mode="json") for item in self.rtm],
             "metrics": self.metrics.model_dump(mode="json") if self.metrics else None,
             "coverage": self.coverage.model_dump(mode="json") if self.coverage else None,
+            "coverage_evaluation": (
+                self.coverage_evaluation.model_dump(mode="json")
+                if self.coverage_evaluation
+                else None
+            ),
         }
 
 

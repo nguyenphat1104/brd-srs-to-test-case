@@ -13,9 +13,15 @@ from .evaluation import COVERAGE_RATING_RUBRIC_VERSION, coverage_rating
 from .models import (
     AgentSetup,
     ArtifactBundle,
+    CoverageCatalog,
+    CoverageCatalogStatus,
+    CoverageEvaluation,
+    CoverageMappingBatch,
     CoverageScore,
     DocumentChunk,
+    HumanAdjudication,
     HumanCoverageRating,
+    HumanRating,
     Requirement,
     RunHistoryItem,
     RunManifest,
@@ -96,6 +102,144 @@ class RunRepository:
                 connection.execute(schema)
         except (OSError, psycopg.Error) as error:
             raise StorageError("Database initialization failed.") from error
+
+    def save_coverage_catalog(self, catalog: CoverageCatalog) -> CoverageCatalog:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    "INSERT INTO coverage_catalogs "
+                    "(catalog_id, document_hash, evaluator_version, status, units, "
+                    "created_at, approved_at) VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (document_hash, evaluator_version) DO NOTHING",
+                    (
+                        catalog.catalog_id,
+                        catalog.document_hash,
+                        catalog.evaluator_version,
+                        catalog.status.value,
+                        Jsonb(
+                            [unit.model_dump(mode="json") for unit in catalog.units]
+                        ),
+                        catalog.created_at,
+                        catalog.approved_at,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT catalog_id, document_hash, evaluator_version, status, "
+                    "units, created_at, approved_at FROM coverage_catalogs "
+                    "WHERE document_hash = %s AND evaluator_version = %s",
+                    (catalog.document_hash, catalog.evaluator_version),
+                ).fetchone()
+                stored = CoverageCatalog.model_validate(row)
+                immutable_fields = (
+                    "catalog_id",
+                    "document_hash",
+                    "evaluator_version",
+                    "units",
+                    "created_at",
+                )
+                if any(
+                    getattr(stored, field) != getattr(catalog, field)
+                    for field in immutable_fields
+                ):
+                    raise ImmutableRunError(
+                        "Coverage catalog already exists with a different snapshot."
+                    )
+                return stored
+        except psycopg.errors.UniqueViolation as error:
+            raise ImmutableRunError("Coverage catalog identifier already exists.") from error
+        except StorageError:
+            raise
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Coverage catalog could not be saved.") from error
+
+    def load_coverage_catalog(
+        self, document_hash: str, evaluator_version: str
+    ) -> CoverageCatalog | None:
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT catalog_id, document_hash, evaluator_version, status, "
+                    "units, created_at, approved_at FROM coverage_catalogs "
+                    "WHERE document_hash = %s AND evaluator_version = %s",
+                    (document_hash, evaluator_version),
+                ).fetchone()
+            return CoverageCatalog.model_validate(row) if row else None
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Coverage catalog could not be loaded.") from error
+
+    def load_coverage_catalog_by_id(
+        self, catalog_id: str
+    ) -> CoverageCatalog | None:
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT catalog_id, document_hash, evaluator_version, status, "
+                    "units, created_at, approved_at FROM coverage_catalogs "
+                    "WHERE catalog_id = %s",
+                    (catalog_id,),
+                ).fetchone()
+            return CoverageCatalog.model_validate(row) if row else None
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Coverage catalog could not be loaded.") from error
+
+    def approve_coverage_catalog(
+        self, catalog_id: str, *, approved_at: datetime | None = None
+    ) -> CoverageCatalog:
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "UPDATE coverage_catalogs SET status = %s, approved_at = %s "
+                    "WHERE catalog_id = %s AND status = %s "
+                    "RETURNING catalog_id, document_hash, evaluator_version, status, "
+                    "units, created_at, approved_at",
+                    (
+                        CoverageCatalogStatus.APPROVED.value,
+                        approved_at or datetime.now(UTC),
+                        catalog_id,
+                        CoverageCatalogStatus.MACHINE_FROZEN.value,
+                    ),
+                ).fetchone()
+                if row is None:
+                    row = connection.execute(
+                        "SELECT catalog_id, document_hash, evaluator_version, status, "
+                        "units, created_at, approved_at FROM coverage_catalogs "
+                        "WHERE catalog_id = %s",
+                        (catalog_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise StorageError("Coverage catalog does not exist.")
+                    if row["status"] != CoverageCatalogStatus.APPROVED.value:
+                        raise ImmutableRunError("Coverage catalog cannot be approved.")
+                return CoverageCatalog.model_validate(row)
+        except StorageError:
+            raise
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Coverage catalog could not be approved.") from error
+
+    def save_coverage_evaluation(
+        self, evaluation: CoverageEvaluation
+    ) -> CoverageEvaluation:
+        try:
+            with self._connect() as connection:
+                self._insert_coverage_evaluation(connection, evaluation)
+                if evaluation.score is not None:
+                    self._insert_coverage(
+                        connection, evaluation.run_id, evaluation.score
+                    )
+            return evaluation
+        except psycopg.errors.UniqueViolation as error:
+            raise ImmutableRunError("Coverage evaluation already exists.") from error
+        except StorageError:
+            raise
+        except psycopg.Error as error:
+            raise StorageError("Coverage evaluation could not be saved.") from error
+
+    def load_coverage_evaluation(self, run_id: str) -> CoverageEvaluation | None:
+        try:
+            with self._connect() as connection:
+                return self._load_coverage_evaluation(connection, run_id)
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Coverage evaluation could not be loaded.") from error
 
     def load_agent_setups(self) -> dict[str, AgentSetup]:
         try:
@@ -264,6 +408,17 @@ class RunRepository:
         manifest = result.manifest
         if manifest.status is RunStatus.RUNNING:
             raise ImmutableRunError("Finalization requires a terminal run.")
+        evaluation = result.coverage_evaluation
+        if evaluation is not None and (
+            evaluation.run_id != manifest.run_id or evaluation.score != result.coverage
+        ):
+            raise StorageError("Coverage evaluation does not match the run result.")
+        if (
+            evaluation is None
+            and result.coverage is not None
+            and result.coverage.catalog_id != "legacy-unversioned"
+        ):
+            raise StorageError("Versioned coverage requires evaluation evidence.")
         try:
             with self._connect() as connection:
                 persisted = _manifest(
@@ -296,6 +451,8 @@ class RunRepository:
                     )
                 if result.metrics is not None:
                     self._insert_metrics(connection, manifest.run_id, result.metrics)
+                if evaluation is not None:
+                    self._insert_coverage_evaluation(connection, evaluation)
                 if result.coverage is not None:
                     self._insert_coverage(connection, manifest.run_id, result.coverage)
                 self._append_event(
@@ -613,17 +770,40 @@ class RunRepository:
         )
 
     @staticmethod
+    def _insert_coverage_evaluation(
+        connection: psycopg.Connection, evaluation: CoverageEvaluation
+    ) -> None:
+        connection.execute(
+            "INSERT INTO coverage_evaluations "
+            "(run_id, catalog_id, status, mappings, error, evaluated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (
+                evaluation.run_id,
+                evaluation.catalog_id,
+                evaluation.status.value,
+                Jsonb(evaluation.mappings.model_dump(mode="json"))
+                if evaluation.mappings is not None
+                else None,
+                evaluation.error,
+                evaluation.evaluated_at,
+            ),
+        )
+
+    @staticmethod
     def _insert_coverage(
         connection: psycopg.Connection, run_id: str, coverage: CoverageScore
     ) -> None:
         connection.execute(
             "INSERT INTO coverage_scores "
-            "(run_id, precision, recall, f1, true_positive_count, "
+            "(run_id, catalog_id, precision, recall, f1, true_positive_count, "
             "false_positive_count, false_negative_count, total_coverage_units, "
             "total_test_cases, uncovered_unit_ids, unmapped_test_case_ids) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 run_id,
+                None
+                if coverage.catalog_id == "legacy-unversioned"
+                else coverage.catalog_id,
                 coverage.precision,
                 coverage.recall,
                 coverage.f1,
@@ -726,6 +906,94 @@ class RunRepository:
         except (psycopg.Error, ValidationError) as error:
             raise StorageError("Human coverage ratings could not be loaded.") from error
 
+    def save_human_rating(self, rating: HumanRating) -> HumanRating:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    "INSERT INTO human_ratings "
+                    "(rating_id, run_id, rater_id, dimension, score, reason, "
+                    "rubric_version, round, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        rating.rating_id,
+                        rating.run_id,
+                        rating.rater_id,
+                        rating.dimension.value,
+                        rating.score,
+                        rating.reason,
+                        rating.rubric_version,
+                        rating.round,
+                        rating.created_at,
+                    ),
+                )
+            return rating
+        except psycopg.errors.UniqueViolation as error:
+            raise ImmutableRunError("Human rating already exists.") from error
+        except psycopg.Error as error:
+            raise StorageError("Human rating could not be saved.") from error
+
+    def list_human_ratings(self, run_id: str | None = None) -> list[HumanRating]:
+        try:
+            query = (
+                "SELECT rating_id, run_id, rater_id, dimension, score, reason, "
+                "rubric_version, round, created_at FROM human_ratings"
+            )
+            parameters: tuple[str, ...] = ()
+            if run_id is not None:
+                query += " WHERE run_id = %s"
+                parameters = (run_id,)
+            query += " ORDER BY created_at, rating_id"
+            with self._connect() as connection:
+                rows = connection.execute(query, parameters).fetchall()
+            return [HumanRating.model_validate(row) for row in rows]
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Human ratings could not be loaded.") from error
+
+    def save_human_adjudication(
+        self, adjudication: HumanAdjudication
+    ) -> HumanAdjudication:
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    "INSERT INTO human_adjudications "
+                    "(adjudication_id, run_id, dimension, score, reason, "
+                    "rubric_version, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        adjudication.adjudication_id,
+                        adjudication.run_id,
+                        adjudication.dimension.value,
+                        adjudication.score,
+                        adjudication.reason,
+                        adjudication.rubric_version,
+                        adjudication.created_at,
+                    ),
+                )
+            return adjudication
+        except psycopg.errors.UniqueViolation as error:
+            raise ImmutableRunError("Human adjudication already exists.") from error
+        except psycopg.Error as error:
+            raise StorageError("Human adjudication could not be saved.") from error
+
+    def list_human_adjudications(
+        self, run_id: str | None = None
+    ) -> list[HumanAdjudication]:
+        try:
+            query = (
+                "SELECT adjudication_id, run_id, dimension, score, reason, "
+                "rubric_version, created_at FROM human_adjudications"
+            )
+            parameters: tuple[str, ...] = ()
+            if run_id is not None:
+                query += " WHERE run_id = %s"
+                parameters = (run_id,)
+            query += " ORDER BY created_at, adjudication_id"
+            with self._connect() as connection:
+                rows = connection.execute(query, parameters).fetchall()
+            return [HumanAdjudication.model_validate(row) for row in rows]
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Human adjudications could not be loaded.") from error
+
     def load_run(self, run_id: str) -> RunResult:
         try:
             with self._connect() as connection:
@@ -742,7 +1010,14 @@ class RunRepository:
                 bundle = self._load_bundle(connection, run_id)
                 validation = self._load_validation(connection, run_id)
                 metrics = self._load_metrics(connection, run_id)
-                coverage = self._load_coverage(connection, run_id)
+                coverage_evaluation = self._load_coverage_evaluation(
+                    connection, run_id
+                )
+                coverage = (
+                    coverage_evaluation.score
+                    if coverage_evaluation is not None
+                    else self._load_coverage(connection, run_id)
+                )
                 return RunResult(
                     manifest=manifest,
                     bundle=bundle,
@@ -750,6 +1025,7 @@ class RunRepository:
                     rtm=build_rtm(bundle) if bundle is not None else [],
                     metrics=metrics,
                     coverage=coverage,
+                    coverage_evaluation=coverage_evaluation,
                 )
         except StorageError:
             raise
@@ -799,11 +1075,36 @@ class RunRepository:
         )
 
     @staticmethod
+    def _load_coverage_evaluation(
+        connection: psycopg.Connection, run_id: str
+    ) -> CoverageEvaluation | None:
+        row = connection.execute(
+            "SELECT run_id, catalog_id, status, mappings, error, evaluated_at "
+            "FROM coverage_evaluations WHERE run_id = %s",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return CoverageEvaluation(
+            run_id=row["run_id"],
+            catalog_id=row["catalog_id"],
+            status=row["status"],
+            mappings=(
+                CoverageMappingBatch.model_validate(row["mappings"])
+                if row["mappings"] is not None
+                else None
+            ),
+            score=RunRepository._load_coverage(connection, run_id),
+            error=row["error"],
+            evaluated_at=row["evaluated_at"],
+        )
+
+    @staticmethod
     def _load_coverage(
         connection: psycopg.Connection, run_id: str
     ) -> CoverageScore | None:
         row = connection.execute(
-            "SELECT precision, recall, f1, true_positive_count, "
+            "SELECT catalog_id, precision, recall, f1, true_positive_count, "
             "false_positive_count, false_negative_count, total_coverage_units, "
             "total_test_cases, uncovered_unit_ids, unmapped_test_case_ids "
             "FROM coverage_scores WHERE run_id = %s",
@@ -812,7 +1113,7 @@ class RunRepository:
         if row is None:
             return None
         return CoverageScore(
-            catalog_id="legacy-unversioned",
+            catalog_id=row["catalog_id"] or "legacy-unversioned",
             precision=row["precision"],
             recall=row["recall"],
             f1=row["f1"],

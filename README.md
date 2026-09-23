@@ -2,7 +2,7 @@
 
 Research core for generating traceable test cases from a BRD or SRS.
 
-[Operations guide](docs/research-core-operations.md) · [System and coverage guide](static/system-and-coverage.html)
+[Operations guide](docs/research-core-operations.md) · [Research methodology](docs/research-methodology.md) · [System and coverage guide](static/system-and-coverage.html)
 
 ## Research core quick start
 
@@ -17,6 +17,18 @@ env PYTHONPATH=src .venv/bin/python -m streamlit run app.py
 ```
 
 The home page lists PostgreSQL-backed runs newest first. Choose **Create new run**, select a run type, configure its agents, then upload one PDF. The UI offers Gemini and a local llama.cpp backend with provider-aware model dropdowns. Single-prompt runs default to Gemini 3.5 Flash, staged runs default to Gemini 2.5 Flash, and multi-agent runs default to llama.cpp using the first model reported by its API. Provider credentials and base URLs come from `.env`; users adjust only the provider, model, prompts, and token ceiling. Every run stores an immutable settings snapshot without connection details.
+
+## Reproducible coverage evaluation
+
+For an official comparison, extract one versioned coverage catalog per source
+document, inspect its quoted evidence, approve it, and reuse that same catalog
+for every run type. Each run persists its test-case mappings and linked score;
+an evaluator failure is stored and excluded from score comparisons rather than
+treated as F1 zero. Two blinded raters score coverage, groundedness,
+executability, and redundancy control before separate adjudication. The
+operational reliability gate is quadratic-weighted Cohen's kappa ≥ 0.70 in
+every dimension. See the [Vietnamese research methodology](docs/research-methodology.md)
+for metric definitions, limitations, and public research sources.
 
 ## Existing prototypes
 

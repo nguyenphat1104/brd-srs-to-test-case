@@ -3,20 +3,32 @@ from __future__ import annotations
 import html
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import streamlit as st
 import streamlit.components.v1 as components
-from brd_srs_testgen.evaluation import quadratic_weighted_kappa
+from brd_srs_testgen.evaluation import (
+    QUALITY_RUBRIC_VERSION,
+    agreement_gate,
+    summarize_human_agreement,
+)
 from brd_srs_testgen.models import (
     AgentSetup,
     ActivityEvent,
     ArtifactBundle,
+    CoverageCatalogStatus,
+    CoverageEvaluation,
+    CoverageEvaluationStatus,
     CoverageScore,
     CoverageUnitBatch,
     FailureCategory,
     GeneratedCases,
+    HumanAdjudication,
+    HumanRating,
+    HumanRatingDimension,
     RequirementBatch,
     RunHistoryItem,
     RunMetrics,
@@ -48,11 +60,23 @@ STAGED_DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_TOKEN_CEILING = 200_000
 RUNS_PER_PAGE = 10
 GEMINI_THINKING_LEVELS = ("minimal", "low", "medium", "high")
-COVERAGE_RATING_LABELS = {
-    1: "Poor — less than 50% coverage",
-    2: "Major gaps — 50–74% coverage",
-    3: "Minor gaps — 75–89% coverage",
-    4: "Strong — 90–100% coverage",
+QUALITY_DIMENSION_LABELS = {
+    HumanRatingDimension.COVERAGE: "Coverage",
+    HumanRatingDimension.GROUNDEDNESS: "Groundedness",
+    HumanRatingDimension.EXECUTABILITY: "Executability",
+    HumanRatingDimension.REDUNDANCY_CONTROL: "Redundancy control",
+}
+QUALITY_DIMENSION_HELP = {
+    HumanRatingDimension.COVERAGE: "Completeness of source-backed testable behavior.",
+    HumanRatingDimension.GROUNDEDNESS: "Claims and steps remain supported by the BRD/SRS.",
+    HumanRatingDimension.EXECUTABILITY: "A tester can perform the steps and observe the outcome.",
+    HumanRatingDimension.REDUNDANCY_CONTROL: "Cases add distinct value without avoidable duplication.",
+}
+QUALITY_SCORE_LABELS = {
+    1: "Major deficiencies",
+    2: "Material gaps",
+    3: "Minor gaps",
+    4: "Strong",
 }
 PROVIDER_LABELS = {
     "gemini": "Gemini",
@@ -1476,7 +1500,11 @@ def _render_scenarios(
 
 
 def _render_coverage(
-    coverage: CoverageScore | None, *, key_prefix: str, run_id: str
+    coverage: CoverageScore | None,
+    evaluation: CoverageEvaluation | None,
+    *,
+    key_prefix: str,
+    run_id: str,
 ) -> None:
     st.markdown("### Coverage analysis (F1)")
     columns = st.columns(4)
@@ -1487,7 +1515,19 @@ def _render_coverage(
             strict=True,
         ):
             column.metric(label, "—")
-        st.info("Coverage was not calculated because this run did not finish judge analysis.")
+        if (
+            evaluation is not None
+            and evaluation.status is CoverageEvaluationStatus.FAILED
+        ):
+            st.error(
+                f"Coverage evaluator failed: {evaluation.error} "
+                "No F1 score was assigned."
+            )
+        else:
+            st.info(
+                "Coverage was not calculated because this run did not finish "
+                "judge analysis."
+            )
         return
     columns[0].metric("F1 Score", f"{coverage.f1:.2f}")
     columns[1].metric("Precision", f"{coverage.precision:.2f}")
@@ -1556,106 +1596,327 @@ def _render_coverage(
             )
 
 
-def _render_agreement(repository: RunRepository, *, key_prefix: str) -> None:
+def _render_coverage_evidence(
+    result: RunResult,
+    repository: RunRepository,
+    *,
+    key_prefix: str,
+) -> None:
+    evaluation = result.coverage_evaluation
+    if evaluation is None:
+        return
+    st.markdown("### Coverage catalog and mapping evidence")
     try:
-        ratings = repository.list_human_coverage_ratings()
+        catalog = repository.load_coverage_catalog_by_id(evaluation.catalog_id)
+    except StorageError:
+        st.error("Coverage evidence could not be loaded. Check the database and retry.")
+        return
+    if catalog is None or catalog.catalog_id != evaluation.catalog_id:
+        st.warning("The immutable coverage catalog for this evaluation is unavailable.")
+        return
+
+    st.caption(
+        f"Catalog `{catalog.catalog_id}` · "
+        f"{catalog.status.value.replace('_', ' ').title()} · "
+        f"Evaluator `{catalog.evaluator_version}`"
+    )
+    if catalog.status is CoverageCatalogStatus.MACHINE_FROZEN:
+        if st.button(
+            "Approve coverage catalog",
+            key=f"{key_prefix}-{result.manifest.run_id}-approve-catalog",
+        ):
+            try:
+                repository.approve_coverage_catalog(catalog.catalog_id)
+            except StorageError:
+                st.error("The coverage catalog could not be approved. Refresh and retry.")
+            else:
+                st.rerun()
+
+    st.dataframe(
+        [
+            {
+                "Coverage unit": unit.unit_id,
+                "Type": unit.unit_type.replace("_", " ").title(),
+                "Title": unit.title,
+                "Description": unit.description,
+            }
+            for unit in catalog.units
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+    with st.expander(
+        "Quoted catalog evidence",
+        key=f"{key_prefix}-{result.manifest.run_id}-catalog-evidence",
+    ):
+        for unit in catalog.units:
+            st.markdown(f"**{unit.unit_id} · {unit.title}**")
+            for source in unit.source_references:
+                st.markdown(
+                    f"> {source.excerpt}\n\n"
+                    f"Page {source.page_number} · {source.section or 'Untitled section'} · "
+                    f"`{source.chunk_id}`"
+                )
+
+    if evaluation.mappings is not None:
+        st.markdown("**Run-specific test-case mappings**")
+        st.dataframe(
+            [
+                {
+                    "Test case": mapping.test_case_id,
+                    "Covered units": ", ".join(mapping.covered_unit_ids) or "—",
+                }
+                for mapping in evaluation.mappings.mappings
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    elif evaluation.status is CoverageEvaluationStatus.FAILED:
+        st.error(f"Mapping failed: {evaluation.error}")
+
+
+def _render_human_agreement(repository: RunRepository) -> None:
+    try:
+        ratings = repository.list_human_ratings()
     except StorageError:
         st.error("Agreement results could not be loaded. Check the database and retry.")
         return
 
-    pairs = [(rating.human_score, rating.judge_score) for rating in ratings]
-    exact = sum(human == judge for human, judge in pairs) / len(pairs)
-    kappa = quadratic_weighted_kappa(pairs) if len(pairs) >= 2 else None
-    st.markdown("### Human–judge agreement")
-    columns = st.columns(3)
-    columns[0].metric("Rated runs", len(pairs))
-    columns[1].metric("Exact agreement", f"{exact:.0%}")
-    columns[2].metric(
-        "Quadratic weighted κ", "—" if kappa is None else f"{kappa:.2f}"
+    summary = summarize_human_agreement(ratings)
+    st.markdown("### Inter-rater agreement")
+    st.caption(
+        "Exact, adjacent, and quadratic weighted κ are reported per dimension. "
+        "The operational gate is κ ≥ 0.70 for every dimension."
     )
-    if len(pairs) < 2:
-        st.info("Rate at least two runs to calculate Cohen's kappa.")
-    elif kappa is None:
-        st.info("Kappa needs variation in the human or judge ratings.")
-    st.caption("Treat kappa as preliminary until at least 30–50 runs are rated.")
-
-    with st.expander(
-        "Agreement confusion matrix", key=f"{key_prefix}-agreement-matrix"
-    ):
-        st.table(
-            [
-                {
-                    "Human \\ Judge": human,
-                    **{
-                        str(judge): pairs.count((human, judge))
-                        for judge in range(1, 5)
-                    },
-                }
-                for human in range(1, 5)
-            ]
+    st.dataframe(
+        [
+            {
+                "Dimension": QUALITY_DIMENSION_LABELS[dimension],
+                "Paired items": item.pair_count,
+                "Exact": "—" if item.exact_agreement is None else f"{item.exact_agreement:.0%}",
+                "Adjacent": "—" if item.adjacent_agreement is None else f"{item.adjacent_agreement:.0%}",
+                "Quadratic weighted κ": (
+                    "—"
+                    if item.quadratic_weighted_kappa is None
+                    else f"{item.quadratic_weighted_kappa:.2f}"
+                ),
+                "Data status": "Sufficient" if item.sufficient_data else "Insufficient",
+            }
+            for dimension, item in summary.items()
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+    kappas = {
+        dimension: item.quadratic_weighted_kappa if item.sufficient_data else None
+        for dimension, item in summary.items()
+    }
+    if agreement_gate(kappas):
+        st.success("Agreement gate passed for all four dimensions.")
+    else:
+        st.info(
+            "Agreement gate not yet passed. Collect at least two paired items per "
+            "dimension and adjudicate material disagreements."
         )
 
 
-def _render_human_coverage_rating(
+def _render_adjudication(
+    repository: RunRepository,
+    ratings: list[HumanRating],
+    *,
+    run_id: str,
+    key_prefix: str,
+) -> None:
+    if len({rating.rater_id for rating in ratings}) < 2:
+        return
+    try:
+        adjudications = repository.list_human_adjudications(run_id)
+    except StorageError:
+        st.error("Adjudications could not be loaded. Check the database and retry.")
+        return
+    completed = {item.dimension for item in adjudications}
+    disputed = {
+        dimension
+        for dimension in HumanRatingDimension
+        if len(
+            {
+                rating.score
+                for rating in ratings
+                if rating.dimension is dimension
+            }
+        )
+        > 1
+    }
+    available = [item for item in disputed if item not in completed]
+    if not available and not adjudications:
+        return
+    with st.expander("Adjudication", key=f"{key_prefix}-{run_id}-adjudication"):
+        st.caption(
+            "Adjudication is recorded separately from the two independent ratings."
+        )
+        if adjudications:
+            st.dataframe(
+                [
+                    {
+                        "Dimension": QUALITY_DIMENSION_LABELS[item.dimension],
+                        "Score": item.score,
+                        "Reason": item.reason,
+                    }
+                    for item in adjudications
+                ],
+                hide_index=True,
+                width="stretch",
+            )
+        if not available:
+            st.info("All dimensions have been adjudicated.")
+            return
+        dimension = st.selectbox(
+            "Dimension to adjudicate",
+            available,
+            format_func=lambda item: QUALITY_DIMENSION_LABELS[item],
+            key=f"{key_prefix}-{run_id}-adjudication-dimension",
+        )
+        score = st.selectbox(
+            "Adjudicated score",
+            tuple(QUALITY_SCORE_LABELS),
+            index=None,
+            format_func=lambda value: f"{value} — {QUALITY_SCORE_LABELS[value]}",
+            key=f"{key_prefix}-{run_id}-adjudication-score",
+        )
+        reason = st.text_area(
+            "Adjudication reason",
+            max_chars=2_000,
+            key=f"{key_prefix}-{run_id}-adjudication-reason",
+        )
+        if st.button(
+            "Save adjudication",
+            key=f"{key_prefix}-{run_id}-save-adjudication",
+        ):
+            if score is None or not reason.strip():
+                st.warning("Choose a score and document the adjudication reason.")
+                return
+            try:
+                repository.save_human_adjudication(
+                    HumanAdjudication(
+                        adjudication_id=f"adjudication-{uuid4().hex}",
+                        run_id=run_id,
+                        dimension=dimension,
+                        score=score,
+                        reason=reason.strip(),
+                        rubric_version=QUALITY_RUBRIC_VERSION,
+                        created_at=datetime.now(UTC),
+                    )
+                )
+            except StorageError:
+                st.error("The adjudication could not be saved. Refresh and retry.")
+            else:
+                st.rerun()
+
+
+def _render_human_ratings(
     repository: RunRepository,
     *,
     run_id: str,
     key_prefix: str,
-) -> bool:
+) -> None:
     st.markdown("### Independent human evaluation")
+    st.write(
+        "Review the BRD/SRS and generated cases independently. Do not use the judge "
+        "score while assigning the four ordinal ratings."
+    )
     try:
-        rating = repository.load_human_coverage_rating(run_id)
+        ratings = repository.list_human_ratings(run_id)
+        legacy = repository.load_human_coverage_rating(run_id)
     except StorageError:
-        st.error("The human rating could not be loaded. Check the database and retry.")
-        return False
+        st.error("Human ratings could not be loaded. Check the database and retry.")
+        return
 
-    if rating is None:
-        st.write(
-            "Compare the generated test cases with the original BRD/SRS, then rate "
-            "coverage from the source evidence."
+    if ratings:
+        st.dataframe(
+            [
+                {
+                    "Rater": item.rater_id,
+                    "Dimension": QUALITY_DIMENSION_LABELS[item.dimension],
+                    "Score": item.score,
+                    "Reason": item.reason or "—",
+                    "Round": item.round,
+                }
+                for item in ratings
+            ],
+            hide_index=True,
+            width="stretch",
         )
-        score = st.radio(
-            "Human coverage rating",
-            tuple(COVERAGE_RATING_LABELS),
-            index=None,
-            format_func=lambda value: f"{value} — {COVERAGE_RATING_LABELS[value]}",
-            key=f"{key_prefix}-{run_id}-human-coverage-score",
-        )
-        reason = st.text_area(
-            "Reason (optional)",
-            max_chars=2_000,
-            key=f"{key_prefix}-{run_id}-human-coverage-reason",
-        )
-        if st.button(
-            "Save independent rating",
-            key=f"{key_prefix}-{run_id}-save-human-coverage",
-            disabled=score is None,
+        st.caption("Saved ratings are append-only and cannot be edited.")
+
+    if legacy is not None:
+        with st.expander(
+            "Legacy coverage-only rating",
+            key=f"{key_prefix}-{run_id}-legacy-rating",
         ):
-            try:
-                repository.save_human_coverage_rating(run_id, score, reason)
-            except StorageError:
-                st.error("The human rating could not be saved. Refresh and retry.")
-            else:
-                st.rerun()
-        st.caption(
-            "The judge score is shown below for consistent run details. Base your "
-            "rating on the source document; it will not change future generations."
-        )
-        return False
+            st.write(
+                f"Human {legacy.human_score}/4 · Judge {legacy.judge_score}/4 · "
+                f"F1 {legacy.judge_f1:.2f}"
+            )
+            if legacy.reason:
+                st.caption(legacy.reason)
 
-    st.success(
-        f"Human rating saved: {rating.human_score} — "
-        f"{COVERAGE_RATING_LABELS[rating.human_score]}"
+    if len({item.rater_id for item in ratings}) < 2:
+        with st.form(f"{key_prefix}-{run_id}-rating-form"):
+            rater_id = st.text_input(
+                "Rater ID",
+                help="Use a stable pseudonymous identifier; do not enter a name.",
+            )
+            scores = {}
+            reasons = {}
+            for dimension in HumanRatingDimension:
+                label = QUALITY_DIMENSION_LABELS[dimension]
+                st.caption(QUALITY_DIMENSION_HELP[dimension])
+                scores[dimension] = st.selectbox(
+                    f"{label} score",
+                    tuple(QUALITY_SCORE_LABELS),
+                    index=None,
+                    format_func=lambda value: f"{value} — {QUALITY_SCORE_LABELS[value]}",
+                )
+                reasons[dimension] = st.text_input(
+                    f"{label} reason (optional)", max_chars=2_000
+                )
+            submitted = st.form_submit_button("Save blinded rating")
+        if submitted:
+            normalized_rater = rater_id.strip()
+            if not normalized_rater or any(score is None for score in scores.values()):
+                st.warning("Enter a rater ID and score all four dimensions.")
+            elif any(item.rater_id == normalized_rater for item in ratings):
+                st.warning("This rater already has an immutable rating for this run.")
+            else:
+                created_at = datetime.now(UTC)
+                try:
+                    for dimension in HumanRatingDimension:
+                        repository.save_human_rating(
+                            HumanRating(
+                                rating_id=f"rating-{uuid4().hex}",
+                                run_id=run_id,
+                                rater_id=normalized_rater,
+                                dimension=dimension,
+                                score=scores[dimension],
+                                reason=reasons[dimension].strip(),
+                                rubric_version=QUALITY_RUBRIC_VERSION,
+                                created_at=created_at,
+                            )
+                        )
+                except StorageError:
+                    st.error("The blinded rating could not be saved. Refresh and retry.")
+                else:
+                    st.rerun()
+    else:
+        st.info("Two independent raters have completed this run.")
+
+    _render_adjudication(
+        repository,
+        ratings,
+        run_id=run_id,
+        key_prefix=key_prefix,
     )
-    if rating.reason:
-        st.caption(f"Reason · {rating.reason}")
-    st.caption(
-        f"Judge rubric rating · {rating.judge_score} — "
-        f"{COVERAGE_RATING_LABELS[rating.judge_score]} (F1 {rating.judge_f1:.2f})"
-    )
-    st.caption("Saved for evaluation only; it does not change future generations.")
-    _render_agreement(repository, key_prefix=f"{key_prefix}-{run_id}")
-    return True
+    _render_human_agreement(repository)
 
 
 def _render_bundle(
@@ -1819,8 +2080,8 @@ def _render_result(
             )
 
     st.markdown("### Quality and traceability")
-    if result.coverage is not None:
-        _render_human_coverage_rating(
+    if manifest.status is RunStatus.COMPLETED and result.bundle is not None:
+        _render_human_ratings(
             repository,
             run_id=manifest.run_id,
             key_prefix=key_prefix,
@@ -1830,7 +2091,7 @@ def _render_result(
         st.caption(
             f"Latency {metrics.latency_seconds:.2f} s · {metrics.retries} retries"
         )
-    if result.coverage is not None:
+    if result.coverage is not None or result.coverage_evaluation is not None:
         agents = manifest.configuration.get("agents", {})
         judge = agents.get("judge", {}) if isinstance(agents, dict) else {}
         if isinstance(judge, dict):
@@ -1839,8 +2100,10 @@ def _render_result(
                 st.caption(
                     f"Independent judge · {_model_label(str(model))} · fixed"
                 )
+    _render_coverage_evidence(result, repository, key_prefix=key_prefix)
     _render_coverage(
         result.coverage,
+        result.coverage_evaluation,
         key_prefix=key_prefix,
         run_id=manifest.run_id,
     )

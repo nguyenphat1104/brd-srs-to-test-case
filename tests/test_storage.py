@@ -9,9 +9,19 @@ import pytest
 from brd_srs_testgen.models import (
     AgentSetup,
     ArtifactBundle,
+    CoverageCatalog,
+    CoverageCatalogStatus,
+    CoverageEvaluation,
+    CoverageEvaluationStatus,
+    CoverageMappingBatch,
+    CoverageMappingEntry,
     CoverageScore,
+    CoverageUnit,
     DocumentChunk,
     FailureCategory,
+    HumanAdjudication,
+    HumanRating,
+    HumanRatingDimension,
     RunManifest,
     RunResult,
     RunStatus,
@@ -81,6 +91,98 @@ def evidence_chunks() -> list[DocumentChunk]:
             content_hash="a0c949e7ef48bf263dfb2bdc23736541783096018c60449464f7496f2ae6a992",
         ),
     ]
+
+
+def coverage_catalog(
+    *,
+    catalog_id: str = "catalog-1",
+    evaluator_version: str = "coverage-v2:test",
+    title: str = "Authenticate registered users",
+) -> CoverageCatalog:
+    chunk = factory_chunk()
+    return CoverageCatalog(
+        catalog_id=catalog_id,
+        document_hash="a" * 64,
+        evaluator_version=evaluator_version,
+        status=CoverageCatalogStatus.MACHINE_FROZEN,
+        units=[
+            CoverageUnit(
+                unit_id="CU-001",
+                title=title,
+                description="Registered users can authenticate.",
+                unit_type="functional",
+                source_references=[
+                    SourceReference(
+                        chunk_id=chunk.chunk_id,
+                        page_number=chunk.page_number,
+                        section=chunk.section,
+                        excerpt=chunk.text,
+                    )
+                ],
+            )
+        ],
+        created_at=datetime(2026, 9, 23, tzinfo=UTC),
+    )
+
+
+def coverage_evaluation(
+    run_id: str,
+    *,
+    status: CoverageEvaluationStatus = CoverageEvaluationStatus.COMPLETED,
+) -> CoverageEvaluation:
+    if status is CoverageEvaluationStatus.FAILED:
+        return CoverageEvaluation(
+            run_id=run_id,
+            catalog_id="catalog-1",
+            status=status,
+            error="Judge service timed out.",
+            evaluated_at=datetime(2026, 9, 23, 1, tzinfo=UTC),
+        )
+    score = CoverageScore(
+        catalog_id="catalog-1",
+        precision=1.0,
+        recall=1.0,
+        f1=1.0,
+        true_positive_count=1,
+        false_positive_count=0,
+        false_negative_count=0,
+        total_coverage_units=1,
+        total_test_cases=1,
+    )
+    return CoverageEvaluation(
+        run_id=run_id,
+        catalog_id="catalog-1",
+        status=status,
+        mappings=CoverageMappingBatch(
+            mappings=[
+                CoverageMappingEntry(
+                    test_case_id="TC-001", covered_unit_ids=["CU-001"]
+                )
+            ]
+        ),
+        score=score,
+        evaluated_at=datetime(2026, 9, 23, 1, tzinfo=UTC),
+    )
+
+
+def human_rating(
+    run_id: str,
+    rater_id: str,
+    dimension: HumanRatingDimension,
+    score: int,
+    *,
+    rating_id: str | None = None,
+) -> HumanRating:
+    return HumanRating(
+        rating_id=rating_id or f"{run_id}-{rater_id}-{dimension.value}",
+        run_id=run_id,
+        rater_id=rater_id,
+        dimension=dimension,
+        score=score,
+        reason="Independent blind review.",
+        rubric_version="quality-rubric-v1",
+        created_at=datetime(2026, 9, 24, tzinfo=UTC),
+    )
 
 
 def rich_completed_run(run_id: str = "normalized") -> RunResult:
@@ -1115,6 +1217,165 @@ def test_list_runs_receives_metric_counts_after_finalization(
         history.scenario_count,
         history.test_case_count,
     ) == (2, 2, 2)
+
+
+def test_coverage_catalog_round_trips_by_document_and_evaluator(
+    repository: RunRepository,
+) -> None:
+    catalog = coverage_catalog()
+
+    saved = repository.save_coverage_catalog(catalog)
+
+    assert saved == catalog
+    assert (
+        repository.load_coverage_catalog(
+            catalog.document_hash, catalog.evaluator_version
+        )
+        == catalog
+    )
+    assert repository.load_coverage_catalog_by_id(catalog.catalog_id) == catalog
+
+
+def test_coverage_catalog_is_idempotent_and_immutable(
+    repository: RunRepository,
+) -> None:
+    catalog = coverage_catalog()
+    repository.save_coverage_catalog(catalog)
+
+    assert repository.save_coverage_catalog(catalog) == catalog
+    with pytest.raises(ImmutableRunError, match="(?i)catalog already exists"):
+        repository.save_coverage_catalog(
+            coverage_catalog(catalog_id="catalog-2", title="Changed snapshot")
+        )
+    assert (
+        repository.load_coverage_catalog(
+            catalog.document_hash, catalog.evaluator_version
+        )
+        == catalog
+    )
+
+
+def test_approve_coverage_catalog_changes_only_approval_fields(
+    repository: RunRepository,
+) -> None:
+    catalog = repository.save_coverage_catalog(coverage_catalog())
+    approved_at = datetime(2026, 9, 23, 2, tzinfo=UTC)
+
+    approved = repository.approve_coverage_catalog(
+        catalog.catalog_id, approved_at=approved_at
+    )
+
+    assert approved == catalog.model_copy(
+        update={
+            "status": CoverageCatalogStatus.APPROVED,
+            "approved_at": approved_at,
+        }
+    )
+
+
+def test_completed_coverage_evaluation_round_trips_mappings_and_score(
+    repository: RunRepository,
+) -> None:
+    result = completed_run("coverage-evaluation")
+    start_run(repository, result)
+    repository.save_coverage_catalog(coverage_catalog())
+    evaluation = coverage_evaluation(result.manifest.run_id)
+
+    repository.save_coverage_evaluation(evaluation)
+
+    assert repository.load_coverage_evaluation(result.manifest.run_id) == evaluation
+
+
+def test_failed_coverage_evaluation_round_trips_without_score(
+    repository: RunRepository,
+) -> None:
+    result = completed_run("failed-coverage-evaluation")
+    start_run(repository, result)
+    repository.save_coverage_catalog(coverage_catalog())
+    evaluation = coverage_evaluation(
+        result.manifest.run_id, status=CoverageEvaluationStatus.FAILED
+    )
+
+    repository.save_coverage_evaluation(evaluation)
+
+    assert repository.load_coverage_evaluation(result.manifest.run_id) == evaluation
+
+
+def test_finalization_persists_evaluation_before_linked_score(
+    repository: RunRepository,
+) -> None:
+    result = completed_run("finalized-coverage-evaluation")
+    repository.save_coverage_catalog(coverage_catalog())
+    evaluation = coverage_evaluation(result.manifest.run_id)
+    result = result.model_copy(
+        update={
+            "coverage_evaluation": evaluation,
+            "coverage": evaluation.score,
+        }
+    )
+    start_run(repository, result)
+
+    repository.finalize(result)
+
+    assert repository.load_run(result.manifest.run_id) == result
+
+
+def test_human_ratings_are_append_only_and_filter_by_run(
+    repository: RunRepository,
+) -> None:
+    result = completed_run("blind-ratings")
+    start_run(repository, result)
+    ratings = [
+        human_rating(
+            result.manifest.run_id,
+            rater_id,
+            HumanRatingDimension.COVERAGE,
+            score,
+        )
+        for rater_id, score in (("rater-a", 3), ("rater-b", 4))
+    ]
+
+    assert [repository.save_human_rating(item) for item in ratings] == ratings
+    assert repository.list_human_ratings(result.manifest.run_id) == ratings
+    assert repository.list_human_ratings() == ratings
+
+    with pytest.raises(ImmutableRunError, match="already exists"):
+        repository.save_human_rating(
+            human_rating(
+                result.manifest.run_id,
+                "rater-a",
+                HumanRatingDimension.COVERAGE,
+                1,
+                rating_id="replacement-rating",
+            )
+        )
+    assert repository.list_human_ratings(result.manifest.run_id) == ratings
+
+
+def test_human_adjudication_is_separate_and_append_only(
+    repository: RunRepository,
+) -> None:
+    result = completed_run("adjudication")
+    start_run(repository, result)
+    adjudication = HumanAdjudication(
+        adjudication_id="adjudication-1",
+        run_id=result.manifest.run_id,
+        dimension=HumanRatingDimension.EXECUTABILITY,
+        score=3,
+        reason="Resolved after comparing executable steps.",
+        rubric_version="quality-rubric-v1",
+        created_at=datetime(2026, 9, 24, 1, tzinfo=UTC),
+    )
+
+    assert repository.save_human_adjudication(adjudication) == adjudication
+    assert repository.list_human_adjudications(result.manifest.run_id) == [
+        adjudication
+    ]
+
+    with pytest.raises(ImmutableRunError, match="already exists"):
+        repository.save_human_adjudication(
+            adjudication.model_copy(update={"adjudication_id": "replacement"})
+        )
 
 
 def test_human_coverage_rating_is_immutable_and_round_trips(

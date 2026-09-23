@@ -35,7 +35,7 @@ Each accepted generation request creates a new immutable run. Correct a problem 
 
 ## Persisted data and security boundary
 
-The application stores normalized run data in local PostgreSQL: the source basename and document hash, extracted text chunks, run configuration and lifecycle events, metrics, validation, requirements, scenarios, test cases, citations, and traceability data.
+The application stores normalized run data in local PostgreSQL: the source basename and document hash, extracted text chunks, run configuration and lifecycle events, metrics, validation, requirements, scenarios, test cases, citations, traceability data, immutable coverage catalogs and mappings, evaluator failures, blinded ratings, and adjudications.
 
 Raw PDF bytes, provider credentials, and base URLs are never stored in PostgreSQL, downloads, URLs, or run snapshots. Provider, model, custom prompt, and token-ceiling values are stored with each run. Credentials and base URLs are loaded from deployment environment variables and never rendered in the UI. Known secrets and base URLs are redacted from displayed and persisted failures. Do not put secrets in the source PDF or in a local-provider URL.
 
@@ -112,4 +112,4 @@ The full gate requires all tests to pass and the PostgreSQL storage suite to run
 
 ## First-slice limits
 
-This slice does not support OCR/scanned PDFs, Excel, a 54-run scheduler or resume flow, provider statistics, or blinded human evaluation.
+This slice does not support OCR/scanned PDFs, Excel, a 54-run scheduler or resume flow, or provider statistics. It supports append-only blinded ratings and agreement reporting, but experiment scheduling and locked comparison execution remain separate work.

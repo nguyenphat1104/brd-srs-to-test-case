@@ -12,12 +12,15 @@ from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
 
 import google.genai as genai
+from pydantic import ValidationError
 
 from .documents import DocumentError, canonicalize_source_references, parse_pdf
-from .coverage import run_coverage_analysis
+from .coverage import evaluate_against_catalog, extract_coverage_catalog
 from .models import (
     AgentSetup,
     ArtifactBundle,
+    CoverageEvaluation,
+    CoverageEvaluationStatus,
     CoverageRepair,
     CoverageScore,
     DocumentChunk,
@@ -64,6 +67,12 @@ JUDGE_PROVIDER = "gemini"
 JUDGE_MODEL = "gemini-3.6-flash"
 JUDGE_THINKING_LEVEL = "medium"
 JUDGE_TOKEN_CEILING = 100_000
+COVERAGE_PROMPT_VERSION = "coverage-v2"
+COVERAGE_SCHEMA_VERSION = "coverage-catalog-v1"
+EVALUATOR_VERSION = (
+    f"{COVERAGE_PROMPT_VERSION}:{COVERAGE_SCHEMA_VERSION}:"
+    f"{JUDGE_PROVIDER}:{JUDGE_MODEL}:{JUDGE_THINKING_LEVEL}"
+)
 JUDGE_PURPOSE = (
     "Extract atomic source coverage units and strictly map generated test cases "
     "for precision, recall, and F1 scoring."
@@ -612,6 +621,7 @@ def run_generation(
     bundle: ArtifactBundle | None = None
     validation: ValidationReport | None = None
     coverage: CoverageScore | None = None
+    coverage_evaluation: CoverageEvaluation | None = None
     judge_charged_tokens = 0
     rtm: list[RTMRow] = []
     started = time.perf_counter()
@@ -706,6 +716,9 @@ def run_generation(
             _notify(progress, "Analyzing coverage")
             judge_ledger = BudgetLedger(JUDGE_TOKEN_CEILING)
             judge_context: PipelineContext | None = None
+            catalog = repository.load_coverage_catalog(
+                document_hash, EVALUATOR_VERSION
+            )
             try:
                 if judge_provider_factory is not None:
                     judge_provider = judge_provider_factory(judge_ledger)
@@ -733,9 +746,66 @@ def run_generation(
                     },
                     progress=progress,
                 )
-                coverage = run_coverage_analysis(judge_context, bundle, chunks)
-            except Exception:
-                pass  # Coverage analysis is informational; never fail the run.
+                if catalog is None:
+                    _notify(
+                        progress,
+                        "Judge: extracting coverage units from the source document.",
+                    )
+                    catalog = extract_coverage_catalog(
+                        judge_context,
+                        chunks,
+                        document_hash=document_hash,
+                        evaluator_version=EVALUATOR_VERSION,
+                        catalog_id=(
+                            f"{document_hash[:16]}-"
+                            f"{hashlib.sha256(EVALUATOR_VERSION.encode()).hexdigest()[:12]}"
+                        ),
+                        created_at=_now(),
+                    )
+                    catalog = repository.save_coverage_catalog(catalog)
+                    _notify(
+                        progress,
+                        f"Judge: extracted {len(catalog.units)} coverage units. "
+                        "Mapping test cases...",
+                    )
+                else:
+                    _notify(
+                        progress,
+                        f"Judge: reusing {len(catalog.units)} frozen coverage units. "
+                        "Mapping test cases...",
+                    )
+                coverage_evaluation = evaluate_against_catalog(
+                    judge_context,
+                    run_id=manifest.run_id,
+                    bundle=bundle,
+                    catalog=catalog,
+                    evaluated_at=_now(),
+                )
+                coverage = coverage_evaluation.score
+                if coverage is not None:
+                    _notify(
+                        progress,
+                        f"Judge: F1={coverage.f1:.2f} "
+                        f"(precision={coverage.precision:.2f}, "
+                        f"recall={coverage.recall:.2f}).",
+                    )
+            except (
+                ConfigurationError,
+                ProviderError,
+                PipelineOutputError,
+                ValueError,
+                ValidationError,
+            ) as error:
+                message = _safe_message(error, settings)
+                if catalog is not None:
+                    coverage_evaluation = CoverageEvaluation(
+                        run_id=manifest.run_id,
+                        catalog_id=catalog.catalog_id,
+                        status=CoverageEvaluationStatus.FAILED,
+                        error=message,
+                        evaluated_at=_now(),
+                    )
+                _notify(progress, f"Coverage evaluation failed: {message}")
             finally:
                 judge_charged_tokens = judge_ledger.used
                 if judge_context is not None:
@@ -800,6 +870,7 @@ def run_generation(
         rtm=rtm,
         metrics=metrics,
         coverage=coverage,
+        coverage_evaluation=coverage_evaluation,
     )
     repository.finalize(result)
     _notify(progress, manifest.status.value.title())

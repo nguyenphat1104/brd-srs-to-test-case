@@ -53,6 +53,11 @@ def repository(test_database_connection: psycopg.Connection) -> RunRepository:
 
     result = RunRepository(database_url)
     result.initialize()
-    test_database_connection.execute("TRUNCATE TABLE runs CASCADE")
+    test_database_connection.execute(
+        "TRUNCATE TABLE runs, coverage_catalogs, agent_setups CASCADE"
+    )
+    result.initialize()
     yield result
-    test_database_connection.execute("TRUNCATE TABLE runs CASCADE")
+    test_database_connection.execute(
+        "TRUNCATE TABLE runs, coverage_catalogs, agent_setups CASCADE"
+    )

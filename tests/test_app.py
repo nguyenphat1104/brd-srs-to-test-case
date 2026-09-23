@@ -12,9 +12,19 @@ from brd_srs_testgen.evaluation import (
 from brd_srs_testgen.models import (
     AgentSetup,
     ActivityEvent,
+    CoverageCatalog,
+    CoverageCatalogStatus,
+    CoverageEvaluation,
+    CoverageEvaluationStatus,
+    CoverageMappingBatch,
+    CoverageMappingEntry,
     CoverageScore,
+    CoverageUnit,
     FailureCategory,
+    HumanAdjudication,
     HumanCoverageRating,
+    HumanRating,
+    HumanRatingDimension,
     RequirementBatch,
     RunHistoryItem,
     RunManifest,
@@ -24,6 +34,7 @@ from brd_srs_testgen.models import (
     TestStep as ModelTestStep,
     default_agent_setups,
 )
+from brd_srs_testgen.runner import EVALUATOR_VERSION
 from brd_srs_testgen.storage import StorageError
 from tests.factories import completed_run
 
@@ -53,6 +64,9 @@ class FakeRepository:
         list_error: StorageError | None = None,
         load_error: StorageError | None = None,
         ratings: dict[str, HumanCoverageRating] | None = None,
+        catalogs: dict[tuple[str, str], CoverageCatalog] | None = None,
+        human_ratings: list[HumanRating] | None = None,
+        adjudications: list[HumanAdjudication] | None = None,
     ) -> None:
         self.runs = runs or []
         self.run_batches = run_batches
@@ -61,6 +75,9 @@ class FakeRepository:
         self.list_error = list_error
         self.load_error = load_error
         self.ratings = ratings or {}
+        self.catalogs = catalogs or {}
+        self.human_ratings = human_ratings or []
+        self.adjudications = adjudications or []
         self.initialize_calls = 0
         self.list_calls = 0
         self.load_calls: list[str] = []
@@ -118,6 +135,84 @@ class FakeRepository:
 
     def list_human_coverage_ratings(self) -> list[HumanCoverageRating]:
         return list(self.ratings.values())
+
+    def load_coverage_catalog(
+        self, document_hash: str, evaluator_version: str
+    ) -> CoverageCatalog | None:
+        return self.catalogs.get((document_hash, evaluator_version))
+
+    def load_coverage_catalog_by_id(
+        self, catalog_id: str
+    ) -> CoverageCatalog | None:
+        return next(
+            (
+                catalog
+                for catalog in self.catalogs.values()
+                if catalog.catalog_id == catalog_id
+            ),
+            None,
+        )
+
+    def approve_coverage_catalog(self, catalog_id: str, *, approved_at=None):
+        for key, catalog in self.catalogs.items():
+            if catalog.catalog_id == catalog_id:
+                approved = catalog.model_copy(
+                    update={
+                        "status": CoverageCatalogStatus.APPROVED,
+                        "approved_at": approved_at or datetime.now(UTC),
+                    }
+                )
+                self.catalogs[key] = approved
+                return approved
+        raise StorageError("Coverage catalog does not exist.")
+
+    def save_human_rating(self, rating: HumanRating) -> HumanRating:
+        if any(
+            (
+                item.run_id,
+                item.rater_id,
+                item.dimension,
+                item.round,
+            )
+            == (
+                rating.run_id,
+                rating.rater_id,
+                rating.dimension,
+                rating.round,
+            )
+            for item in self.human_ratings
+        ):
+            raise StorageError("Human rating already exists.")
+        self.human_ratings.append(rating)
+        return rating
+
+    def list_human_ratings(self, run_id: str | None = None) -> list[HumanRating]:
+        return [
+            rating
+            for rating in self.human_ratings
+            if run_id is None or rating.run_id == run_id
+        ]
+
+    def save_human_adjudication(
+        self, adjudication: HumanAdjudication
+    ) -> HumanAdjudication:
+        if any(
+            item.run_id == adjudication.run_id
+            and item.dimension is adjudication.dimension
+            for item in self.adjudications
+        ):
+            raise StorageError("Human adjudication already exists.")
+        self.adjudications.append(adjudication)
+        return adjudication
+
+    def list_human_adjudications(
+        self, run_id: str | None = None
+    ) -> list[HumanAdjudication]:
+        return [
+            item
+            for item in self.adjudications
+            if run_id is None or item.run_id == run_id
+        ]
 
 
 def _app_test(repository: FakeRepository | None = None) -> AppTest:
@@ -270,6 +365,86 @@ def _detailed_run() -> RunResult:
                 }
             )
         }
+    )
+
+
+def _versioned_coverage_result(
+    *, failed: bool = False
+) -> tuple[RunResult, CoverageCatalog]:
+    result = _detailed_run()
+    source = result.bundle.requirements[0].source_references[0]
+    catalog = CoverageCatalog(
+        catalog_id="catalog-audit-1",
+        document_hash=result.manifest.document_hash,
+        evaluator_version=EVALUATOR_VERSION,
+        status=CoverageCatalogStatus.MACHINE_FROZEN,
+        units=[
+            CoverageUnit(
+                unit_id="CU-001",
+                title="Authenticate registered users",
+                description="Registered users can authenticate.",
+                unit_type="functional",
+                source_references=[source],
+            )
+        ],
+        created_at=datetime(2026, 9, 24, tzinfo=UTC),
+    )
+    if failed:
+        evaluation = CoverageEvaluation(
+            run_id=result.manifest.run_id,
+            catalog_id=catalog.catalog_id,
+            status=CoverageEvaluationStatus.FAILED,
+            error="Judge mapping timed out.",
+            evaluated_at=datetime(2026, 9, 24, 1, tzinfo=UTC),
+        )
+        return result.model_copy(
+            update={"coverage": None, "coverage_evaluation": evaluation}
+        ), catalog
+    score = CoverageScore(
+        catalog_id=catalog.catalog_id,
+        precision=1,
+        recall=1,
+        f1=1,
+        true_positive_count=1,
+        false_positive_count=0,
+        false_negative_count=0,
+        total_coverage_units=1,
+        total_test_cases=1,
+    )
+    evaluation = CoverageEvaluation(
+        run_id=result.manifest.run_id,
+        catalog_id=catalog.catalog_id,
+        status=CoverageEvaluationStatus.COMPLETED,
+        mappings=CoverageMappingBatch(
+            mappings=[
+                CoverageMappingEntry(
+                    test_case_id="TC-001", covered_unit_ids=["CU-001"]
+                )
+            ]
+        ),
+        score=score,
+        evaluated_at=datetime(2026, 9, 24, 1, tzinfo=UTC),
+    )
+    return result.model_copy(
+        update={"coverage": score, "coverage_evaluation": evaluation}
+    ), catalog
+
+
+def _human_rating(
+    result: RunResult,
+    rater_id: str,
+    dimension: HumanRatingDimension,
+    score: int,
+) -> HumanRating:
+    return HumanRating(
+        rating_id=f"{result.manifest.run_id}-{rater_id}-{dimension.value}",
+        run_id=result.manifest.run_id,
+        rater_id=rater_id,
+        dimension=dimension,
+        score=score,
+        reason="Blind review.",
+        rubric_version="quality-rubric-v1",
+        created_at=datetime(2026, 9, 24, tzinfo=UTC),
     )
 
 
@@ -743,17 +918,132 @@ def test_completed_detail_renders_coverage_charts() -> None:
     assert "### Coverage analysis (F1)" in [item.value for item in at.markdown]
     assert _element(at.metric, "F1 Score").value == "0.00"
     assert "Citation coverage" in _rendered_text(at)
-    _element(at.radio, "Human coverage rating").set_value(1)
-    at.run()
-    _element(at.button, "Save independent rating").click()
+    assert _element(at.text_input, "Rater ID")
+    assert "### Inter-rater agreement" in [item.value for item in at.markdown]
+
+
+def test_versioned_coverage_renders_catalog_evidence_and_mappings() -> None:
+    result, catalog = _versioned_coverage_result()
+    repository = FakeRepository(
+        results={result.manifest.run_id: result},
+        catalogs={(catalog.document_hash, catalog.evaluator_version): catalog},
+    )
+    at = _app_test(repository)
+    _show_detail(at, result)
+
     at.run()
 
-    assert repository.ratings[result.manifest.run_id].human_score == 1
-    assert repository.ratings[result.manifest.run_id].judge_score == 1
-    assert "### Coverage analysis (F1)" in [item.value for item in at.markdown]
-    assert _element(at.metric, "Rated runs").value == "1"
-    assert _element(at.metric, "Exact agreement").value == "100%"
-    assert _element(at.metric, "Quadratic weighted κ").value == "—"
+    text = _rendered_text(at)
+    assert "### Coverage catalog and mapping evidence" in [
+        item.value for item in at.markdown
+    ]
+    assert catalog.catalog_id in text
+    assert "Machine Frozen" in text
+    assert "The system shall authenticate registered users." in text
+    tables = "\n".join(str(frame.value) for frame in at.dataframe)
+    assert "CU-001" in tables
+    assert "TC-001" in tables
+    _element(at.button, "Approve coverage catalog").click()
+    at.run()
+
+    assert repository.catalogs[
+        (catalog.document_hash, catalog.evaluator_version)
+    ].status is CoverageCatalogStatus.APPROVED
+    assert not any(
+        button.label == "Approve coverage catalog" for button in at.button
+    )
+
+
+def test_evaluator_failure_is_shown_without_a_zero_f1() -> None:
+    result, catalog = _versioned_coverage_result(failed=True)
+    repository = FakeRepository(
+        results={result.manifest.run_id: result},
+        catalogs={(catalog.document_hash, catalog.evaluator_version): catalog},
+    )
+    at = _app_test(repository)
+    _show_detail(at, result)
+
+    at.run()
+
+    text = _rendered_text(at)
+    assert _element(at.metric, "F1 Score").value == "—"
+    assert "Judge mapping timed out." in text
+    assert "No F1 score was assigned" in text
+    assert "F1 Score</div><div>0.00" not in text
+
+
+def test_blinded_rating_form_requires_identity_and_all_dimensions() -> None:
+    result, catalog = _versioned_coverage_result()
+    repository = FakeRepository(
+        results={result.manifest.run_id: result},
+        catalogs={(catalog.document_hash, catalog.evaluator_version): catalog},
+    )
+    at = _app_test(repository)
+    _show_detail(at, result)
+
+    at.run()
+    _element(at.button, "Save blinded rating").click()
+    at.run()
+
+    assert "Enter a rater ID and score all four dimensions." in _rendered_text(at)
+    _element(at.text_input, "Rater ID").set_value("rater-a")
+    for label in (
+        "Coverage score",
+        "Groundedness score",
+        "Executability score",
+        "Redundancy control score",
+    ):
+        _element(at.selectbox, label).set_value(3)
+    _element(at.button, "Save blinded rating").click()
+    at.run()
+
+    assert len(repository.human_ratings) == 4
+    assert {item.dimension for item in repository.human_ratings} == set(
+        HumanRatingDimension
+    )
+    assert "Saved ratings are append-only" in _rendered_text(at)
+
+
+def test_agreement_and_adjudication_are_separate_per_dimension() -> None:
+    result, catalog = _versioned_coverage_result()
+    ratings = [
+        _human_rating(
+            result,
+            rater_id,
+            dimension,
+            3 if rater_id == "rater-a" else (4 if dimension is HumanRatingDimension.COVERAGE else 3),
+        )
+        for rater_id in ("rater-a", "rater-b")
+        for dimension in HumanRatingDimension
+    ]
+    repository = FakeRepository(
+        results={result.manifest.run_id: result},
+        catalogs={(catalog.document_hash, catalog.evaluator_version): catalog},
+        human_ratings=ratings,
+    )
+    at = _app_test(repository)
+    _show_detail(at, result)
+
+    at.run()
+
+    text = _rendered_text(at)
+    assert "### Inter-rater agreement" in [item.value for item in at.markdown]
+    rendered = text + "\n" + "\n".join(
+        str(frame.value) for frame in at.dataframe
+    )
+    labels = (
+        "Coverage",
+        "Groundedness",
+        "Executability",
+        "Redundancy control",
+    )
+    assert not [label for label in labels if label not in rendered], rendered
+    assert any(
+        {"Exact", "Adjacent", "Quadratic weighted κ"}.issubset(frame.value.columns)
+        for frame in at.dataframe
+    )
+    assert "Adjudication" in [item.label for item in at.expander]
+    assert not any(input.value == "rater-a" for input in at.text_input)
 
 
 def test_quality_chart_surfaces_the_lowest_coverage_gap() -> None:

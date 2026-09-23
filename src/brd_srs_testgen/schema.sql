@@ -291,6 +291,17 @@ CREATE TABLE IF NOT EXISTS validation_orphan_test_cases (
     PRIMARY KEY (run_id, position)
 );
 
+CREATE TABLE IF NOT EXISTS coverage_catalogs (
+    catalog_id text PRIMARY KEY CHECK (catalog_id <> ''),
+    document_hash text NOT NULL CHECK (document_hash ~ '^[0-9a-f]{64}$'),
+    evaluator_version text NOT NULL CHECK (evaluator_version <> ''),
+    status text NOT NULL CHECK (status IN ('machine_frozen', 'approved', 'superseded')),
+    units jsonb NOT NULL CHECK (jsonb_typeof(units) = 'array'),
+    created_at timestamptz NOT NULL,
+    approved_at timestamptz,
+    UNIQUE (document_hash, evaluator_version)
+);
+
 CREATE TABLE IF NOT EXISTS coverage_scores (
     run_id text PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
     precision double precision NOT NULL CHECK (precision BETWEEN 0 AND 1),
@@ -305,6 +316,22 @@ CREATE TABLE IF NOT EXISTS coverage_scores (
     unmapped_test_case_ids jsonb NOT NULL DEFAULT '[]'
 );
 
+ALTER TABLE coverage_scores
+    ADD COLUMN IF NOT EXISTS catalog_id text REFERENCES coverage_catalogs(catalog_id);
+
+CREATE TABLE IF NOT EXISTS coverage_evaluations (
+    run_id text PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
+    catalog_id text NOT NULL REFERENCES coverage_catalogs(catalog_id),
+    status text NOT NULL CHECK (status IN ('completed', 'failed')),
+    mappings jsonb,
+    error text NOT NULL DEFAULT '' CHECK (length(error) <= 2000),
+    evaluated_at timestamptz NOT NULL,
+    CHECK (
+        (status = 'completed' AND mappings IS NOT NULL AND error = '') OR
+        (status = 'failed' AND mappings IS NULL AND error <> '')
+    )
+);
+
 CREATE TABLE IF NOT EXISTS human_coverage_ratings (
     run_id text PRIMARY KEY REFERENCES coverage_scores(run_id) ON DELETE CASCADE,
     human_score smallint NOT NULL CHECK (human_score BETWEEN 1 AND 4),
@@ -313,4 +340,32 @@ CREATE TABLE IF NOT EXISTS human_coverage_ratings (
     reason text NOT NULL DEFAULT '' CHECK (length(reason) <= 2000),
     rubric_version text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS human_ratings (
+    rating_id text PRIMARY KEY CHECK (rating_id <> ''),
+    run_id text NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    rater_id text NOT NULL CHECK (rater_id <> ''),
+    dimension text NOT NULL CHECK (dimension IN (
+        'coverage', 'groundedness', 'executability', 'redundancy_control'
+    )),
+    score smallint NOT NULL CHECK (score BETWEEN 1 AND 4),
+    reason text NOT NULL DEFAULT '' CHECK (length(reason) <= 2000),
+    rubric_version text NOT NULL CHECK (rubric_version <> ''),
+    round integer NOT NULL DEFAULT 1 CHECK (round > 0),
+    created_at timestamptz NOT NULL,
+    UNIQUE (run_id, rater_id, dimension, round)
+);
+
+CREATE TABLE IF NOT EXISTS human_adjudications (
+    adjudication_id text PRIMARY KEY CHECK (adjudication_id <> ''),
+    run_id text NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    dimension text NOT NULL CHECK (dimension IN (
+        'coverage', 'groundedness', 'executability', 'redundancy_control'
+    )),
+    score smallint NOT NULL CHECK (score BETWEEN 1 AND 4),
+    reason text NOT NULL CHECK (reason <> '' AND length(reason) <= 2000),
+    rubric_version text NOT NULL CHECK (rubric_version <> ''),
+    created_at timestamptz NOT NULL,
+    UNIQUE (run_id, dimension)
 );

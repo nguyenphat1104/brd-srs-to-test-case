@@ -12,7 +12,16 @@ from brd_srs_testgen.documents import DocumentError
 from brd_srs_testgen.models import (
     ArtifactBundle,
     CoverageAssignment,
+    CoverageCatalog,
+    CoverageCatalogStatus,
+    CoverageEvaluation,
+    CoverageEvaluationStatus,
+    CoverageMappingBatch,
+    CoverageMappingEntry,
     CoverageRepair,
+    CoverageScore,
+    CoverageUnit,
+    CoverageUnitBatch,
     FailureCategory,
     GeneratedCases,
     RequirementBatch,
@@ -40,6 +49,7 @@ class RecordingRepository:
         self.saved = []
         self.events = []
         self.finalized = []
+        self.catalogs = {}
 
     def _fail(self, method) -> None:
         if self.fail_at == method:
@@ -65,6 +75,18 @@ class RecordingRepository:
         self.calls.append(("finalize", result))
         self.finalized.append(result)
         self._fail("finalize")
+
+    def load_coverage_catalog(self, document_hash, evaluator_version):
+        self.calls.append(
+            ("load_coverage_catalog", document_hash, evaluator_version)
+        )
+        return self.catalogs.get((document_hash, evaluator_version))
+
+    def save_coverage_catalog(self, catalog):
+        self.calls.append(("save_coverage_catalog", catalog))
+        return self.catalogs.setdefault(
+            (catalog.document_hash, catalog.evaluator_version), catalog
+        )
 
 
 def _result(value, *, input_tokens=1, output_tokens=1):
@@ -148,6 +170,45 @@ class NamedProvider(ScriptedProvider):
     def __init__(self, ledger: BudgetLedger, model: str) -> None:
         super().__init__(ledger, [])
         self.model = model
+        self.generated_schemas = []
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        self.generated_schemas.append(schema)
+        if schema is CoverageUnitBatch:
+            evidence = chunk()
+            return _result(
+                CoverageUnitBatch(
+                    units=[
+                        CoverageUnit(
+                            unit_id="CU-001",
+                            title="Authenticate registered users",
+                            description="Registered users can authenticate.",
+                            unit_type="functional",
+                            source_references=[
+                                {
+                                    "chunk_id": evidence.chunk_id,
+                                    "page_number": evidence.page_number,
+                                    "section": evidence.section,
+                                    "excerpt": evidence.text,
+                                }
+                            ],
+                        )
+                    ]
+                )
+            )
+        if schema is CoverageMappingBatch:
+            return _result(
+                CoverageMappingBatch(
+                    mappings=[
+                        CoverageMappingEntry(
+                            test_case_id="TC-001", covered_unit_ids=["CU-001"]
+                        )
+                    ]
+                )
+            )
+        return super().generate(
+            messages, schema, max_output_tokens=max_output_tokens
+        )
 
 
 class InvalidCentralProvider(CentralProvider):
@@ -173,6 +234,63 @@ def settings(**overrides) -> ProviderSettings:
     }
     values.update(overrides)
     return ProviderSettings(**values)
+
+
+def frozen_catalog(document_hash: str) -> CoverageCatalog:
+    evidence = chunk()
+    return CoverageCatalog(
+        catalog_id="shared-catalog",
+        document_hash=document_hash,
+        evaluator_version=runner.EVALUATOR_VERSION,
+        status=CoverageCatalogStatus.MACHINE_FROZEN,
+        units=[
+            CoverageUnit(
+                unit_id="CU-001",
+                title="Authenticate registered users",
+                description="Registered users can authenticate.",
+                unit_type="functional",
+                source_references=[
+                    {
+                        "chunk_id": evidence.chunk_id,
+                        "page_number": evidence.page_number,
+                        "section": evidence.section,
+                        "excerpt": evidence.text,
+                    }
+                ],
+            )
+        ],
+        created_at=datetime(2026, 9, 24, tzinfo=UTC),
+    )
+
+
+def completed_evaluation(
+    run_id: str, catalog: CoverageCatalog
+) -> CoverageEvaluation:
+    score = CoverageScore(
+        catalog_id=catalog.catalog_id,
+        precision=1,
+        recall=1,
+        f1=1,
+        true_positive_count=1,
+        false_positive_count=0,
+        false_negative_count=0,
+        total_coverage_units=1,
+        total_test_cases=1,
+    )
+    return CoverageEvaluation(
+        run_id=run_id,
+        catalog_id=catalog.catalog_id,
+        status=CoverageEvaluationStatus.COMPLETED,
+        mappings=CoverageMappingBatch(
+            mappings=[
+                CoverageMappingEntry(
+                    test_case_id="TC-001", covered_unit_ids=["CU-001"]
+                )
+            ]
+        ),
+        score=score,
+        evaluated_at=datetime(2026, 9, 24, 1, tzinfo=UTC),
+    )
 
 
 def _successful_run(
@@ -208,7 +326,7 @@ def test_only_the_selected_pipeline_runs_and_run_type_is_persisted(
 ) -> None:
     called = []
     seen_factory = []
-    judged = []
+    judges = []
     artifacts = bundle()
     repository = RecordingRepository()
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
@@ -225,11 +343,10 @@ def test_only_the_selected_pipeline_runs_and_run_type_is_persisted(
         seen_factory.append((selected, ledger))
         return ScriptedProvider(ledger, [])
 
-    monkeypatch.setattr(
-        runner,
-        "run_coverage_analysis",
-        lambda context, result, chunks: judged.append((context, result, chunks)),
-    )
+    def judge_factory(ledger):
+        judge = NamedProvider(ledger, runner.JUDGE_MODEL)
+        judges.append(judge)
+        return judge
 
     result = run_generation(
         b"pdf",
@@ -238,9 +355,7 @@ def test_only_the_selected_pipeline_runs_and_run_type_is_persisted(
         settings(),
         repository=repository,
         provider_factory=factory,
-        judge_provider_factory=lambda ledger: NamedProvider(
-            ledger, runner.JUDGE_MODEL
-        ),
+        judge_provider_factory=judge_factory,
     )
 
     assert called == [run_type]
@@ -248,9 +363,10 @@ def test_only_the_selected_pipeline_runs_and_run_type_is_persisted(
     assert result.manifest.run_type is run_type
     assert repository.created[0].run_type is run_type
     assert repository.finalized == [result]
-    assert len(judged) == 1
-    assert judged[0][0].provider.model == runner.JUDGE_MODEL
-    assert judged[0][0].provider.ledger is not seen_factory[0][1]
+    assert judges[0].model == runner.JUDGE_MODEL
+    assert judges[0].ledger is not seen_factory[0][1]
+    assert judges[0].generated_schemas == [CoverageUnitBatch, CoverageMappingBatch]
+    assert result.coverage_evaluation is not None
     assert result.manifest.configuration["agents"]["judge"] == {
         "provider": "gemini",
         "model": runner.JUDGE_MODEL,
@@ -291,19 +407,22 @@ def test_fixed_judge_ignores_legacy_coverage_analyzer_overrides(monkeypatch) -> 
 
 def test_fixed_judge_usage_is_included_in_run_metrics(monkeypatch) -> None:
     repository = RecordingRepository()
+    catalog = frozen_catalog(hashlib.sha256(b"pdf").hexdigest())
+    repository.save_coverage_catalog(catalog)
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
     monkeypatch.setitem(
         runner.PIPELINES, RunType.SINGLE_PROMPT, lambda _context, _chunks: bundle()
     )
 
-    def judge(context, _bundle, _chunks):
+    def judge(context, *, run_id, bundle, catalog, evaluated_at):
         reservation = context.provider.ledger.reserve(11)
         context.provider.ledger.settle(reservation, 11)
         context.input_tokens = 3
         context.output_tokens = 8
         context.retries = 1
+        return completed_evaluation(run_id, catalog)
 
-    monkeypatch.setattr(runner, "run_coverage_analysis", judge)
+    monkeypatch.setattr(runner, "evaluate_against_catalog", judge)
 
     result = run_generation(
         b"pdf",
@@ -321,6 +440,170 @@ def test_fixed_judge_usage_is_included_in_run_metrics(monkeypatch) -> None:
     assert result.metrics.output_tokens == 8
     assert result.metrics.charged_tokens == 11
     assert result.metrics.retries == 1
+
+
+def test_existing_catalog_skips_extraction_and_maps_once(monkeypatch) -> None:
+    repository = RecordingRepository()
+    document_hash = hashlib.sha256(b"pdf").hexdigest()
+    catalog = frozen_catalog(document_hash)
+    repository.save_coverage_catalog(catalog)
+    judges = []
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES, RunType.SINGLE_PROMPT, lambda _context, _chunks: bundle()
+    )
+
+    def judge_factory(ledger):
+        judge = NamedProvider(ledger, runner.JUDGE_MODEL)
+        judges.append(judge)
+        return judge
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+        judge_provider_factory=judge_factory,
+    )
+
+    assert judges[0].generated_schemas == [CoverageMappingBatch]
+    assert result.coverage_evaluation is not None
+    assert result.coverage_evaluation.catalog_id == catalog.catalog_id
+
+
+def test_missing_catalog_is_extracted_saved_then_mapped(monkeypatch) -> None:
+    repository = RecordingRepository()
+    judges = []
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES, RunType.SINGLE_PROMPT, lambda _context, _chunks: bundle()
+    )
+
+    def judge_factory(ledger):
+        judge = NamedProvider(ledger, runner.JUDGE_MODEL)
+        judges.append(judge)
+        return judge
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+        judge_provider_factory=judge_factory,
+    )
+
+    assert judges[0].generated_schemas == [CoverageUnitBatch, CoverageMappingBatch]
+    assert len(repository.catalogs) == 1
+    assert result.coverage_evaluation is not None
+    assert result.coverage_evaluation.catalog_id == result.coverage.catalog_id
+
+
+def test_all_run_types_reuse_one_catalog_for_the_same_document(monkeypatch) -> None:
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    for run_type in RunType:
+        monkeypatch.setitem(
+            runner.PIPELINES, run_type, lambda _context, _chunks: bundle()
+        )
+
+    results = [
+        run_generation(
+            b"same-pdf",
+            "sample.pdf",
+            run_type,
+            settings(),
+            repository=repository,
+            provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+            judge_provider_factory=lambda ledger: NamedProvider(
+                ledger, runner.JUDGE_MODEL
+            ),
+        )
+        for run_type in RunType
+    ]
+
+    assert len(repository.catalogs) == 1
+    assert len(
+        {
+            result.coverage_evaluation.catalog_id
+            for result in results
+            if result.coverage_evaluation is not None
+        }
+    ) == 1
+
+
+def test_judge_failure_is_persisted_without_failing_generation(monkeypatch) -> None:
+    repository = RecordingRepository()
+    repository.save_coverage_catalog(
+        frozen_catalog(hashlib.sha256(b"pdf").hexdigest())
+    )
+    trace = []
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES, RunType.SINGLE_PROMPT, lambda _context, _chunks: bundle()
+    )
+    monkeypatch.setattr(
+        runner,
+        "evaluate_against_catalog",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ProviderError("Judge mapping failed.", code=503, retryable=False)
+        ),
+    )
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        progress=trace.append,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+        judge_provider_factory=lambda ledger: NamedProvider(
+            ledger, runner.JUDGE_MODEL
+        ),
+    )
+
+    assert result.manifest.status is RunStatus.COMPLETED
+    assert result.coverage is None
+    assert result.coverage_evaluation is not None
+    assert result.coverage_evaluation.status is CoverageEvaluationStatus.FAILED
+    assert result.coverage_evaluation.error == "Judge mapping failed."
+    assert "Coverage evaluation failed: Judge mapping failed." in trace
+    assert repository.finalized == [result]
+
+
+def test_unknown_judge_programming_error_still_propagates(monkeypatch) -> None:
+    repository = RecordingRepository()
+    repository.save_coverage_catalog(
+        frozen_catalog(hashlib.sha256(b"pdf").hexdigest())
+    )
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES, RunType.SINGLE_PROMPT, lambda _context, _chunks: bundle()
+    )
+    monkeypatch.setattr(
+        runner,
+        "evaluate_against_catalog",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("judge bug")),
+    )
+
+    with pytest.raises(RuntimeError, match="judge bug"):
+        run_generation(
+            b"pdf",
+            "sample.pdf",
+            RunType.SINGLE_PROMPT,
+            settings(),
+            repository=repository,
+            provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+            judge_provider_factory=lambda ledger: NamedProvider(
+                ledger, runner.JUDGE_MODEL
+            ),
+        )
+
+    assert repository.finalized == []
 
 
 @pytest.mark.parametrize(
@@ -443,6 +726,8 @@ def test_pipeline_activity_is_forwarded_to_the_progress_callback(monkeypatch) ->
         "Orchestrator: spawning Analyzer 1.",
         "Analyzing coverage",
         "Judge: extracting coverage units from the source document.",
+        "Judge: extracted 1 coverage units. Mapping test cases...",
+        "Judge: F1=1.00 (precision=1.00, recall=1.00).",
         "Completed",
     ]
 
@@ -735,11 +1020,11 @@ def test_failed_validation_retains_normalized_artifacts_and_metrics(
     repository = RecordingRepository()
     judged = []
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
-    monkeypatch.setattr(
-        runner,
-        "run_coverage_analysis",
-        lambda context, result, chunks: judged.append((context, result, chunks)),
-    )
+    def judge(context, *, run_id, bundle, catalog, evaluated_at):
+        judged.append((context, bundle))
+        return completed_evaluation(run_id, catalog)
+
+    monkeypatch.setattr(runner, "evaluate_against_catalog", judge)
 
     result = run_generation(
         b"pdf",
@@ -1178,6 +1463,8 @@ def test_progress_is_a_single_string_and_observer_errors_are_ignored(
         "Generating artifacts",
         "Analyzing coverage",
         "Judge: extracting coverage units from the source document.",
+        "Judge: extracted 1 coverage units. Mapping test cases...",
+        "Judge: F1=1.00 (precision=1.00, recall=1.00).",
         "Completed",
     ]
     assert all(isinstance(message, str) for message in trace)
