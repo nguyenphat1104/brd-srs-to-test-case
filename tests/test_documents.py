@@ -148,6 +148,36 @@ def test_canonicalizes_extract_with_skipped_intermediate_words() -> None:
     assert verify_source_reference(fixed.requirements[0].source_references[0], chunks)
 
 
+def test_strict_canonicalization_does_not_repair_excerpt_text() -> None:
+    evidence = "The system shall authenticate registered users with valid active account credentials."
+    chunks = chunk_pages([(1, evidence)])
+    requirement = Requirement(
+        requirement_id="REQ-001",
+        title="Authenticate",
+        description="Authenticate users.",
+        requirement_type=RequirementType.FUNCTIONAL,
+        module="Access",
+        priority=RequirementPriority.HIGH,
+        source_references=[
+            SourceReference(
+                chunk_id="wrong",
+                page_number=99,
+                excerpt=f"{evidence} Invented.",
+            )
+        ],
+    )
+
+    permissive = canonicalize_source_references(
+        RequirementBatch(requirements=[requirement]), chunks
+    )
+    strict = canonicalize_source_references(
+        RequirementBatch(requirements=[requirement]), chunks, repair_excerpt=False
+    )
+
+    assert verify_source_reference(permissive.requirements[0].source_references[0], chunks)
+    assert not verify_source_reference(strict.requirements[0].source_references[0], chunks)
+
+
 def test_canonicalizes_extract_interrupted_by_step_numbers() -> None:
     chunks = chunk_pages(
         [

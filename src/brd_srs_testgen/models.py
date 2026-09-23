@@ -374,6 +374,8 @@ class CoverageCatalog(StrictModel):
 
     @model_validator(mode="after")
     def validate_status(self) -> Self:
+        if len({unit.unit_id for unit in self.units}) != len(self.units):
+            raise ValueError("duplicate coverage unit IDs are not allowed")
         if self.status is CoverageCatalogStatus.APPROVED:
             if self.approved_at is None:
                 raise ValueError("approved catalogs require approved_at")

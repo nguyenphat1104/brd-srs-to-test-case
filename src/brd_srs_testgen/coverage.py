@@ -131,7 +131,7 @@ def extract_coverage_catalog(
         max_output_tokens=16_000,
         agent="coverage_analyzer",
     )
-    batch = canonicalize_source_references(batch, chunks)
+    batch = canonicalize_source_references(batch, chunks, repair_excerpt=False)
     for unit in batch.units:
         for reference in unit.source_references:
             if not verify_source_reference(reference, chunks):

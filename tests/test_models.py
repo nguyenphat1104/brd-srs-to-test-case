@@ -7,6 +7,9 @@ from pydantic import ValidationError
 import brd_srs_testgen.models as models
 from brd_srs_testgen.models import (
     ArtifactBundle,
+    CoverageCatalog,
+    CoverageCatalogStatus,
+    CoverageUnit,
     FailureCategory,
     Requirement,
     RequirementPriority,
@@ -100,6 +103,26 @@ def test_models_reject_unknown_fields() -> None:
                 "excerpt": "Evidence",
                 "invented": True,
             }
+        )
+
+
+def test_coverage_catalog_rejects_duplicate_unit_ids() -> None:
+    unit = CoverageUnit(
+        unit_id="CU-001",
+        title="Authenticate users",
+        description="Authenticate registered users.",
+        unit_type="functional",
+        source_references=[source()],
+    )
+
+    with pytest.raises(ValidationError, match="duplicate coverage unit IDs"):
+        CoverageCatalog(
+            catalog_id="catalog-1",
+            document_hash="a" * 64,
+            evaluator_version="coverage-v2",
+            status=CoverageCatalogStatus.MACHINE_FROZEN,
+            units=[unit, unit.model_copy(update={"title": "Different behavior"})],
+            created_at=datetime.now(UTC),
         )
 
 

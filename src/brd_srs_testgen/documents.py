@@ -183,7 +183,9 @@ def verify_source_reference(
     )
 
 
-def canonicalize_source_references(value: T, chunks: list[DocumentChunk]) -> T:
+def canonicalize_source_references(
+    value: T, chunks: list[DocumentChunk], *, repair_excerpt: bool = True
+) -> T:
     data = value.model_dump(mode="json")
 
     def visit(node: object) -> None:
@@ -215,7 +217,7 @@ def canonicalize_source_references(value: T, chunks: list[DocumentChunk]) -> T:
                         page_number=chunk.page_number,
                         section=chunk.section,
                     )
-                else:
+                elif repair_excerpt:
                     grounded = [
                         (chunk, exact_excerpt)
                         for chunk in chunks
