@@ -11,16 +11,19 @@ from brd_srs_testgen.coverage import (
 )
 from brd_srs_testgen.models import (
     ArtifactBundle,
-    CoverageMappingBatch,
-    CoverageMappingEntry,
     CoverageCatalog,
     CoverageCatalogStatus,
     CoverageEvaluation,
     CoverageEvaluationStatus,
+    CoverageMappingBatch,
+    CoverageMappingEntry,
     CoverageScore,
     CoverageUnit,
     CoverageUnitBatch,
     DocumentChunk,
+    HumanAdjudication,
+    HumanRating,
+    HumanRatingDimension,
     Requirement,
     RequirementPriority,
     RequirementType,
@@ -30,9 +33,6 @@ from brd_srs_testgen.models import (
     TestCase,
     TestPriority,
     TestStep,
-    HumanAdjudication,
-    HumanRating,
-    HumanRatingDimension,
 )
 
 
@@ -285,6 +285,17 @@ class TestEvaluatorContracts:
         for error in ("", " \t "):
             with pytest.raises(ValueError):
                 CoverageEvaluation(**{**failed, "error": error})
+
+    def test_completed_evaluation_requires_score_from_its_catalog(self) -> None:
+        with pytest.raises(ValueError, match="score catalog_id must match evaluation catalog_id"):
+            CoverageEvaluation(
+                run_id="run-1",
+                catalog_id="cat-doc-v1",
+                status=CoverageEvaluationStatus.COMPLETED,
+                mappings=CoverageMappingBatch(mappings=[]),
+                score=_score().model_copy(update={"catalog_id": "cat-doc-v2"}),
+                evaluated_at=datetime.now(UTC),
+            )
 
     def test_human_rating_identifies_rater_dimension_and_round(self) -> None:
         rating = HumanRating(

@@ -427,6 +427,8 @@ class CoverageEvaluation(StrictModel):
         if self.status is CoverageEvaluationStatus.COMPLETED:
             if self.mappings is None or self.score is None or self.error:
                 raise ValueError("completed evaluations require mappings and score with blank error")
+            if self.score.catalog_id != self.catalog_id:
+                raise ValueError("score catalog_id must match evaluation catalog_id")
         elif self.mappings is not None or self.score is not None or not self.error.strip():
             raise ValueError("failed evaluations require no mappings or score and nonblank error")
         return self
