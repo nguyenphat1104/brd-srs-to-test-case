@@ -9,6 +9,7 @@ import pytest
 from brd_srs_testgen.models import (
     AgentSetup,
     ArtifactBundle,
+    CoverageScore,
     DocumentChunk,
     FailureCategory,
     RunManifest,
@@ -1114,6 +1115,39 @@ def test_list_runs_receives_metric_counts_after_finalization(
         history.scenario_count,
         history.test_case_count,
     ) == (2, 2, 2)
+
+
+def test_human_coverage_rating_is_immutable_and_round_trips(
+    repository: RunRepository,
+) -> None:
+    result = completed_run("human-rating").model_copy(
+        update={
+            "coverage": CoverageScore(
+                precision=0.8,
+                recall=0.8,
+                f1=0.8,
+                true_positive_count=4,
+                false_positive_count=1,
+                false_negative_count=1,
+                total_coverage_units=5,
+                total_test_cases=5,
+            )
+        }
+    )
+    start_run(repository, result)
+    repository.finalize(result)
+
+    saved = repository.save_human_coverage_rating(
+        result.manifest.run_id, 3, "Only minor gaps."
+    )
+
+    assert saved.human_score == 3
+    assert saved.judge_score == 3
+    assert saved.judge_f1 == 0.8
+    assert repository.load_human_coverage_rating(result.manifest.run_id) == saved
+    assert repository.list_human_coverage_ratings() == [saved]
+    with pytest.raises(ImmutableRunError, match="already exists"):
+        repository.save_human_coverage_rating(result.manifest.run_id, 4)
 
 
 def test_terminal_chunks_events_and_finalization_are_immutable(

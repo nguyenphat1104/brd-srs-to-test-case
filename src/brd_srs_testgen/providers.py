@@ -50,12 +50,19 @@ class StructuredOutputError(RuntimeError):
         input_tokens: int = 0,
         output_tokens: int = 0,
         latency_seconds: float = 0.0,
+        incomplete: bool = False,
     ) -> None:
-        super().__init__("Provider returned invalid structured output.")
+        super().__init__(
+            "Provider stopped at the output token limit before completing "
+            "structured data."
+            if incomplete
+            else "Provider returned invalid structured output."
+        )
         self.raw_text = raw_text
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.latency_seconds = latency_seconds
+        self.incomplete = incomplete
 
 
 @dataclass(frozen=True)
@@ -495,10 +502,17 @@ def list_llama_cpp_models(
 
 
 class GeminiProvider:
-    def __init__(self, client, model: str, ledger: BudgetLedger) -> None:
+    def __init__(
+        self,
+        client,
+        model: str,
+        ledger: BudgetLedger,
+        thinking_level: str | None = None,
+    ) -> None:
         self.client = client
         self.model = model
         self.ledger = ledger
+        self.thinking_level = thinking_level
 
     def generate(
         self,
@@ -521,19 +535,31 @@ class GeminiProvider:
 
         reservation = self.ledger.reserve(input_estimate + max_output_tokens)
         started = time.perf_counter()
+        generation_config: dict[str, object] = {
+            "temperature": 0.0,
+            "max_output_tokens": max_output_tokens,
+        }
+        if self.thinking_level is not None:
+            generation_config["thinking_level"] = self.thinking_level
         try:
+            response_schema = schema.model_json_schema()
+            pending: list[object] = [response_schema]
+            while pending:
+                value = pending.pop()
+                if isinstance(value, dict):
+                    value.pop("maxItems", None)
+                    pending.extend(value.values())
+                elif isinstance(value, list):
+                    pending.extend(value)
             interaction = self.client.interactions.create(
                 model=self.model,
                 input=prompt,
                 response_format={
                     "type": "text",
                     "mime_type": "application/json",
-                    "schema": schema.model_json_schema(),
+                    "schema": response_schema,
                 },
-                generation_config={
-                    "temperature": 0.0,
-                    "max_output_tokens": max_output_tokens,
-                },
+                generation_config=generation_config,
             )
         except Exception as error:
             if isinstance(error, (ValueError, TypeError)):
@@ -565,6 +591,14 @@ class GeminiProvider:
             ) from error
         self.ledger.settle(reservation, total_tokens)
         raw_text = getattr(interaction, "output_text", None)
+        if getattr(interaction, "status", None) == "incomplete":
+            raise StructuredOutputError(
+                raw_text if isinstance(raw_text, str) else "",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_seconds=time.perf_counter() - started,
+                incomplete=True,
+            )
         if not isinstance(raw_text, str):
             raise ProviderError(
                 "Gemini returned an incomplete response.", code=None, retryable=False

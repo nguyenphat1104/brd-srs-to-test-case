@@ -1,0 +1,79 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Single Prompt · Detailed Run Flow",
+    "quality_profile": "showcase",
+    "output": "static/single-prompt-flow.html"
+  },
+  "lanes": [
+    { "id": "evidence", "label": "Evidence" },
+    { "id": "generation", "label": "Single Generator" },
+    { "id": "quality", "label": "Deterministic Quality" },
+    { "id": "judge", "label": "Fixed Judge" },
+    { "id": "storage", "label": "Saved Result" }
+  ],
+  "phases": [
+    { "id": "prepare", "label": "Prepare", "fromCol": 0, "toCol": 1 },
+    { "id": "generate", "label": "Generate", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "evaluate", "label": "Validate & evaluate", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": [
+    "evidence_chunks",
+    "compose_prompt",
+    "generate_bundle",
+    "typed_bundle",
+    "validate_bundle",
+    "build_metrics",
+    "persist_result"
+  ],
+  "semanticChecks": {
+    "allowedRoots": ["evidence_chunks"],
+    "allowedTerminals": ["persist_result"],
+    "requiredPaths": [
+      { "from": "evidence_chunks", "to": "persist_result" },
+      { "from": "typed_bundle", "to": "judge_bundle" }
+    ]
+  },
+  "nodes": [
+    { "id": "evidence_chunks", "lane": "evidence", "col": 0, "type": "external", "label": "Evidence Chunks", "sublabel": "complete PDF context", "width": 148 },
+    { "id": "compose_prompt", "lane": "generation", "col": 1, "type": "messagebus", "label": "Compose One Prompt", "sublabel": "core rules + run prompt", "width": 156 },
+    { "id": "generate_bundle", "lane": "generation", "col": 2, "type": "backend", "label": "One Model Call", "sublabel": "all generation tasks", "width": 146 },
+    { "id": "typed_bundle", "lane": "generation", "col": 3, "type": "messagebus", "label": "ArtifactBundle", "sublabel": "REQ + SCN + TC", "width": 146 },
+    { "id": "validate_bundle", "lane": "quality", "col": 4, "type": "security", "label": "Validate Bundle", "sublabel": "IDs, links, citations", "width": 148 },
+    { "id": "correct_bundle", "lane": "generation", "col": 5, "type": "backend", "label": "Repair or Revise", "sublabel": "only when required", "width": 146 },
+    { "id": "build_metrics", "lane": "quality", "col": 5, "type": "backend", "label": "RTM & Metrics", "sublabel": "deterministic", "width": 136 },
+    { "id": "judge_bundle", "lane": "judge", "col": 4, "type": "backend", "label": "Judge Bundle", "sublabel": "Gemini 3.6 Flash", "width": 144 },
+    { "id": "persist_result", "lane": "storage", "col": 5, "type": "database", "label": "Persist Run Result", "sublabel": "config + outputs", "width": 150 }
+  ],
+  "edges": [
+    { "id": "chunks_to_prompt", "from": "evidence_chunks", "to": "compose_prompt", "label": "full evidence", "role": "main" },
+    { "id": "prompt_to_model", "from": "compose_prompt", "to": "generate_bundle", "label": "one request", "variant": "emphasis", "role": "main" },
+    { "id": "model_to_bundle", "from": "generate_bundle", "to": "typed_bundle", "label": "structured JSON", "role": "main" },
+    { "id": "bundle_to_validation", "from": "typed_bundle", "to": "validate_bundle", "label": "canonical citations", "variant": "emphasis", "role": "main" },
+    { "id": "validation_to_metrics", "from": "validate_bundle", "to": "build_metrics", "label": "final report", "role": "main" },
+    { "id": "metrics_to_storage", "from": "build_metrics", "to": "persist_result", "label": "RTM + ratios", "variant": "emphasis", "role": "main" },
+    { "id": "validation_to_correction", "from": "validate_bundle", "to": "correct_bundle", "label": "repairable issue", "variant": "security", "role": "branch" },
+    { "id": "correction_to_validation", "from": "correct_bundle", "to": "validate_bundle", "label": "revalidate once", "variant": "dashed", "role": "return" },
+    { "id": "bundle_to_judge", "from": "typed_bundle", "to": "judge_bundle", "label": "generated bundle", "variant": "dashed", "role": "branch" },
+    { "id": "judge_to_storage", "from": "judge_bundle", "to": "persist_result", "label": "optional F1", "variant": "dashed", "role": "return" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Experimental role",
+      "items": [
+        "Minimal-orchestration baseline with one generation response",
+        "The model performs extraction, design, linking, and citation grounding together"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Configurable inputs",
+      "items": [
+        "Provider, model, run prompt, Gemini thinking level, and run token ceiling",
+        "Core evidence rules, schemas, validation, and Judge policy remain controlled"
+      ]
+    }
+  ]
+}

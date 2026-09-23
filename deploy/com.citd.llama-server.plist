@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.citd.llama-server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/llama-server</string>
+    <string>--host</string>
+    <string>127.0.0.1</string>
+    <string>--port</string>
+    <string>8081</string>
+    <string>--models-preset</string>
+    <string>/Users/jun/projects/citd-final/brd-srs-to-test-case/deploy/llama-models.ini</string>
+    <string>--models-max</string>
+    <string>1</string>
+    <string>--models-autoload</string>
+    <string>--no-webui</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/jun/Library/Logs/citd-llama-server.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/jun/Library/Logs/citd-llama-server.log</string>
+</dict>
+</plist>

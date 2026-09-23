@@ -58,6 +58,11 @@ PROMPT_VERSION = "research-core-v4"
 MIN_OUTPUT_TOKENS = 1_024
 LOCAL_EVIDENCE_CHARS_PER_TASK = 6_000
 LOCAL_REQUIREMENTS_PER_TASK = 3
+STAGED_OUTPUT_TOKEN_DEFAULTS = {
+    "requirements": 16_000,
+    "scenarios": 24_000,
+    "test_cases": 48_000,
+}
 
 
 class PipelineOutputError(ValueError):
@@ -104,6 +109,7 @@ class PipelineContext:
     providers: dict[str, StructuredProvider] = field(default_factory=dict)
     agent_setups: dict[str, AgentSetup] = field(default_factory=default_agent_setups)
     agent_prompts: dict[str, str] = field(default_factory=dict)
+    agent_max_output_tokens: dict[str, int] = field(default_factory=dict)
     sleep: Callable[[float], None] = time.sleep
     progress: Callable[[str], None] | None = None
     retries: int = 0
@@ -216,7 +222,9 @@ class PipelineContext:
             if cancellation_event is not None and cancellation_event.is_set():
                 raise CancelledError("A sibling worker failed.")
             output_budget = self._output_budget(
-                current_messages, schema, max_output_tokens
+                current_messages,
+                schema,
+                self.agent_max_output_tokens.get(agent, max_output_tokens),
             )
             started = time.perf_counter()
             try:
@@ -248,7 +256,11 @@ class PipelineContext:
                 self._record(error)
                 if cancellation_event is not None and cancellation_event.is_set():
                     raise CancelledError("A sibling worker failed.") from error
-                if not allow_schema_repair or schema_repair_count == 2:
+                if (
+                    error.incomplete
+                    or not allow_schema_repair
+                    or schema_repair_count == 2
+                ):
                     raise
                 with self._lock:
                     self.schema_repairs += 1
@@ -320,7 +332,7 @@ def run_staged_single_agent(
         context.generate(
             [prompt],
             RequirementBatch,
-            max_output_tokens=4_000,
+            max_output_tokens=STAGED_OUTPUT_TOKEN_DEFAULTS["requirements"],
             agent="requirements",
         ),
         chunks,
@@ -330,7 +342,7 @@ def run_staged_single_agent(
         context.generate(
             [prompt],
             ScenarioBatch,
-            max_output_tokens=4_000,
+            max_output_tokens=STAGED_OUTPUT_TOKEN_DEFAULTS["scenarios"],
             agent="scenarios",
         ),
         chunks,
@@ -340,7 +352,7 @@ def run_staged_single_agent(
         context.generate(
             [prompt],
             TestCaseBatch,
-            max_output_tokens=8_000,
+            max_output_tokens=STAGED_OUTPUT_TOKEN_DEFAULTS["test_cases"],
             agent="test_cases",
         ),
         chunks,

@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>End-to-end BRD/SRS generation and evaluation flow</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #0f172a;
+      --muted: #475569;
+      --line: #dbe3ee;
+      --surface: #ffffff;
+      --soft: #eff6ff;
+      --soft-amber: #fffbeb;
+      --accent: #1d4ed8;
+      --accent-dark: #1e3a8a;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #f8fafc;
+      font: 16px/1.65 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); }
+    a:focus-visible, [tabindex]:focus-visible {
+      outline: 3px solid #2563eb;
+      outline-offset: 3px;
+    }
+    .skip-link {
+      position: absolute;
+      left: 16px;
+      top: -80px;
+      z-index: 10;
+      padding: 10px 14px;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--accent-dark);
+    }
+    .skip-link:focus { top: 16px; }
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 64px;
+    }
+    .back {
+      display: inline-block;
+      min-height: 44px;
+      margin-bottom: 16px;
+      padding: 8px 0;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .hero, section {
+      margin-bottom: 24px;
+      padding: clamp(24px, 4vw, 48px);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--surface);
+    }
+    .hero { background: linear-gradient(135deg, #ffffff, var(--soft)); }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      max-width: 850px;
+      margin: 8px 0 16px;
+      font-size: clamp(36px, 6vw, 66px);
+      line-height: 1.04;
+      letter-spacing: -.04em;
+    }
+    h2 {
+      margin: 0 0 16px;
+      font-size: clamp(25px, 3vw, 36px);
+      line-height: 1.2;
+      letter-spacing: -.02em;
+    }
+    h3 { margin: 30px 0 8px; font-size: 21px; line-height: 1.3; }
+    p { max-width: 76ch; }
+    .lead { color: var(--muted); font-size: 19px; }
+    .frame-grid, .stack-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .frame-card, .stack-card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+    .frame-card strong, .stack-card strong { display: block; margin-bottom: 6px; }
+    .frame-card p, .stack-card p { margin: 0; color: var(--muted); }
+    .diagram {
+      display: block;
+      width: 100%;
+      height: min(900px, 92vh);
+      margin-top: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+    .diagram--detail { height: min(820px, 88vh); }
+    .diagram--multi { height: 1420px; }
+    .table-wrap {
+      overflow-x: auto;
+      margin: 20px 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--accent-dark); background: #f8fafc; }
+    tbody tr:last-child td { border-bottom: 0; }
+    code {
+      padding: .12em .35em;
+      border-radius: 5px;
+      background: #eaf2ff;
+      font-size: .9em;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 18px;
+      border-radius: 12px;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-size: 14px;
+    }
+    pre code { padding: 0; background: transparent; font-size: inherit; }
+    ol, ul { padding-left: 22px; }
+    li + li { margin-top: 8px; }
+    .note {
+      max-width: 82ch;
+      padding: 16px 18px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+    }
+    .caution { border-left-color: #b45309; background: var(--soft-amber); }
+    .metric { font-variant-numeric: tabular-nums; }
+    @media (max-width: 720px) {
+      main { width: min(100% - 20px, 1180px); padding-top: 12px; }
+      .hero, section { padding: 22px; border-radius: 16px; }
+      .frame-grid, .stack-grid { grid-template-columns: 1fr; }
+      .diagram, .diagram--detail { height: 760px; }
+      .diagram--multi { height: 1420px; }
+      h1 { font-size: clamp(34px, 12vw, 48px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to main content</a>
+  <main id="content">
+    <a class="back" href="../../">← Back to runs</a>
+    <header class="hero">
+      <div class="eyebrow">Research methodology guide</div>
+      <h1>End-to-end BRD/SRS generation and evaluation</h1>
+      <p class="lead">The application converts one text-extractable requirements PDF into traceable requirements, scenarios, and manual test cases. This guide follows the data through all three generation strategies and explains which experimental conditions remain fixed.</p>
+      <div class="frame-grid">
+        <div class="frame-card">
+          <strong>Controlled conditions</strong>
+          <p>Source PDF, evidence chunking, schemas, core grounding rules, deterministic validation, quality calculations, and Judge policy.</p>
+        </div>
+        <div class="frame-card">
+          <strong>Independent variables</strong>
+          <p>Run type plus configured generation providers, models, prompts, thinking levels, output limits, and run token ceiling.</p>
+        </div>
+        <div class="frame-card">
+          <strong>Generated artifacts</strong>
+          <p>Requirements (<code>REQ-*</code>), scenarios (<code>SCN-*</code>), test cases (<code>TC-*</code>), citations, and explicit trace links.</p>
+        </div>
+        <div class="frame-card">
+          <strong>Evaluation outputs</strong>
+          <p>Validation report, requirement traceability matrix, deterministic quality ratios, and fixed-Judge precision, recall, and F1.</p>
+        </div>
+      </div>
+    </header>
+
+    <section aria-labelledby="overview-heading">
+      <div class="eyebrow">Shared system</div>
+      <h2 id="overview-heading">System workflow overview</h2>
+      <p>Every run shares intake, evidence preparation, deterministic quality gates, the independent Judge, and persistence. Only the generation strategy changes.</p>
+      <iframe class="diagram" src="system-and-coverage-diagram.html" title="Overview of the complete BRD/SRS generation, validation, judging, and persistence workflow"></iframe>
+    </section>
+
+    <section aria-labelledby="pipeline-heading">
+      <div class="eyebrow">Data lineage</div>
+      <h2 id="pipeline-heading">End-to-end data pipeline</h2>
+      <p><code>PDF → evidence chunks → generation → canonical bundle → validation and correction → RTM and metrics → fixed Judge → saved result</code></p>
+      <div class="table-wrap" role="region" aria-label="End-to-end data pipeline table" tabindex="0">
+        <table>
+          <thead><tr><th>Stage</th><th>Input</th><th>Transformation</th><th>Output</th><th>Result influences</th><th>Failure behavior</th></tr></thead>
+          <tbody>
+            <tr><td>1. Run intake</td><td>PDF and selected settings</td><td>Create a running manifest and immutable configuration snapshot</td><td>Run ID and experiment record</td><td>Run type, provider/model, prompts, thinking, token limits</td><td>Invalid configuration stops before parsing</td></tr>
+            <tr><td>2. Evidence preparation</td><td>PDF bytes</td><td>Extract and normalize text; split at up to 6,000 characters</td><td>Chunks with stable ID, page, section, text, and SHA-256 hash</td><td>Shared parsing and chunking policy</td><td>Unreadable or empty text becomes a parsing failure</td></tr>
+            <tr><td>3. Generation</td><td>Evidence chunks and trusted prompts</td><td>Run the selected Single, Staged, or Multi-Agent strategy</td><td>Typed requirements, scenarios, and test cases</td><td>Generation settings and orchestration strategy</td><td>Provider, timeout, budget, truncation, or schema failure</td></tr>
+            <tr><td>4. Canonicalization</td><td>Model citations and evidence chunks</td><td>Match excerpts back to real chunks and normalize metadata</td><td>Canonical source references</td><td>Deterministic evidence matching</td><td>Unsupported excerpts remain invalid for validation</td></tr>
+            <tr><td>5. Validation and correction</td><td>Artifact bundle and chunks</td><td>Check IDs, dependencies, links, citations, orphans, and coverage; repair or revise once when allowed</td><td>Final bundle and validation report</td><td>Shared deterministic rules; conditional Reviewer call</td><td>Remaining issues produce semantic-validation failure</td></tr>
+            <tr><td>6. Measurement</td><td>Final bundle and report</td><td>Build RTM and deterministic quality ratios</td><td>Traceability and quality metrics</td><td>Shared Python calculations</td><td>Metrics still describe a generated bundle that fails validation</td></tr>
+            <tr><td>7. Semantic judging</td><td>Source chunks and generated test cases</td><td>Extract source coverage units, map exercised behavior, then calculate scores</td><td>Precision, recall, F1, and uncovered IDs</td><td>Fixed Gemini 3.6 Flash Judge</td><td>Judge failure leaves F1 unavailable without changing generation status</td></tr>
+            <tr><td>8. Persistence</td><td>Manifest, artifacts, reports, metrics, and optional F1</td><td>Store normalized records</td><td>Reloadable PostgreSQL run result</td><td>Saved configuration supports comparison</td><td>Raw PDF bytes, credentials, and base URLs are not stored</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="comparison-heading">
+      <div class="eyebrow">Experimental strategies</div>
+      <h2 id="comparison-heading">Run-type comparison</h2>
+      <div class="table-wrap" role="region" aria-label="Run-type comparison table" tabindex="0">
+        <table>
+          <thead><tr><th>Dimension</th><th>Single Prompt</th><th>Staged Single Agent</th><th>Centralized Multi-Agent</th></tr></thead>
+          <tbody>
+            <tr><td>Orchestration</td><td>One request produces the complete bundle</td><td>Three sequential typed stages</td><td>Central orchestrator coordinates worker groups and deterministic merges</td></tr>
+            <tr><td>Base generation calls</td><td>1</td><td>3</td><td>Variable: Analyst wave plus Test Generator wave</td></tr>
+            <tr><td>Evidence scope</td><td>Complete PDF in one request</td><td>Complete evidence at each stage</td><td>Balanced remote scopes or bounded local scopes</td></tr>
+            <tr><td>Intermediate artifacts</td><td>None before <code>ArtifactBundle</code></td><td><code>RequirementBatch</code>, <code>ScenarioBatch</code>, <code>TestCaseBatch</code></td><td>Candidate requirement batches, canonical requirement catalog, worker scenario/test batches</td></tr>
+            <tr><td>Configurable generation</td><td>Provider, model, prompt, Gemini thinking, run ceiling</td><td>Shared provider/model; prompt, thinking, and output limit per stage</td><td>Provider, model, and prompt per Analyst, Test Generator, and Reviewer</td></tr>
+            <tr><td>Concurrency</td><td>None</td><td>None</td><td>Remote workers may run concurrently; local workers run bounded tasks sequentially</td></tr>
+            <tr><td>Correction</td><td>Targeted link repair or one bundle revision</td><td>Same; bundle revision inherits Test cases output limit</td><td>Reviewer is called only when final correction is required</td></tr>
+            <tr><td>Experimental value</td><td>Minimal-orchestration baseline</td><td>Measures task decomposition with one model/provider</td><td>Measures specialization, partitioning, and coordination</td></tr>
+            <tr><td>Main interpretation risk</td><td>One response must complete every task and can become large</td><td>Early-stage omissions propagate into later stages</td><td>Partitioning, worker count, and model mix change together</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">The strategies are alternatives, not a ranking. Compare saved runs using the same PDF and state every generation setting that differs.</p>
+    </section>
+
+    <section aria-labelledby="single-heading">
+      <div class="eyebrow">Run type 1</div>
+      <h2 id="single-heading">Single Prompt</h2>
+      <p>One model call receives the complete evidence, core grounding rules, and run-specific prompt. It must return one <code>ArtifactBundle</code> containing requirements, scenarios, test cases, trace links, and grounded citations.</p>
+      <iframe class="diagram diagram--detail" loading="lazy" src="single-prompt-flow.html" title="Detailed Single Prompt generation, correction, evaluation, and persistence flow"></iframe>
+      <h3>Controls and handoffs</h3>
+      <ul>
+        <li>Configurable provider, model, prompt, and run token ceiling.</li>
+        <li>Gemini 3 models expose a configurable thinking level.</li>
+        <li>No intermediate generation batch is saved before the complete bundle.</li>
+        <li>Transient provider errors retry up to two times; invalid complete responses receive up to two schema-repair prompts.</li>
+      </ul>
+      <p class="caution note"><strong>Research trade-off:</strong> this is the cleanest baseline for orchestration overhead, but extraction, scenario design, case design, linking, and citation grounding compete inside one response.</p>
+    </section>
+
+    <section aria-labelledby="staged-heading">
+      <div class="eyebrow">Run type 2</div>
+      <h2 id="staged-heading">Staged Single Agent</h2>
+      <p>One shared provider and model perform three sequential tasks. Each typed result is validated by its schema and becomes explicit input to the next task.</p>
+      <iframe class="diagram diagram--detail" loading="lazy" src="staged-single-agent-flow.html" title="Detailed Staged Single Agent requirements, scenarios, test cases, correction, and evaluation flow"></iframe>
+      <div class="table-wrap" role="region" aria-label="Staged Single Agent step table" tabindex="0">
+        <table>
+          <thead><tr><th>Step</th><th>Input</th><th>Typed output</th><th>Default output limit</th><th>Configurable controls</th></tr></thead>
+          <tbody>
+            <tr><td>Requirements</td><td>Complete evidence</td><td><code>RequirementBatch</code></td><td class="metric">16,000</td><td>Prompt, Gemini thinking, output tokens</td></tr>
+            <tr><td>Scenarios</td><td>Requirements and complete evidence</td><td><code>ScenarioBatch</code></td><td class="metric">24,000</td><td>Prompt, Gemini thinking, output tokens</td></tr>
+            <tr><td>Test cases</td><td>Requirements, scenarios, and complete evidence</td><td><code>TestCaseBatch</code></td><td class="metric">48,000</td><td>Prompt, Gemini thinking, output tokens</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>A final whole-bundle revision uses the configured Test cases output limit because it must reproduce all three artifact collections. The global run ceiling still governs total generation usage.</p>
+      <p class="caution note"><strong>Research trade-off:</strong> staged outputs expose where omissions arise, but an incomplete requirement catalog constrains every downstream scenario and test case.</p>
+    </section>
+
+    <section aria-labelledby="multi-heading">
+      <div class="eyebrow">Run type 3</div>
+      <h2 id="multi-heading">Centralized Multi-Agent</h2>
+      <p>A policy orchestrator partitions work, enforces worker ID ranges, and merges results. Analyst, Test Generator, and Reviewer are the configurable generation agents. The fixed Judge remains independent and is not part of that agent configuration.</p>
+      <iframe class="diagram diagram--detail diagram--multi" loading="lazy" src="centralized-multi-agent-flow.html" title="Detailed Centralized Multi-Agent partitioning, worker, merge, review, judging, and persistence flow"></iframe>
+      <h3>Wave 1: requirement extraction</h3>
+      <ol>
+        <li>Remote execution balances chunks across three worker groups; local execution creates bounded scopes and runs them sequentially.</li>
+        <li>Analyst workers extract grounded candidate requirements using reserved ID ranges.</li>
+        <li>Python logic merges duplicate candidates, combines citations and dependencies, selects at most 20 canonical requirements, and renumbers them.</li>
+      </ol>
+      <h3>Wave 2: scenario and test generation</h3>
+      <ol>
+        <li>The orchestrator redistributes canonical requirements with relevant evidence and read-only dependency context.</li>
+        <li>Test Generator workers create scenarios and test cases using reserved local ranges.</li>
+        <li>Python namespaces and checks worker IDs, merges batches, removes scenarios without usable test cases, and normalizes derived links and citations.</li>
+      </ol>
+      <h3>Conditional Reviewer</h3>
+      <p>The Reviewer is not an always-on fourth worker. It runs only when deterministic validation needs a targeted requirement-link repair or an allowed whole-bundle revision.</p>
+      <p class="caution note"><strong>Research trade-off:</strong> specialization and smaller contexts can improve focus, but partitioning, parallelism, deterministic reconciliation, and agent-model choices all become experimental factors.</p>
+    </section>
+
+    <section aria-labelledby="evaluation-heading">
+      <div class="eyebrow">Measurement</div>
+      <h2 id="evaluation-heading">Evaluation methodology</h2>
+      <h3>Deterministic quality and traceability</h3>
+      <p>These values come directly from saved IDs, links, citations, and validation issues. An evaluator model does not decide them.</p>
+      <div class="table-wrap" role="region" aria-label="Deterministic quality metrics table" tabindex="0">
+        <table>
+          <thead><tr><th>Metric</th><th>Calculation</th></tr></thead>
+          <tbody>
+            <tr><td>Citation coverage</td><td>Requirements without an invalid source reference ÷ all requirements</td></tr>
+            <tr><td>Requirement → scenario</td><td>Requirements linked by at least one scenario ÷ all requirements</td></tr>
+            <tr><td>Requirement → test case</td><td>Requirements linked by at least one test case ÷ all requirements</td></tr>
+            <tr><td>Positive scenario coverage</td><td>Requirements linked by a positive scenario ÷ all requirements</td></tr>
+            <tr><td>Non-positive coverage</td><td>Requirements linked by a negative, boundary, edge, or state-transition scenario ÷ all requirements</td></tr>
+            <tr><td>RTM completeness</td><td>Requirements with both a linked scenario and test case ÷ all requirements</td></tr>
+            <tr><td>Orphan rate</td><td>Orphan scenarios and test cases ÷ all scenarios and test cases</td></tr>
+            <tr><td>Invalid-reference rate</td><td>Invalid source-reference issues ÷ all source references</td></tr>
+            <tr><td>Duplicate test-case rate</td><td>Test-case pairs with word-trigram Jaccard similarity ≥ 0.85 ÷ all test-case pairs</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Fixed-Judge semantic coverage</h3>
+      <p>The independent Judge evaluates every generated artifact bundle, including a bundle that ultimately fails deterministic validation. It is fixed to <strong>Gemini 3.6 Flash</strong>, <strong>medium thinking</strong>, the same two prompts, and a separate <strong>100,000-token</strong> evaluation ceiling.</p>
+      <ol>
+        <li>Extract every atomic testable behavior, business rule, constraint, or requirement from the complete source as <code>CU-*</code> coverage units.</li>
+        <li>Map each test case only when its steps and expected results directly exercise a known coverage unit.</li>
+        <li>Discard unknown IDs and calculate precision, recall, and F1 deterministically.</li>
+      </ol>
+      <pre><code>TP = test cases mapped to at least one valid coverage unit
+FP = test cases with no valid unit, including omitted mappings
+FN = coverage units not covered by any test case
+
+precision = TP / (TP + FP)
+recall    = covered coverage units / all coverage units
+F1        = 2 × precision × recall / (precision + recall)</code></pre>
+      <p>One test case can cover several units. It counts once toward precision, while every distinct covered unit contributes to recall. Judge failure leaves semantic coverage unavailable and never changes the generation outcome.</p>
+    </section>
+
+    <section aria-labelledby="technology-heading">
+      <div class="eyebrow">Experimental implementation</div>
+      <h2 id="technology-heading">Result-affecting technology</h2>
+      <div class="stack-grid">
+        <div class="stack-card"><strong>PDF evidence</strong><p><code>pypdf</code> extraction, whitespace normalization, section detection, 6,000-character chunks, stable IDs, and SHA-256 hashes determine the model-visible source.</p></div>
+        <div class="stack-card"><strong>Typed contracts</strong><p>Pydantic models define requirements, scenarios, test cases, reviews, repairs, coverage units, mappings, and the final artifact bundle.</p></div>
+        <div class="stack-card"><strong>Provider adapters</strong><p>Gemini structured interactions plus Ollama, LM Studio, and llama.cpp-compatible endpoints translate the same typed requests into provider calls.</p></div>
+        <div class="stack-card"><strong>Python orchestration</strong><p>Prompt assembly, retries, token ledgers, worker partitioning, bounded local execution, and conditional correction determine call shape and order.</p></div>
+        <div class="stack-card"><strong>Deterministic logic</strong><p>Citation canonicalization, ID checks, link validation, normalization, RTM construction, and quality calculations constrain and measure outputs.</p></div>
+        <div class="stack-card"><strong>Independent evaluation</strong><p>The fixed Gemini Judge supplies semantic units and mappings; Python calculates the final coverage score.</p></div>
+        <div class="stack-card"><strong>Research record</strong><p>PostgreSQL stores normalized results, metrics, events, and immutable configuration snapshots for later comparison.</p></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="failures-heading">
+      <div class="eyebrow">Diagnostics</div>
+      <h2 id="failures-heading">Failure and correction behavior</h2>
+      <div class="table-wrap" role="region" aria-label="Failure and correction behavior table" tabindex="0">
+        <table>
+          <thead><tr><th>Condition</th><th>System response</th><th>Stored outcome</th></tr></thead>
+          <tbody>
+            <tr><td>PDF parsing failure</td><td>Stop before provider creation</td><td>Failed manifest and redacted diagnostic; no artifacts</td></tr>
+            <tr><td>Transient provider or timeout error</td><td>Retry up to two times with bounded backoff</td><td>Result or categorized failure with usage counters</td></tr>
+            <tr><td>Invalid complete structured output</td><td>Add a schema-repair instruction, up to two attempts</td><td>Valid typed result or schema failure</td></tr>
+            <tr><td>Output-token truncation</td><td>Stop immediately; incomplete JSON is not repairable safely</td><td>Schema failure with guidance to raise the relevant output limit</td></tr>
+            <tr><td>Run token ceiling exhausted</td><td>Reject a request that cannot be reserved or settled</td><td>Budget-exhaustion failure and charged usage</td></tr>
+            <tr><td>Only requirement links are missing</td><td>Reviewer assigns existing scenarios and test cases; no new artifacts</td><td>Revalidated bundle and one semantic-revision count</td></tr>
+            <tr><td>Other deterministic issues</td><td>One whole-bundle revision when context permits</td><td>Completed run if corrected; otherwise semantic-validation failure</td></tr>
+            <tr><td>Judge unavailable or invalid</td><td>Isolate the informational evaluation failure</td><td>Generation result without semantic F1</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="limits-heading">
+      <div class="eyebrow">Research boundaries</div>
+      <h2 id="limits-heading">Interpretation and reproducibility limits</h2>
+      <ul>
+        <li>The metrics are not source-code coverage and do not prove that any test was executed.</li>
+        <li>They do not measure defect detection or prove that the source requirements are correct.</li>
+        <li>Semantic F1 is not compared with a human-authored gold set. The fixed Judge controls evaluator variation but does not remove model judgment.</li>
+        <li>Parallel scheduling may affect latency, while saved token and retry counters describe resource use rather than artifact quality.</li>
+        <li>Reproducible comparisons require the same source PDF plus the stored run configuration. State every generation setting that differs.</li>
+        <li>A missing F1 means evaluation was unavailable; it must not be interpreted as zero coverage.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

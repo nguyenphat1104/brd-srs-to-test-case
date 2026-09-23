@@ -780,12 +780,25 @@ def test_staged_condition_passes_validated_artifacts_between_steps() -> None:
             ModelTestCaseBatch(test_cases=artifacts.test_cases),
         ]
     )
-    context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
+    context = PipelineContext(
+        provider=provider,
+        agent_max_output_tokens={
+            "requirements": 6_000,
+            "scenarios": 7_000,
+            "test_cases": 9_000,
+        },
+        sleep=lambda _seconds: None,
+    )
 
     result = run_staged_single_agent(context, [chunk()])
 
     assert result == artifacts
     assert len(provider.calls) == 3
+    assert [limit for _messages, _schema, limit in provider.calls] == [
+        6_000,
+        7_000,
+        9_000,
+    ]
     assert all(len(messages) == 1 for messages, _schema, _limit in provider.calls)
     assert RequirementBatch(requirements=artifacts.requirements).model_dump_json() in (
         provider.calls[1][0][0]["content"]
@@ -822,6 +835,17 @@ def test_single_prompt_gets_one_schema_repair() -> None:
     assert context.schema_repairs == 1
     assert (context.input_tokens, context.output_tokens) == (3, 4)
     assert "invalid response" in provider.calls[1][0][-1]["content"]
+
+
+def test_incomplete_structured_output_is_not_retried_at_the_same_limit() -> None:
+    provider = ScriptedProvider([StructuredOutputError("bad", incomplete=True)])
+    context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
+
+    with pytest.raises(StructuredOutputError, match="output token limit"):
+        run_single_prompt(context, [chunk()])
+
+    assert len(provider.calls) == 1
+    assert context.schema_repairs == 0
 
 
 def test_staged_requests_carry_evidence_once() -> None:

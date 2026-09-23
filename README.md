@@ -2,7 +2,7 @@
 
 Research core for generating traceable test cases from a BRD or SRS.
 
-[Operations guide](docs/research-core-operations.md)
+[Operations guide](docs/research-core-operations.md) · [System and coverage guide](static/system-and-coverage.html)
 
 ## Research core quick start
 

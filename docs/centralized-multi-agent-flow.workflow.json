@@ -1,0 +1,88 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Centralized Multi-Agent · Detailed Run Flow",
+    "quality_profile": "showcase",
+    "output": "static/centralized-multi-agent-flow.html"
+  },
+  "lanes": [
+    { "id": "orchestrator", "label": "Orchestrator" },
+    { "id": "analysts", "label": "Analyst Workers" },
+    { "id": "generators", "label": "Test Generator Workers" },
+    { "id": "quality", "label": "Deterministic Quality + Reviewer" },
+    { "id": "judge", "label": "Fixed Judge + Storage" }
+  ],
+  "phases": [
+    { "id": "extract", "label": "Partition & extract", "fromCol": 0, "toCol": 1 },
+    { "id": "generate", "label": "Reconcile & generate", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "evaluate", "label": "Normalize & evaluate", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": [
+    "evidence_chunks",
+    "partition_evidence",
+    "analyst_workers",
+    "reconcile_requirements",
+    "partition_requirements",
+    "generator_workers",
+    "normalize_bundle",
+    "validate_bundle",
+    "build_metrics",
+    "persist_result"
+  ],
+  "semanticChecks": {
+    "allowedRoots": ["evidence_chunks"],
+    "allowedTerminals": ["persist_result"],
+    "requiredPaths": [
+      { "from": "evidence_chunks", "to": "persist_result" },
+      { "from": "normalize_bundle", "to": "judge_bundle" }
+    ]
+  },
+  "nodes": [
+    { "id": "evidence_chunks", "lane": "orchestrator", "col": 0, "type": "external", "label": "Evidence Chunks", "sublabel": "stable IDs + hashes", "width": 146 },
+    { "id": "partition_evidence", "lane": "orchestrator", "col": 1, "type": "messagebus", "label": "Partition Evidence", "sublabel": "balanced or bounded", "width": 150 },
+    { "id": "analyst_workers", "lane": "analysts", "col": 1, "type": "backend", "label": "Analyst Workers", "sublabel": "candidate requirements", "width": 148 },
+    { "id": "reconcile_requirements", "lane": "orchestrator", "col": 2, "type": "backend", "label": "Reconcile Requirements", "sublabel": "merge + canonical IDs", "width": 172 },
+    { "id": "partition_requirements", "lane": "orchestrator", "col": 3, "type": "messagebus", "label": "Redistribute Requirements", "sublabel": "evidence + dependencies", "width": 174 },
+    { "id": "generator_workers", "lane": "generators", "col": 3, "type": "backend", "label": "Test Generator Workers", "sublabel": "SCN + TC ranges", "width": 174 },
+    { "id": "normalize_bundle", "lane": "orchestrator", "col": 4, "type": "backend", "label": "Merge & Normalize", "sublabel": "links + citations", "width": 154 },
+    { "id": "validate_bundle", "lane": "quality", "col": 4, "type": "security", "label": "Validate Bundle", "sublabel": "deterministic gates", "width": 148 },
+    { "id": "reviewer_correction", "lane": "quality", "col": 5, "type": "backend", "label": "Reviewer Correction", "sublabel": "only when required", "width": 156, "yOffset": 72 },
+    { "id": "build_metrics", "lane": "quality", "col": 5, "type": "backend", "label": "RTM & Metrics", "sublabel": "deterministic", "width": 136 },
+    { "id": "judge_bundle", "lane": "judge", "col": 4, "type": "backend", "label": "Judge Bundle", "sublabel": "fixed semantic F1", "width": 144 },
+    { "id": "persist_result", "lane": "judge", "col": 5, "type": "database", "label": "Persist Run Result", "sublabel": "config + outputs", "width": 150 }
+  ],
+  "edges": [
+    { "id": "chunks_to_partition", "from": "evidence_chunks", "to": "partition_evidence", "role": "main" },
+    { "id": "partition_to_analysts", "from": "partition_evidence", "to": "analyst_workers", "label": "worker scopes", "variant": "emphasis", "role": "main" },
+    { "id": "analysts_to_reconcile", "from": "analyst_workers", "to": "reconcile_requirements", "label": "candidate batches", "role": "main" },
+    { "id": "reconcile_to_partition", "from": "reconcile_requirements", "to": "partition_requirements", "variant": "emphasis", "role": "main" },
+    { "id": "partition_to_generators", "from": "partition_requirements", "to": "generator_workers", "variant": "emphasis", "role": "main" },
+    { "id": "generators_to_normalize", "from": "generator_workers", "to": "normalize_bundle", "label": "worker artifacts", "role": "main" },
+    { "id": "normalize_to_validate", "from": "normalize_bundle", "to": "validate_bundle", "label": "merged bundle", "variant": "emphasis", "role": "main" },
+    { "id": "validation_to_metrics", "from": "validate_bundle", "to": "build_metrics", "label": "final report", "role": "main" },
+    { "id": "metrics_to_storage", "from": "build_metrics", "to": "persist_result", "label": "RTM + ratios", "variant": "emphasis", "role": "main" },
+    { "id": "validation_to_reviewer", "from": "validate_bundle", "to": "reviewer_correction", "label": "repairable issue", "variant": "security", "role": "branch" },
+    { "id": "reviewer_to_validation", "from": "reviewer_correction", "to": "validate_bundle", "label": "revalidate once", "variant": "dashed", "role": "return" },
+    { "id": "bundle_to_judge", "from": "validate_bundle", "to": "judge_bundle", "label": "generated bundle", "variant": "dashed", "role": "branch" },
+    { "id": "judge_to_storage", "from": "judge_bundle", "to": "persist_result", "label": "optional F1", "variant": "dashed", "role": "return" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Central policy",
+      "items": [
+        "The orchestrator owns partitioning, ID ranges, deterministic merging, and normalization",
+        "Analyst, Test Generator, and Reviewer may use separate providers, models, and prompts"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Execution mode",
+      "items": [
+        "Remote workers may run concurrently across three balanced groups",
+        "Local providers use bounded sequential tasks to control request size and memory"
+      ]
+    }
+  ]
+}

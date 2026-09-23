@@ -34,6 +34,7 @@ from .models import (
 )
 from .pipelines import (
     PROMPT_VERSION,
+    STAGED_OUTPUT_TOKEN_DEFAULTS,
     WORKER_COUNT,
     PipelineContext,
     PipelineOutputError,
@@ -58,6 +59,15 @@ from .validation import build_rtm, compute_metrics, validate_bundle
 SCHEMA_VERSION = "research-core-v1"
 LOCAL_REQUEST_TOKEN_BUDGET = 12_000
 LOCAL_PROVIDERS = {"lm_studio", "llama_cpp", "ollama"}
+THINKING_LEVELS = {"minimal", "low", "medium", "high"}
+JUDGE_PROVIDER = "gemini"
+JUDGE_MODEL = "gemini-3.6-flash"
+JUDGE_THINKING_LEVEL = "medium"
+JUDGE_TOKEN_CEILING = 100_000
+JUDGE_PURPOSE = (
+    "Extract atomic source coverage units and strictly map generated test cases "
+    "for precision, recall, and F1 scoring."
+)
 RUN_AGENTS = {
     RunType.SINGLE_PROMPT: ("single",),
     RunType.STAGED_SINGLE_AGENT: ("requirements", "scenarios", "test_cases"),
@@ -65,10 +75,10 @@ RUN_AGENTS = {
         "analyst",
         "test_generator",
         "reviewer",
-        "coverage_analyzer",
     ),
 }
 ProviderFactory = Callable[[RunType, BudgetLedger], StructuredProvider]
+JudgeProviderFactory = Callable[[BudgetLedger], StructuredProvider]
 Progress = Callable[[str], None]
 
 
@@ -91,6 +101,9 @@ class ProviderSettings:
     agent_providers: dict[str, str] = field(default_factory=dict)
     agent_models: dict[str, str] = field(default_factory=dict)
     agent_prompts: dict[str, str] = field(default_factory=dict)
+    thinking_level: str | None = None
+    agent_thinking_levels: dict[str, str] = field(default_factory=dict)
+    agent_max_output_tokens: dict[str, int] = field(default_factory=dict)
     provider_api_keys: dict[str, str] = field(default_factory=dict, repr=False)
     provider_base_urls: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -105,6 +118,12 @@ class ProviderSettings:
 
     def prompt_for(self, agent: str) -> str:
         return self.agent_prompts.get(agent, "").strip()
+
+    def thinking_level_for(self, agent: str) -> str | None:
+        configured = self.agent_thinking_levels.get(agent)
+        if configured is not None:
+            return configured
+        return self.thinking_level if self.provider_for(agent) == self.provider else None
 
     def api_key_for(self, provider: str) -> str:
         return self.provider_api_keys.get(
@@ -124,18 +143,30 @@ class ProviderSettings:
             model=self.model_for(agent),
             api_key=self.api_key_for(provider),
             base_url=self.base_url_for(provider),
+            thinking_level=self.thinking_level_for(agent),
         )
 
     def snapshot(self, run_type: RunType) -> dict[str, object]:
+        agents = {
+            agent: {
+                "provider": self.provider_for(agent),
+                "model": self.model_for(agent),
+                "prompt": self.prompt_for(agent),
+                "thinking_level": self.thinking_level_for(agent),
+                "max_output_tokens": self.agent_max_output_tokens.get(agent),
+            }
+            for agent in RUN_AGENTS[run_type]
+        }
+        agents["judge"] = {
+            "provider": JUDGE_PROVIDER,
+            "model": JUDGE_MODEL,
+            "prompt": JUDGE_PURPOSE,
+            "thinking_level": JUDGE_THINKING_LEVEL,
+            "token_ceiling": JUDGE_TOKEN_CEILING,
+            "fixed": True,
+        }
         return {
-            "agents": {
-                agent: {
-                    "provider": self.provider_for(agent),
-                    "model": self.model_for(agent),
-                    "prompt": self.prompt_for(agent),
-                }
-                for agent in RUN_AGENTS[run_type]
-            },
+            "agents": agents,
             "token_ceiling": self.token_ceiling,
         }
 
@@ -154,8 +185,12 @@ class ProviderSettings:
             or self.token_ceiling < 1
         ):
             raise ValueError("Token ceiling must be positive.")
-        agent_names = set(self.agent_providers) | set(self.agent_models) | set(
-            self.agent_prompts
+        agent_names = (
+            set(self.agent_providers)
+            | set(self.agent_models)
+            | set(self.agent_prompts)
+            | set(self.agent_thinking_levels)
+            | set(self.agent_max_output_tokens)
         )
         if any(not isinstance(agent, str) or not agent for agent in agent_names):
             raise ValueError("Agent configuration keys must be non-empty strings.")
@@ -163,8 +198,25 @@ class ProviderSettings:
             provider = self.provider if agent == "default" else self.provider_for(agent)
             model = self.model if agent == "default" else self.model_for(agent)
             self._validate_provider(provider, model)
+            thinking_level = (
+                self.thinking_level
+                if agent == "default"
+                else self.thinking_level_for(agent)
+            )
+            if thinking_level is not None:
+                if not isinstance(thinking_level, str) or thinking_level not in THINKING_LEVELS:
+                    raise ValueError("Thinking level must be minimal, low, medium, or high.")
+                if provider != "gemini" or not model.startswith("gemini-3"):
+                    raise ValueError("Thinking level requires a Gemini 3 model.")
             if agent != "default" and not isinstance(self.agent_prompts.get(agent, ""), str):
                 raise ValueError("Agent prompt must be a string.")
+            max_output_tokens = self.agent_max_output_tokens.get(agent)
+            if max_output_tokens is not None and (
+                not isinstance(max_output_tokens, int)
+                or isinstance(max_output_tokens, bool)
+                or max_output_tokens < 1
+            ):
+                raise ValueError("Step output tokens must be positive integers.")
 
     def _validate_provider(self, provider: str, model: str) -> None:
         if not isinstance(provider, str) or provider not in {
@@ -233,7 +285,10 @@ def _make_provider(
 ) -> StructuredProvider:
     if settings.provider == "gemini":
         return GeminiProvider(
-            genai.Client(api_key=settings.api_key), settings.model, ledger
+            genai.Client(api_key=settings.api_key),
+            settings.model,
+            ledger,
+            thinking_level=settings.thinking_level,
         )
     if settings.provider == "lm_studio":
         return LMStudioProvider(
@@ -251,6 +306,22 @@ def _make_provider(
             auto_load=False,
         )
     return OllamaProvider(settings.base_url, settings.model, ledger)
+
+
+def _make_judge_provider(
+    settings: ProviderSettings, ledger: BudgetLedger
+) -> StructuredProvider:
+    return _make_provider(
+        replace(
+            settings,
+            provider=JUDGE_PROVIDER,
+            model=JUDGE_MODEL,
+            api_key=settings.api_key_for(JUDGE_PROVIDER),
+            base_url="",
+            thinking_level=JUDGE_THINKING_LEVEL,
+        ),
+        ledger,
+    )
 
 
 def _empty_metrics(
@@ -478,6 +549,7 @@ def run_generation(
     repository: RunRepository,
     progress: Progress | None = None,
     provider_factory: ProviderFactory | None = None,
+    judge_provider_factory: JudgeProviderFactory | None = None,
 ) -> RunResult:
     settings.validate()
     primary_agent = RUN_AGENTS[run_type][0]
@@ -540,6 +612,7 @@ def run_generation(
     bundle: ArtifactBundle | None = None
     validation: ValidationReport | None = None
     coverage: CoverageScore | None = None
+    judge_charged_tokens = 0
     rtm: list[RTMRow] = []
     started = time.perf_counter()
     try:
@@ -558,6 +631,7 @@ def run_generation(
             if (
                 agent_settings.provider == primary_settings.provider
                 and agent_settings.model == primary_settings.model
+                and agent_settings.thinking_level == primary_settings.thinking_level
             ):
                 continue
             agent_provider = _make_provider(agent_settings, ledger)
@@ -578,6 +652,7 @@ def run_generation(
             providers=providers,
             agent_setups=settings.agent_setups,
             agent_prompts=settings.agent_prompts,
+            agent_max_output_tokens=settings.agent_max_output_tokens,
             progress=progress,
             max_request_tokens=(
                 LOCAL_REQUEST_TOKEN_BUDGET
@@ -615,24 +690,66 @@ def run_generation(
                 ),
                 _revision_chunks(bundle, validation, chunks),
                 ArtifactBundle,
-                16_000,
+                (
+                    settings.agent_max_output_tokens.get(
+                        "test_cases", STAGED_OUTPUT_TOKEN_DEFAULTS["test_cases"]
+                    )
+                    if run_type is RunType.STAGED_SINGLE_AGENT
+                    else 16_000
+                ),
             )
             bundle = canonicalize_source_references(bundle, chunks)
             validation = validate_bundle(bundle, chunks)
 
         rtm = build_rtm(bundle)
-        if validation.valid and bundle is not None:
+        if bundle is not None:
             _notify(progress, "Analyzing coverage")
+            judge_ledger = BudgetLedger(JUDGE_TOKEN_CEILING)
+            judge_context: PipelineContext | None = None
             try:
-                coverage = run_coverage_analysis(context, bundle, chunks)
+                if judge_provider_factory is not None:
+                    judge_provider = judge_provider_factory(judge_ledger)
+                elif not settings.api_key_for(JUDGE_PROVIDER).strip():
+                    raise ConfigurationError(
+                        "Gemini API key is required for the fixed judge."
+                    )
+                else:
+                    judge_provider = _make_judge_provider(settings, judge_ledger)
+                if getattr(judge_provider, "ledger", None) is not judge_ledger:
+                    raise ConfigurationError(
+                        "Judge provider must use the judge budget ledger."
+                    )
+                if getattr(judge_provider, "model", None) != JUDGE_MODEL:
+                    raise ConfigurationError(
+                        "Judge provider model must be Gemini 3.6 Flash."
+                    )
+                judge_context = PipelineContext(
+                    provider=judge_provider,
+                    agent_setups={
+                        "coverage_analyzer": AgentSetup(
+                            agent="coverage_analyzer",
+                            role="Independent quality judge",
+                        )
+                    },
+                    progress=progress,
+                )
+                coverage = run_coverage_analysis(judge_context, bundle, chunks)
             except Exception:
                 pass  # Coverage analysis is informational; never fail the run.
+            finally:
+                judge_charged_tokens = judge_ledger.used
+                if judge_context is not None:
+                    context.input_tokens += judge_context.input_tokens
+                    context.output_tokens += judge_context.output_tokens
+                    context.retries += judge_context.retries
+                    context.schema_repairs += judge_context.schema_repairs
+                    context.semantic_revisions += judge_context.semantic_revisions
         metrics = compute_metrics(
             bundle,
             validation,
             input_tokens=context.input_tokens,
             output_tokens=context.output_tokens,
-            charged_tokens=context.charged_tokens,
+            charged_tokens=context.charged_tokens + judge_charged_tokens,
             latency_seconds=time.perf_counter() - started,
             retries=context.retries,
             schema_repairs=context.schema_repairs,

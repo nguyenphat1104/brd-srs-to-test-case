@@ -9,11 +9,13 @@ from pydantic import ValidationError
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from .evaluation import COVERAGE_RATING_RUBRIC_VERSION, coverage_rating
 from .models import (
     AgentSetup,
     ArtifactBundle,
     CoverageScore,
     DocumentChunk,
+    HumanCoverageRating,
     Requirement,
     RunHistoryItem,
     RunManifest,
@@ -651,6 +653,78 @@ class RunRepository:
             raise
         except psycopg.Error as error:
             raise StorageError("Database operation failed.") from error
+
+    def save_human_coverage_rating(
+        self, run_id: str, human_score: int, reason: str = ""
+    ) -> HumanCoverageRating:
+        if isinstance(human_score, bool) or human_score not in range(1, 5):
+            raise StorageError("Human coverage score must be an integer from 1 to 4.")
+        if not isinstance(reason, str) or len(reason.strip()) > 2_000:
+            raise StorageError("Rating reason must contain at most 2,000 characters.")
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT f1 FROM coverage_scores WHERE run_id = %s", (run_id,)
+                ).fetchone()
+                if row is None:
+                    raise StorageError("Run has no judge coverage score.")
+                rating = HumanCoverageRating(
+                    run_id=run_id,
+                    human_score=human_score,
+                    judge_score=coverage_rating(row["f1"]),
+                    judge_f1=row["f1"],
+                    reason=reason.strip(),
+                    rubric_version=COVERAGE_RATING_RUBRIC_VERSION,
+                    created_at=datetime.now(UTC),
+                )
+                connection.execute(
+                    "INSERT INTO human_coverage_ratings "
+                    "(run_id, human_score, judge_score, judge_f1, reason, "
+                    "rubric_version, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        rating.run_id,
+                        rating.human_score,
+                        rating.judge_score,
+                        rating.judge_f1,
+                        rating.reason,
+                        rating.rubric_version,
+                        rating.created_at,
+                    ),
+                )
+                return rating
+        except psycopg.errors.UniqueViolation as error:
+            raise ImmutableRunError("Human coverage rating already exists.") from error
+        except StorageError:
+            raise
+        except (psycopg.Error, ValidationError, ValueError) as error:
+            raise StorageError("Human coverage rating could not be saved.") from error
+
+    def load_human_coverage_rating(self, run_id: str) -> HumanCoverageRating | None:
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT run_id, human_score, judge_score, judge_f1, reason, "
+                    "rubric_version, created_at FROM human_coverage_ratings "
+                    "WHERE run_id = %s",
+                    (run_id,),
+                ).fetchone()
+            return HumanCoverageRating.model_validate(row, strict=True) if row else None
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Human coverage rating could not be loaded.") from error
+
+    def list_human_coverage_ratings(self) -> list[HumanCoverageRating]:
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT run_id, human_score, judge_score, judge_f1, reason, "
+                    "rubric_version, created_at FROM human_coverage_ratings "
+                    "ORDER BY created_at, run_id"
+                ).fetchall()
+            return [
+                HumanCoverageRating.model_validate(row, strict=True) for row in rows
+            ]
+        except (psycopg.Error, ValidationError) as error:
+            raise StorageError("Human coverage ratings could not be loaded.") from error
 
     def load_run(self, run_id: str) -> RunResult:
         try:

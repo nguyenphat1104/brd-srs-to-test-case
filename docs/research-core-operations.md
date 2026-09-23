@@ -78,6 +78,19 @@ Local `centralized_multi_agent` runs keep requests small and predictable: requir
 
 On a 32 GB Mac, run llama.cpp in router mode with `--models-max 1 --parallel 1 --ctx-size 16384`. The agents are queued together, but only one model and one inference request are active at a time.
 
+This workstation keeps the router alive with the checked-in LaunchAgent and model preset in `deploy/`. To reinstall it after changing either file:
+
+```sh
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.citd.llama-server.plist 2>/dev/null || true
+cp deploy/com.citd.llama-server.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.citd.llama-server.plist
+curl --fail http://127.0.0.1:8081/v1/models
+```
+
+The LaunchAgent starts at login, restarts after failures, and binds to loopback only. Docker Desktop or Colima can still reach it through `host.docker.internal` without exposing the unauthenticated API to the LAN.
+
+`RunAtLoad` starts the router at login and `KeepAlive` restarts it after an unexpected exit. Logs are written to `~/Library/Logs/citd-llama-server.log`.
+
 A run remains one immutable transaction; completed task outputs are not resumable after a later task fails. Retry/resume storage should be added only if bounded local tasks still fail often enough to justify the extra schema and UI state.
 
 ## Offline verification

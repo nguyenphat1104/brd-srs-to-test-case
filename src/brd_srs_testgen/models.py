@@ -355,6 +355,16 @@ class CoverageScore(StrictModel):
     unmapped_test_case_ids: list[str] = Field(default_factory=list)
 
 
+class HumanCoverageRating(StrictModel):
+    run_id: str = Field(min_length=1)
+    human_score: int = Field(ge=1, le=4)
+    judge_score: int = Field(ge=1, le=4)
+    judge_f1: float = Field(ge=0, le=1)
+    reason: str = Field(default="", max_length=2_000)
+    rubric_version: str = Field(min_length=1)
+    created_at: AwareDatetime
+
+
 class RunHistoryItem(StrictModel):
     run_id: str
     source_filename: str

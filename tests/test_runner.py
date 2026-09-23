@@ -195,6 +195,9 @@ def _successful_run(
         repository=repository,
         progress=progress,
         provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+        judge_provider_factory=lambda ledger: NamedProvider(
+            ledger, runner.JUDGE_MODEL
+        ),
     )
     return result, repository
 
@@ -205,6 +208,7 @@ def test_only_the_selected_pipeline_runs_and_run_type_is_persisted(
 ) -> None:
     called = []
     seen_factory = []
+    judged = []
     artifacts = bundle()
     repository = RecordingRepository()
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
@@ -221,6 +225,12 @@ def test_only_the_selected_pipeline_runs_and_run_type_is_persisted(
         seen_factory.append((selected, ledger))
         return ScriptedProvider(ledger, [])
 
+    monkeypatch.setattr(
+        runner,
+        "run_coverage_analysis",
+        lambda context, result, chunks: judged.append((context, result, chunks)),
+    )
+
     result = run_generation(
         b"pdf",
         "sample.pdf",
@@ -228,6 +238,9 @@ def test_only_the_selected_pipeline_runs_and_run_type_is_persisted(
         settings(),
         repository=repository,
         provider_factory=factory,
+        judge_provider_factory=lambda ledger: NamedProvider(
+            ledger, runner.JUDGE_MODEL
+        ),
     )
 
     assert called == [run_type]
@@ -235,6 +248,79 @@ def test_only_the_selected_pipeline_runs_and_run_type_is_persisted(
     assert result.manifest.run_type is run_type
     assert repository.created[0].run_type is run_type
     assert repository.finalized == [result]
+    assert len(judged) == 1
+    assert judged[0][0].provider.model == runner.JUDGE_MODEL
+    assert judged[0][0].provider.ledger is not seen_factory[0][1]
+    assert result.manifest.configuration["agents"]["judge"] == {
+        "provider": "gemini",
+        "model": runner.JUDGE_MODEL,
+        "prompt": runner.JUDGE_PURPOSE,
+        "thinking_level": "medium",
+        "token_ceiling": runner.JUDGE_TOKEN_CEILING,
+        "fixed": True,
+    }
+
+
+def test_fixed_judge_ignores_legacy_coverage_analyzer_overrides(monkeypatch) -> None:
+    observed = []
+
+    def make_provider(config, ledger):
+        observed.append((config, ledger))
+        return NamedProvider(ledger, config.model)
+
+    monkeypatch.setattr(runner, "_make_provider", make_provider)
+    ledger = BudgetLedger(runner.JUDGE_TOKEN_CEILING)
+    configured = settings(
+        coverage_analyzer_model="local-model",
+        agent_providers={"coverage_analyzer": "ollama"},
+        agent_models={"coverage_analyzer": "another-local-model"},
+        agent_thinking_levels={"coverage_analyzer": "high"},
+        provider_api_keys={"gemini": "judge-key"},
+    )
+
+    provider = runner._make_judge_provider(configured, ledger)
+
+    judge_settings, judge_ledger = observed[0]
+    assert provider.model == runner.JUDGE_MODEL
+    assert judge_ledger is ledger
+    assert judge_settings.provider == runner.JUDGE_PROVIDER
+    assert judge_settings.model == runner.JUDGE_MODEL
+    assert judge_settings.thinking_level == runner.JUDGE_THINKING_LEVEL
+    assert judge_settings.api_key == "judge-key"
+
+
+def test_fixed_judge_usage_is_included_in_run_metrics(monkeypatch) -> None:
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES, RunType.SINGLE_PROMPT, lambda _context, _chunks: bundle()
+    )
+
+    def judge(context, _bundle, _chunks):
+        reservation = context.provider.ledger.reserve(11)
+        context.provider.ledger.settle(reservation, 11)
+        context.input_tokens = 3
+        context.output_tokens = 8
+        context.retries = 1
+
+    monkeypatch.setattr(runner, "run_coverage_analysis", judge)
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.SINGLE_PROMPT,
+        settings(),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+        judge_provider_factory=lambda ledger: NamedProvider(
+            ledger, runner.JUDGE_MODEL
+        ),
+    )
+
+    assert result.metrics.input_tokens == 3
+    assert result.metrics.output_tokens == 8
+    assert result.metrics.charged_tokens == 11
+    assert result.metrics.retries == 1
 
 
 @pytest.mark.parametrize(
@@ -345,6 +431,9 @@ def test_pipeline_activity_is_forwarded_to_the_progress_callback(monkeypatch) ->
         repository=repository,
         progress=trace.append,
         provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+        judge_provider_factory=lambda ledger: NamedProvider(
+            ledger, runner.JUDGE_MODEL
+        ),
     )
 
     assert result.manifest.status is RunStatus.COMPLETED
@@ -353,7 +442,7 @@ def test_pipeline_activity_is_forwarded_to_the_progress_callback(monkeypatch) ->
         "Generating artifacts",
         "Orchestrator: spawning Analyzer 1.",
         "Analyzing coverage",
-        "Coverage Analyzer: extracting coverage units from the source document.",
+        "Judge: extracting coverage units from the source document.",
         "Completed",
     ]
 
@@ -644,7 +733,13 @@ def test_failed_validation_retains_normalized_artifacts_and_metrics(
         }
     )
     repository = RecordingRepository()
+    judged = []
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setattr(
+        runner,
+        "run_coverage_analysis",
+        lambda context, result, chunks: judged.append((context, result, chunks)),
+    )
 
     result = run_generation(
         b"pdf",
@@ -655,6 +750,9 @@ def test_failed_validation_retains_normalized_artifacts_and_metrics(
         provider_factory=lambda _run_type, ledger: ScriptedProvider(
             ledger, [invalid, invalid]
         ),
+        judge_provider_factory=lambda ledger: NamedProvider(
+            ledger, runner.JUDGE_MODEL
+        ),
     )
 
     assert result.manifest.status is RunStatus.FAILED
@@ -664,6 +762,7 @@ def test_failed_validation_retains_normalized_artifacts_and_metrics(
     assert result.validation.valid is False
     assert result.rtm
     assert result.metrics.semantic_revisions == 1
+    assert judged[0][1] == invalid
     assert repository.finalized[0] is result
 
 
@@ -698,6 +797,51 @@ def test_failed_validation_gets_one_semantic_revision(monkeypatch) -> None:
     assert result.manifest.status is RunStatus.COMPLETED
     assert result.validation.valid is True
     assert result.metrics.semantic_revisions == 1
+
+
+def test_staged_semantic_revision_uses_test_case_output_limit(monkeypatch) -> None:
+    artifacts = bundle()
+    invalid_reference = artifacts.requirements[0].source_references[0].model_copy(
+        update={"excerpt": "invented evidence"}
+    )
+    invalid = artifacts.model_copy(
+        update={
+            "requirements": [
+                artifacts.requirements[0].model_copy(
+                    update={"source_references": [invalid_reference]}
+                )
+            ]
+        }
+    )
+    requested = []
+
+    class RecordingProvider(ScriptedProvider):
+        def generate(self, messages, schema, *, max_output_tokens):
+            requested.append(max_output_tokens)
+            return super().generate(
+                messages, schema, max_output_tokens=max_output_tokens
+            )
+
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES,
+        RunType.STAGED_SINGLE_AGENT,
+        lambda _context, _chunks: invalid,
+    )
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.STAGED_SINGLE_AGENT,
+        settings(agent_max_output_tokens={"test_cases": 52_000}),
+        repository=RecordingRepository(),
+        provider_factory=lambda _run_type, ledger: RecordingProvider(
+            ledger, [artifacts]
+        ),
+    )
+
+    assert result.manifest.status is RunStatus.COMPLETED
+    assert requested == [52_000]
 
 
 def test_local_run_does_not_send_an_invalid_bundle_to_a_full_revision(monkeypatch) -> None:
@@ -833,7 +977,9 @@ def test_invalid_central_worker_output_is_semantic_failure(monkeypatch) -> None:
     assert "outside worker 1 range" in result.manifest.failure_message
 
 
-def test_centralized_builds_configured_agent_models_with_one_budget(monkeypatch) -> None:
+def test_centralized_builds_generation_agents_and_a_separate_fixed_judge(
+    monkeypatch,
+) -> None:
     built = []
     captured = []
     repository = RecordingRepository()
@@ -859,6 +1005,7 @@ def test_centralized_builds_configured_agent_models_with_one_budget(monkeypatch)
             analyst_model="analyst",
             test_generator_model="generator",
             reviewer_model="reviewer",
+            provider_api_keys={"gemini": "judge-key"},
         ),
         repository=repository,
     )
@@ -868,17 +1015,15 @@ def test_centralized_builds_configured_agent_models_with_one_budget(monkeypatch)
         "analyst",
         "generator",
         "reviewer",
-        "primary",
+        runner.JUDGE_MODEL,
     ]
-    assert {id(ledger) for _model, ledger in built} == {
-        id(captured[0].provider.ledger)
-    }
+    assert len({id(ledger) for _model, ledger in built}) == 2
+    assert built[-1][1] is not captured[0].provider.ledger
     assert {
         agent: provider.model for agent, provider in captured[0].providers.items()
     } == {
         "test_generator": "generator",
         "reviewer": "reviewer",
-        "coverage_analyzer": "primary",
     }
     assert captured[0].bounded_tasks is True
     assert captured[0].worker_limit == 1
@@ -887,8 +1032,10 @@ def test_centralized_builds_configured_agent_models_with_one_budget(monkeypatch)
 def test_run_snapshot_keeps_each_agent_config_but_not_credentials() -> None:
     configured = settings(
         agent_providers={"requirements": "gemini", "scenarios": "ollama"},
-        agent_models={"requirements": "gemini-2.5-flash", "scenarios": "gemma4"},
+        agent_models={"requirements": "gemini-3.6-flash", "scenarios": "gemma4"},
         agent_prompts={"requirements": "Extract rules.", "scenarios": "Find edges."},
+        agent_thinking_levels={"requirements": "minimal"},
+        agent_max_output_tokens={"requirements": 6_000, "scenarios": 8_000},
         provider_api_keys={"gemini": "never-store-this"},
         provider_base_urls={"ollama": "http://localhost:11434"},
     )
@@ -897,8 +1044,10 @@ def test_run_snapshot_keeps_each_agent_config_but_not_credentials() -> None:
 
     assert snapshot["agents"]["requirements"] == {
         "provider": "gemini",
-        "model": "gemini-2.5-flash",
+        "model": "gemini-3.6-flash",
         "prompt": "Extract rules.",
+        "thinking_level": "minimal",
+        "max_output_tokens": 6_000,
     }
     assert snapshot["agents"]["scenarios"]["prompt"] == "Find edges."
     assert "never-store-this" not in str(snapshot)
@@ -1028,7 +1177,7 @@ def test_progress_is_a_single_string_and_observer_errors_are_ignored(
         "Preparing document",
         "Generating artifacts",
         "Analyzing coverage",
-        "Coverage Analyzer: extracting coverage units from the source document.",
+        "Judge: extracting coverage units from the source document.",
         "Completed",
     ]
     assert all(isinstance(message, str) for message in trace)
@@ -1088,6 +1237,21 @@ def test_lm_studio_settings_create_authenticated_provider() -> None:
     assert provider.api_key == "local-token"
 
 
+def test_gemini_settings_forward_thinking_level() -> None:
+    configured = settings(
+        provider="gemini",
+        model="gemini-3.6-flash",
+        api_key="gemini-key",
+        thinking_level="minimal",
+    )
+
+    configured.validate()
+    provider = runner._make_provider(configured, BudgetLedger(100_000))
+
+    assert isinstance(provider, providers_module.GeminiProvider)
+    assert provider.thinking_level == "minimal"
+
+
 def test_llama_cpp_settings_create_unmanaged_openai_provider() -> None:
     configured = settings(
         provider="llama_cpp",
@@ -1137,6 +1301,8 @@ def test_credential_bearing_urls_fail_before_persistence(base_url) -> None:
         {"model": 1},
         {"token_ceiling": "100"},
         {"provider": "gemini", "api_key": 1},
+        {"thinking_level": "maximum"},
+        {"agent_max_output_tokens": {"requirements": True}},
     ],
 )
 def test_provider_settings_reject_wrong_types(overrides) -> None:

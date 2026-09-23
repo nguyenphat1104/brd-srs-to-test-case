@@ -5,11 +5,16 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+from brd_srs_testgen.evaluation import (
+    COVERAGE_RATING_RUBRIC_VERSION,
+    coverage_rating,
+)
 from brd_srs_testgen.models import (
     AgentSetup,
     ActivityEvent,
     CoverageScore,
     FailureCategory,
+    HumanCoverageRating,
     RequirementBatch,
     RunHistoryItem,
     RunManifest,
@@ -47,6 +52,7 @@ class FakeRepository:
         initialize_error: StorageError | None = None,
         list_error: StorageError | None = None,
         load_error: StorageError | None = None,
+        ratings: dict[str, HumanCoverageRating] | None = None,
     ) -> None:
         self.runs = runs or []
         self.run_batches = run_batches
@@ -54,6 +60,7 @@ class FakeRepository:
         self.initialize_error = initialize_error
         self.list_error = list_error
         self.load_error = load_error
+        self.ratings = ratings or {}
         self.initialize_calls = 0
         self.list_calls = 0
         self.load_calls: list[str] = []
@@ -88,6 +95,29 @@ class FakeRepository:
 
     def save_agent_setups(self, setups) -> None:
         self.agent_setups = {setup.agent: setup for setup in setups}
+
+    def load_human_coverage_rating(self, run_id: str) -> HumanCoverageRating | None:
+        return self.ratings.get(run_id)
+
+    def save_human_coverage_rating(
+        self, run_id: str, human_score: int, reason: str = ""
+    ) -> HumanCoverageRating:
+        result = self.results[run_id]
+        assert result.coverage is not None
+        rating = HumanCoverageRating(
+            run_id=run_id,
+            human_score=human_score,
+            judge_score=coverage_rating(result.coverage.f1),
+            judge_f1=result.coverage.f1,
+            reason=reason,
+            rubric_version=COVERAGE_RATING_RUBRIC_VERSION,
+            created_at=datetime.now(UTC),
+        )
+        self.ratings[run_id] = rating
+        return rating
+
+    def list_human_coverage_ratings(self) -> list[HumanCoverageRating]:
+        return list(self.ratings.values())
 
 
 def _app_test(repository: FakeRepository | None = None) -> AppTest:
@@ -276,6 +306,9 @@ def test_runs_home_shows_run_item_list_without_global_settings() -> None:
     assert not at.tabs
     assert "Settings" not in {button.label for button in at.button}
     assert _element(at.button, "Create new run")
+    docs_link = at.get("link_button")[0].proto
+    assert docs_link.label == "How the system and coverage work"
+    assert docs_link.url == "/app/static/system-and-coverage.html"
     text = _rendered_text(at)
     assert not at.dataframe
     assert {button.label for button in at.button} >= {
@@ -315,7 +348,7 @@ def test_single_settings_default_to_one_gemini_35_agent() -> None:
     at.run()
     _open_settings_step(at, RunType.SINGLE_PROMPT)
 
-    assert len(at.selectbox) == 2
+    assert len(at.selectbox) == 3
     assert _element(at.selectbox, "Agent provider").value == "gemini"
     assert _element(at.selectbox, "Agent provider").options == [
         "Gemini",
@@ -329,10 +362,17 @@ def test_single_settings_default_to_one_gemini_35_agent() -> None:
         "Gemini 2.5 Flash",
         "Gemini 2.5 Pro",
     ]
+    assert _element(at.selectbox, "Agent thinking level").value == "minimal"
     assert len(at.text_area) == 1
     assert _element(at.text_area, "Agent prompt").value
     assert "Gemini API key" not in {item.label for item in at.text_input}
     assert "Provider access is managed by the deployment environment" in _rendered_text(at)
+
+    _element(at.selectbox, "Agent thinking level").set_value("low")
+    _element(at.button, "Continue to document").click()
+    at.run()
+
+    assert at.session_state["run_provider_settings"].thinking_level_for("single") == "low"
 
 
 def test_staged_settings_share_gemini_36_model_and_have_three_prompts() -> None:
@@ -340,9 +380,27 @@ def test_staged_settings_share_gemini_36_model_and_have_three_prompts() -> None:
     at.run()
     _open_settings_step(at, RunType.STAGED_SINGLE_AGENT)
 
-    assert len(at.selectbox) == 2
+    assert len(at.selectbox) == 5
     assert _element(at.selectbox, "Agent provider").value == "gemini"
     assert _element(at.selectbox, "Agent model").value == "gemini-3.6-flash"
+    assert {
+        item.label: item.value
+        for item in at.selectbox
+        if item.label.endswith("thinking level")
+    } == {
+        "Requirements step thinking level": "minimal",
+        "Scenarios step thinking level": "minimal",
+        "Test cases step thinking level": "minimal",
+    }
+    assert {
+        item.label: item.value
+        for item in at.number_input
+        if item.label.endswith("output tokens")
+    } == {
+        "Requirements step output tokens": 16_000,
+        "Scenarios step output tokens": 24_000,
+        "Test cases step output tokens": 48_000,
+    }
     assert {area.label for area in at.text_area} == {
         "Requirements step prompt",
         "Scenarios step prompt",
@@ -367,15 +425,51 @@ def test_multi_agent_settings_keep_local_defaults_for_every_agent() -> None:
         "Analyst model": "qwen",
         "Test generator model": "gemma",
         "Reviewer model": "phi",
-        "Coverage analyzer model": "qwen",
     }
     assert {
         tuple(item.options)
         for item in at.selectbox
         if item.label.endswith(" model")
     } == {tuple(label for _model, label in LOCAL_TEST_MODELS)}
-    assert len(at.text_area) == 4
+    assert len(at.text_area) == 3
+    text = _rendered_text(at)
+    assert "Judge" in text
+    assert "Gemini 3.6 Flash · Medium thinking" in text
+    assert "separate evaluation tokens · Fixed" in text
     assert "llama.cpp base URL" not in {item.label for item in at.text_input}
+
+
+def test_multi_agent_gemini_settings_include_thinking_levels() -> None:
+    at = _app_test()
+    at.run()
+    _open_settings_step(at, RunType.CENTRALIZED_MULTI_AGENT)
+
+    for selector in at.selectbox:
+        if selector.label.endswith(" provider"):
+            selector.set_value("gemini")
+    at.run()
+
+    assert {
+        item.label: item.value
+        for item in at.selectbox
+        if item.label.endswith("thinking level")
+    } == {
+        "Analyst thinking level": "minimal",
+        "Test generator thinking level": "minimal",
+        "Reviewer thinking level": "minimal",
+    }
+    _element(at.button, "Continue to document").click()
+    at.run()
+
+    settings = at.session_state["run_provider_settings"]
+    assert {
+        agent: settings.thinking_level_for(agent)
+        for agent in ("analyst", "test_generator", "reviewer")
+    } == {
+        "analyst": "minimal",
+        "test_generator": "minimal",
+        "reviewer": "minimal",
+    }
 
 
 def test_llama_cpp_model_api_error_disables_model_selection() -> None:
@@ -576,10 +670,13 @@ def test_completed_detail_groups_artifacts_and_configuration() -> None:
         "Test cases (1)",
         "Requirements (1)",
         "Scenarios (1)",
+        "Run configuration",
     ]
-    assert "### Quality and traceability" not in headings
-    assert _element(at.toggle, "Show quality details")
-    assert _element(at.expander, "Run configuration")
+    assert headings.index("### Quality and traceability") < headings.index(
+        "### Generated artifacts"
+    )
+    assert not any(toggle.label == "Show quality details" for toggle in at.toggle)
+    assert not any(item.label == "Run configuration" for item in at.expander)
     assert _element(at.button, "Open test case TC-001 detail")
     assert _element(at.button, "Open requirement REQ-001 detail")
     assert _element(at.button, "Open scenario SCN-001 detail")
@@ -611,10 +708,6 @@ def test_completed_detail_groups_artifacts_and_configuration() -> None:
         f"detail-{result.manifest.run_id}-bundle",
     }
     assert _element(at.metric, "Charged tokens").value == "30"
-    _element(at.toggle, "Show quality details").set_value(True)
-    at.run()
-    text = _rendered_text(at)
-    assert "### Quality and traceability" in [element.value for element in at.markdown]
     assert "Latency 0.10 s · 0 retries" in text
     assert "Citation coverage" in text
     assert "Positive scenario coverage" in text
@@ -638,15 +731,28 @@ def test_completed_detail_renders_coverage_charts() -> None:
             )
         }
     )
-    at = _app_test()
+    repository = FakeRepository(results={result.manifest.run_id: result})
+    at = _app_test(repository)
     _show_detail(at, result)
 
     at.run()
 
     assert not at.exception
-    _element(at.toggle, "Show quality details").set_value(True)
-    at.run()
+    assert "### Independent human evaluation" in [item.value for item in at.markdown]
     assert "### Coverage analysis (F1)" in [item.value for item in at.markdown]
+    assert _element(at.metric, "F1 Score").value == "0.00"
+    assert "Citation coverage" in _rendered_text(at)
+    _element(at.radio, "Human coverage rating").set_value(1)
+    at.run()
+    _element(at.button, "Save independent rating").click()
+    at.run()
+
+    assert repository.ratings[result.manifest.run_id].human_score == 1
+    assert repository.ratings[result.manifest.run_id].judge_score == 1
+    assert "### Coverage analysis (F1)" in [item.value for item in at.markdown]
+    assert _element(at.metric, "Rated runs").value == "1"
+    assert _element(at.metric, "Exact agreement").value == "100%"
+    assert _element(at.metric, "Quadratic weighted κ").value == "—"
 
 
 def test_quality_chart_surfaces_the_lowest_coverage_gap() -> None:
@@ -670,9 +776,6 @@ def test_quality_chart_surfaces_the_lowest_coverage_gap() -> None:
     _show_detail(at, result)
 
     at.run()
-    _element(at.toggle, "Show quality details").set_value(True)
-    at.run()
-
     text = _rendered_text(at)
     assert "Priority: Positive scenario coverage is 0%. Target: 100%." in text
     assert text.index("Positive scenario coverage") < text.index(
@@ -694,7 +797,10 @@ def test_failed_result_without_metrics_has_an_actionable_summary() -> None:
     assert "text-extractable PDF" in text
     assert at.error
     assert "Diagnostics and next steps" in text
-    assert "Run configuration" in text
+    assert "### Coverage analysis (F1)" in [item.value for item in at.markdown]
+    assert _element(at.metric, "F1 Score").value == "—"
+    assert "did not finish judge analysis" in text
+    assert [tab.label for tab in at.tabs] == ["Run configuration"]
     snapshot = next(
         table.value
         for table in at.table
@@ -704,6 +810,60 @@ def test_failed_result_without_metrics_has_an_actionable_summary() -> None:
         "Status"
     ] == "failed"
     assert _element(at.download_button, "Download diagnostics")
+
+
+def test_run_list_paginates_ten_items_at_a_time() -> None:
+    base = _history_item(completed_run())
+    runs = [
+        base.model_copy(
+            update={
+                "run_id": f"run-{index:02d}",
+                "source_filename": f"suite-{index:02d}.pdf",
+            }
+        )
+        for index in range(12)
+    ]
+    at = _app_test(FakeRepository(runs=runs))
+
+    at.run()
+
+    assert "Page 1 of 2 · 12 runs" in _rendered_text(at)
+    assert {button.label for button in at.button if button.label.startswith("Open ")} == {
+        f"Open suite-{index:02d}.pdf" for index in range(10)
+    }
+    assert _element(at.button, "Previous").disabled
+    _element(at.button, "Next").click()
+    at.run()
+
+    assert "Page 2 of 2 · 12 runs" in _rendered_text(at)
+    assert {button.label for button in at.button if button.label.startswith("Open ")} == {
+        "Open suite-10.pdf",
+        "Open suite-11.pdf",
+    }
+    assert _element(at.button, "Next").disabled
+
+
+def test_incomplete_schema_failure_recommends_more_output_tokens() -> None:
+    failed = _failed_run()
+    result = failed.model_copy(
+        update={
+            "manifest": failed.manifest.model_copy(
+                update={
+                    "failure_category": FailureCategory.SCHEMA_FAILURE,
+                    "failure_message": (
+                        "Provider stopped at the output token limit before "
+                        "completing structured data."
+                    ),
+                }
+            )
+        }
+    )
+    at = _app_test()
+    _show_detail(at, result)
+
+    at.run()
+
+    assert "Increase its output tokens and generate again" in _rendered_text(at)
 
 
 def test_interrupted_result_has_diagnostics_without_a_fake_failure() -> None:
@@ -718,7 +878,7 @@ def test_interrupted_result_has_diagnostics_without_a_fake_failure() -> None:
     assert "Unknown failure" not in text
     assert "Technical details" not in text
     assert "Diagnostics and next steps" in text
-    assert "Run configuration" in text
+    assert [tab.label for tab in at.tabs] == ["Run configuration"]
     assert not at.error
     assert not at.success
     assert at.warning
@@ -744,9 +904,8 @@ def test_failed_semantic_result_keeps_artifact_details_and_diagnostics() -> None
 
     at.run()
 
-    text = _rendered_text(at)
     assert _element(at.button, "Open test case TC-001 detail")
-    assert "Run configuration" in text
+    assert at.tabs[-1].label == "Run configuration"
     snapshot = next(
         table.value
         for table in at.table
@@ -1047,13 +1206,19 @@ def test_run_settings_capture_custom_prompts_without_credentials() -> None:
     at.run()
     _open_settings_step(at, RunType.STAGED_SINGLE_AGENT)
     _element(at.text_area, "Scenarios step prompt").set_value("Focus on edge cases.")
+    _element(at.selectbox, "Scenarios step thinking level").set_value("low")
+    _element(at.number_input, "Scenarios step output tokens").set_value(12_000)
     _element(at.button, "Continue to document").click()
     at.run()
 
     settings = at.session_state["run_provider_settings"]
     assert settings.agent_prompts["scenarios"] == "Focus on edge cases."
+    assert settings.thinking_level_for("scenarios") == "low"
+    assert settings.agent_max_output_tokens["scenarios"] == 12_000
     snapshot = settings.snapshot(RunType.STAGED_SINGLE_AGENT)
     assert snapshot["agents"]["scenarios"]["prompt"] == "Focus on edge cases."
+    assert snapshot["agents"]["scenarios"]["thinking_level"] == "low"
+    assert snapshot["agents"]["scenarios"]["max_output_tokens"] == 12_000
     assert "test-gemini-key" not in str(snapshot)
 
 

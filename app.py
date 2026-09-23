@@ -8,6 +8,7 @@ from typing import Any
 
 import streamlit as st
 import streamlit.components.v1 as components
+from brd_srs_testgen.evaluation import quadratic_weighted_kappa
 from brd_srs_testgen.models import (
     AgentSetup,
     ActivityEvent,
@@ -27,8 +28,17 @@ from brd_srs_testgen.models import (
     default_agent_setups,
 )
 from brd_srs_testgen.prompts import RUN_PROMPT_DEFAULTS
+from brd_srs_testgen.pipelines import STAGED_OUTPUT_TOKEN_DEFAULTS
 from brd_srs_testgen.providers import list_llama_cpp_models
-from brd_srs_testgen.runner import ProviderSettings, run_generation
+from brd_srs_testgen.runner import (
+    JUDGE_MODEL,
+    JUDGE_PROVIDER,
+    JUDGE_PURPOSE,
+    JUDGE_THINKING_LEVEL,
+    JUDGE_TOKEN_CEILING,
+    ProviderSettings,
+    run_generation,
+)
 from brd_srs_testgen.storage import RunRepository, StorageError
 
 
@@ -36,6 +46,14 @@ GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
 SINGLE_DEFAULT_MODEL = "gemini-3.5-flash"
 STAGED_DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_TOKEN_CEILING = 200_000
+RUNS_PER_PAGE = 10
+GEMINI_THINKING_LEVELS = ("minimal", "low", "medium", "high")
+COVERAGE_RATING_LABELS = {
+    1: "Poor — less than 50% coverage",
+    2: "Major gaps — 50–74% coverage",
+    3: "Minor gaps — 75–89% coverage",
+    4: "Strong — 90–100% coverage",
+}
 PROVIDER_LABELS = {
     "gemini": "Gemini",
     "lm_studio": "LM Studio",
@@ -83,26 +101,24 @@ RUN_CONFIG_AGENTS = {
         "analyst",
         "test_generator",
         "reviewer",
-        "coverage_analyzer",
     ),
 }
 AGENT_LABELS = {
     "analyst": "Analyst",
     "test_generator": "Test generator",
     "reviewer": "Reviewer",
-    "coverage_analyzer": "Coverage analyzer",
 }
 LOCAL_AGENT_MODEL_HINTS = {
     "analyst": "qwen",
     "test_generator": "gemma",
     "reviewer": "phi",
-    "coverage_analyzer": "qwen",
 }
 RUN_AGENT_LABELS = {
     "single": "Test suite generator",
     "requirements": "Requirements step",
     "scenarios": "Scenarios step",
     "test_cases": "Test cases step",
+    "judge": "Judge",
     **AGENT_LABELS,
 }
 ACTIVITY_PLAN = (
@@ -503,6 +519,16 @@ def _apply_theme() -> None:
             border-color: var(--color-warning-border);
             color: var(--color-warning);
             background: var(--color-warning-soft);
+        }
+        .pagination-position {
+            display: flex;
+            min-height: 2.5rem;
+            align-items: center;
+            justify-content: center;
+            color: var(--color-muted);
+            font-size: 0.82rem;
+            font-variant-numeric: tabular-nums;
+            text-align: center;
         }
         .artifact-item__title {
             color: var(--color-foreground);
@@ -1171,6 +1197,11 @@ def _failure_guidance(
     if category is FailureCategory.BUDGET_EXHAUSTION:
         return "The run reached its token ceiling. Raise the ceiling or use a smaller document."
     if category is FailureCategory.SCHEMA_FAILURE:
+        if "output token limit" in detail:
+            return (
+                "The response exceeded this step's output capacity. Increase its "
+                "output tokens and generate again."
+            )
         return "The model did not return valid structured data. Retry or choose a stronger model."
     if category is FailureCategory.SEMANTIC_VALIDATION:
         return "Generated artifacts did not pass traceability checks. Review the diagnostics before retrying."
@@ -1444,9 +1475,20 @@ def _render_scenarios(
         _scenario_dialog(selected_scenario)
 
 
-def _render_coverage(coverage, *, key_prefix: str, run_id: str) -> None:
+def _render_coverage(
+    coverage: CoverageScore | None, *, key_prefix: str, run_id: str
+) -> None:
     st.markdown("### Coverage analysis (F1)")
     columns = st.columns(4)
+    if coverage is None:
+        for column, label in zip(
+            columns,
+            ("F1 Score", "Precision", "Recall", "Coverage units"),
+            strict=True,
+        ):
+            column.metric(label, "—")
+        st.info("Coverage was not calculated because this run did not finish judge analysis.")
+        return
     columns[0].metric("F1 Score", f"{coverage.f1:.2f}")
     columns[1].metric("Precision", f"{coverage.precision:.2f}")
     columns[2].metric("Recall", f"{coverage.recall:.2f}")
@@ -1514,6 +1556,108 @@ def _render_coverage(coverage, *, key_prefix: str, run_id: str) -> None:
             )
 
 
+def _render_agreement(repository: RunRepository, *, key_prefix: str) -> None:
+    try:
+        ratings = repository.list_human_coverage_ratings()
+    except StorageError:
+        st.error("Agreement results could not be loaded. Check the database and retry.")
+        return
+
+    pairs = [(rating.human_score, rating.judge_score) for rating in ratings]
+    exact = sum(human == judge for human, judge in pairs) / len(pairs)
+    kappa = quadratic_weighted_kappa(pairs) if len(pairs) >= 2 else None
+    st.markdown("### Human–judge agreement")
+    columns = st.columns(3)
+    columns[0].metric("Rated runs", len(pairs))
+    columns[1].metric("Exact agreement", f"{exact:.0%}")
+    columns[2].metric(
+        "Quadratic weighted κ", "—" if kappa is None else f"{kappa:.2f}"
+    )
+    if len(pairs) < 2:
+        st.info("Rate at least two runs to calculate Cohen's kappa.")
+    elif kappa is None:
+        st.info("Kappa needs variation in the human or judge ratings.")
+    st.caption("Treat kappa as preliminary until at least 30–50 runs are rated.")
+
+    with st.expander(
+        "Agreement confusion matrix", key=f"{key_prefix}-agreement-matrix"
+    ):
+        st.table(
+            [
+                {
+                    "Human \\ Judge": human,
+                    **{
+                        str(judge): pairs.count((human, judge))
+                        for judge in range(1, 5)
+                    },
+                }
+                for human in range(1, 5)
+            ]
+        )
+
+
+def _render_human_coverage_rating(
+    repository: RunRepository,
+    *,
+    run_id: str,
+    key_prefix: str,
+) -> bool:
+    st.markdown("### Independent human evaluation")
+    try:
+        rating = repository.load_human_coverage_rating(run_id)
+    except StorageError:
+        st.error("The human rating could not be loaded. Check the database and retry.")
+        return False
+
+    if rating is None:
+        st.write(
+            "Compare the generated test cases with the original BRD/SRS, then rate "
+            "coverage from the source evidence."
+        )
+        score = st.radio(
+            "Human coverage rating",
+            tuple(COVERAGE_RATING_LABELS),
+            index=None,
+            format_func=lambda value: f"{value} — {COVERAGE_RATING_LABELS[value]}",
+            key=f"{key_prefix}-{run_id}-human-coverage-score",
+        )
+        reason = st.text_area(
+            "Reason (optional)",
+            max_chars=2_000,
+            key=f"{key_prefix}-{run_id}-human-coverage-reason",
+        )
+        if st.button(
+            "Save independent rating",
+            key=f"{key_prefix}-{run_id}-save-human-coverage",
+            disabled=score is None,
+        ):
+            try:
+                repository.save_human_coverage_rating(run_id, score, reason)
+            except StorageError:
+                st.error("The human rating could not be saved. Refresh and retry.")
+            else:
+                st.rerun()
+        st.caption(
+            "The judge score is shown below for consistent run details. Base your "
+            "rating on the source document; it will not change future generations."
+        )
+        return False
+
+    st.success(
+        f"Human rating saved: {rating.human_score} — "
+        f"{COVERAGE_RATING_LABELS[rating.human_score]}"
+    )
+    if rating.reason:
+        st.caption(f"Reason · {rating.reason}")
+    st.caption(
+        f"Judge rubric rating · {rating.judge_score} — "
+        f"{COVERAGE_RATING_LABELS[rating.judge_score]} (F1 {rating.judge_f1:.2f})"
+    )
+    st.caption("Saved for evaluation only; it does not change future generations.")
+    _render_agreement(repository, key_prefix=f"{key_prefix}-{run_id}")
+    return True
+
+
 def _render_bundle(
     result: RunResult, *, key_prefix: str, in_dialog: bool = False
 ) -> None:
@@ -1522,11 +1666,12 @@ def _render_bundle(
         return
 
     st.markdown("### Generated artifacts")
-    test_cases, requirements, scenarios = st.tabs(
+    test_cases, requirements, scenarios, configuration = st.tabs(
         [
             f"Test cases ({len(bundle.test_cases)})",
             f"Requirements ({len(bundle.requirements)})",
             f"Scenarios ({len(bundle.scenarios)})",
+            "Run configuration",
         ]
     )
     with test_cases:
@@ -1535,6 +1680,8 @@ def _render_bundle(
         _render_requirements(result, key_prefix=key_prefix, in_dialog=in_dialog)
     with scenarios:
         _render_scenarios(result, key_prefix=key_prefix, in_dialog=in_dialog)
+    with configuration:
+        _render_snapshot(result)
 
 
 def _render_snapshot(result: RunResult) -> None:
@@ -1574,10 +1721,19 @@ def _render_snapshot(result: RunResult) -> None:
         label = RUN_AGENT_LABELS.get(agent, agent.replace("_", " ").title())
         with st.container(border=True):
             st.markdown(f"**{label}**")
-            st.caption(
+            detail = (
                 f"{_provider_label(str(raw.get('provider', manifest.provider)))} · "
                 f"{raw.get('model', manifest.model)}"
             )
+            if thinking_level := raw.get("thinking_level"):
+                detail += f" · {thinking_level} thinking"
+            if max_output_tokens := raw.get("max_output_tokens"):
+                detail += f" · {max_output_tokens:,} output tokens"
+            if token_ceiling := raw.get("token_ceiling"):
+                detail += f" · {token_ceiling:,} token ceiling"
+            if raw.get("fixed") is True:
+                detail += " · Fixed"
+            st.caption(detail)
             st.text_area(
                 f"{label} prompt",
                 value=str(raw.get("prompt", "")),
@@ -1587,7 +1743,11 @@ def _render_snapshot(result: RunResult) -> None:
 
 
 def _render_result(
-    result: RunResult, *, key_prefix: str = "result", in_dialog: bool = False
+    result: RunResult,
+    repository: RunRepository,
+    *,
+    key_prefix: str = "result",
+    in_dialog: bool = False,
 ) -> None:
     manifest = result.manifest
     st.caption(f"Source · {manifest.source_filename}")
@@ -1658,42 +1818,52 @@ def _render_result(
                 f"{key_prefix}-{manifest.run_id}-bundle",
             )
 
+    st.markdown("### Quality and traceability")
+    if result.coverage is not None:
+        _render_human_coverage_rating(
+            repository,
+            run_id=manifest.run_id,
+            key_prefix=key_prefix,
+        )
+    if metrics is not None:
+        st.markdown(_quality_chart_html(metrics), unsafe_allow_html=True)
+        st.caption(
+            f"Latency {metrics.latency_seconds:.2f} s · {metrics.retries} retries"
+        )
+    if result.coverage is not None:
+        agents = manifest.configuration.get("agents", {})
+        judge = agents.get("judge", {}) if isinstance(agents, dict) else {}
+        if isinstance(judge, dict):
+            model = judge.get("model")
+            if model:
+                st.caption(
+                    f"Independent judge · {_model_label(str(model))} · fixed"
+                )
+    _render_coverage(
+        result.coverage,
+        key_prefix=key_prefix,
+        run_id=manifest.run_id,
+    )
+
     if result.bundle is not None:
         _render_bundle(result, key_prefix=key_prefix, in_dialog=in_dialog)
-
-    if metrics is not None or result.coverage is not None:
-        if st.toggle(
-            "Show quality details",
-            key=f"{key_prefix}-{manifest.run_id}-show-quality",
-        ):
-            st.markdown("### Quality and traceability")
-            if metrics is not None:
-                st.markdown(_quality_chart_html(metrics), unsafe_allow_html=True)
-                st.caption(
-                    f"Latency {metrics.latency_seconds:.2f} s · "
-                    f"{metrics.retries} retries"
-                )
-            if result.coverage is not None:
-                _render_coverage(
-                    result.coverage,
-                    key_prefix=key_prefix,
-                    run_id=manifest.run_id,
-                )
-
-    with st.expander(
-        "Run configuration",
-        key=f"{key_prefix}-{manifest.run_id}-configuration",
-    ):
-        _render_snapshot(result)
+    else:
+        (configuration,) = st.tabs(["Run configuration"])
+        with configuration:
+            _render_snapshot(result)
 
 
 @st.dialog("Run result", width="large")
-def _result_dialog(result: RunResult) -> None:
+def _result_dialog(result: RunResult, repository: RunRepository) -> None:
     st.markdown("<span id='result-reader-marker'></span>", unsafe_allow_html=True)
-    _render_result(result, key_prefix="result-reader", in_dialog=True)
+    _render_result(
+        result, repository, key_prefix="result-reader", in_dialog=True
+    )
 
 
-def _render_timeline_result_action(result: RunResult) -> None:
+def _render_timeline_result_action(
+    result: RunResult, repository: RunRepository
+) -> None:
     label, _ = _result_status(result)
     completed = result.manifest.status is RunStatus.COMPLETED
     eyebrow = "Validated result" if completed else "Run outcome"
@@ -1711,7 +1881,7 @@ def _render_timeline_result_action(result: RunResult) -> None:
         key=f"timeline-{result.manifest.run_id}-view-result",
         width="stretch",
     ):
-        _result_dialog(result)
+        _result_dialog(result, repository)
 
 
 def _go_home() -> None:
@@ -1778,7 +1948,12 @@ def _request_create() -> None:
             st.session_state.pop(key)
     st.session_state["view"] = "create"
     st.session_state["create_step"] = 1
+    st.session_state["runs_page"] = 1
     st.session_state.pop("retained_pdf", None)
+
+
+def _set_runs_page(page: int) -> None:
+    st.session_state["runs_page"] = page
 
 
 def _render_runs(repository: RunRepository) -> None:
@@ -1817,6 +1992,10 @@ def _render_runs(repository: RunRepository) -> None:
         type="primary",
         on_click=_request_create,
     )
+    st.link_button(
+        "How the system and coverage work",
+        "/app/static/system-and-coverage.html",
+    )
     if notice := st.session_state.pop("runs_notice", None):
         st.info(notice)
     if runs is None:
@@ -1829,8 +2008,13 @@ def _render_runs(repository: RunRepository) -> None:
         st.info("No test suites yet. Add your first PDF to get started.")
         return
 
+    page_count = (len(runs) + RUNS_PER_PAGE - 1) // RUNS_PER_PAGE
+    page = min(max(st.session_state.get("runs_page", 1), 1), page_count)
+    st.session_state["runs_page"] = page
+    start = (page - 1) * RUNS_PER_PAGE
+
     st.markdown("### Recent test suites")
-    for item in runs:
+    for item in runs[start : start + RUNS_PER_PAGE]:
         with st.container(border=True, key=f"run-item-{item.run_id}"):
             st.markdown(_run_item_html(item), unsafe_allow_html=True)
             st.button(
@@ -1839,8 +2023,27 @@ def _render_runs(repository: RunRepository) -> None:
                 on_click=_open_run,
                 args=(item.run_id,),
             )
-
-
+    if page_count > 1:
+        previous, position, following = st.columns([1, 2, 1])
+        previous.button(
+            "Previous",
+            disabled=page == 1,
+            on_click=_set_runs_page,
+            args=(page - 1,),
+            width="stretch",
+        )
+        position.markdown(
+            f"<div class='pagination-position'>Page {page} of {page_count} · "
+            f"{len(runs)} runs</div>",
+            unsafe_allow_html=True,
+        )
+        following.button(
+            "Next",
+            disabled=page == page_count,
+            on_click=_set_runs_page,
+            args=(page + 1,),
+            width="stretch",
+        )
 def _render_centralized_create(
     repository: RunRepository,
     settings: ProviderSettings,
@@ -1944,7 +2147,7 @@ def _render_centralized_create(
                     with artifact_column:
                         _render_artifact_reader(st.empty(), activity_events)
             with result_panel.container(border=True):
-                _render_timeline_result_action(result)
+                _render_timeline_result_action(result, repository)
         else:
             live_panel.empty()
         return
@@ -2071,7 +2274,7 @@ def _render_centralized_create(
     st.session_state["selected_run"] = result
     st.session_state["timeline_result"] = result
     with result_panel.container(border=True):
-        _render_timeline_result_action(result)
+        _render_timeline_result_action(result, repository)
 def _render_create_steps(active_step: int) -> None:
     labels = ("Choose run type", "Configure agents", "Upload and run")
     steps = []
@@ -2137,6 +2340,12 @@ def _initialize_run_settings(
         st.session_state.setdefault(
             f"run_{agent}_prompt", RUN_PROMPT_DEFAULTS[agent]
         )
+        st.session_state.setdefault(f"run_{agent}_thinking_level", "minimal")
+        if run_type is RunType.STAGED_SINGLE_AGENT:
+            st.session_state.setdefault(
+                f"run_{agent}_max_output_tokens",
+                STAGED_OUTPUT_TOKEN_DEFAULTS[agent],
+            )
 
 
 def _render_provider_model(
@@ -2187,12 +2396,42 @@ def _render_provider_model(
     return provider, model
 
 
+def _supports_thinking_level(provider: str, model: str) -> bool:
+    return provider == "gemini" and model.startswith("gemini-3")
+
+
+def _render_thinking_level(agent: str, label: str) -> None:
+    st.selectbox(
+        f"{label} thinking level",
+        GEMINI_THINKING_LEVELS,
+        key=f"run_{agent}_thinking_level",
+        format_func=str.title,
+        help="Minimal leaves more of the output limit available for structured JSON.",
+    )
+
+
+def _render_step_output_tokens(agent: str) -> None:
+    label = RUN_AGENT_LABELS[agent]
+    st.number_input(
+        f"{label} output tokens",
+        min_value=1_000,
+        max_value=65_000,
+        step=1_000,
+        key=f"run_{agent}_max_output_tokens",
+        help="Maximum generated tokens for this step, including Gemini thinking.",
+    )
+
+
 def _render_run_settings(run_type: RunType) -> None:
     st.session_state.pop("_llama_cpp_model_error", None)
     if run_type is RunType.SINGLE_PROMPT:
         with st.container(border=True):
             st.markdown("#### Test suite generator")
-            _render_provider_model("single", "Agent", run_type)
+            provider, model = _render_provider_model("single", "Agent", run_type)
+            if _supports_thinking_level(provider, model):
+                _render_thinking_level("single", "Agent")
+            elif provider == "gemini":
+                st.caption("Thinking level is automatic for Gemini 2.5 models.")
             st.text_area(
                 "Agent prompt",
                 key="run_single_prompt",
@@ -2202,10 +2441,20 @@ def _render_run_settings(run_type: RunType) -> None:
     elif run_type is RunType.STAGED_SINGLE_AGENT:
         with st.container(border=True):
             st.markdown("#### Shared generation model")
-            _render_provider_model("staged", "Agent", run_type)
+            provider, model = _render_provider_model("staged", "Agent", run_type)
         for agent in RUN_CONFIG_AGENTS[run_type]:
             with st.container(border=True):
                 st.markdown(f"#### {RUN_AGENT_LABELS[agent]}")
+                if _supports_thinking_level(provider, model):
+                    thinking_column, tokens_column = st.columns(2)
+                    with thinking_column:
+                        _render_thinking_level(agent, RUN_AGENT_LABELS[agent])
+                    with tokens_column:
+                        _render_step_output_tokens(agent)
+                else:
+                    if provider == "gemini":
+                        st.caption("Thinking level is automatic for Gemini 2.5 models.")
+                    _render_step_output_tokens(agent)
                 st.text_area(
                     f"{RUN_AGENT_LABELS[agent]} prompt",
                     key=f"run_{agent}_prompt",
@@ -2216,13 +2465,26 @@ def _render_run_settings(run_type: RunType) -> None:
         for agent in RUN_CONFIG_AGENTS[run_type]:
             with st.container(border=True):
                 st.markdown(f"#### {RUN_AGENT_LABELS[agent]}")
-                _render_provider_model(agent, RUN_AGENT_LABELS[agent], run_type)
+                provider, model = _render_provider_model(
+                    agent, RUN_AGENT_LABELS[agent], run_type
+                )
+                if _supports_thinking_level(provider, model):
+                    _render_thinking_level(agent, RUN_AGENT_LABELS[agent])
+                elif provider == "gemini":
+                    st.caption("Thinking level is automatic for Gemini 2.5 models.")
                 st.text_area(
                     f"{RUN_AGENT_LABELS[agent]} prompt",
                     key=f"run_{agent}_prompt",
                     height=150,
                     help="Applied after the core evidence, safety, and output-schema rules.",
                 )
+    with st.container(border=True):
+        st.markdown("#### Judge")
+        st.caption(
+            f"{_model_label(JUDGE_MODEL)} · {JUDGE_THINKING_LEVEL.title()} thinking · "
+            f"{JUDGE_TOKEN_CEILING:,} separate evaluation tokens · Fixed"
+        )
+        st.write(JUDGE_PURPOSE)
     if st.session_state.pop("_llama_cpp_model_error", False):
         st.warning(
             "llama.cpp models are unavailable. Check LLAMA_CPP_BASE_URL and "
@@ -2254,6 +2516,22 @@ def _run_provider_settings(run_type: RunType) -> ProviderSettings:
         provider = agent_providers[agents[0]]
         model = agent_models[agents[0]]
 
+    agent_thinking_levels = {
+        agent: st.session_state.get(f"run_{agent}_thinking_level", "minimal")
+        for agent in agents
+        if _supports_thinking_level(
+            agent_providers[agent], agent_models[agent]
+        )
+    }
+    agent_max_output_tokens = (
+        {
+            agent: st.session_state[f"run_{agent}_max_output_tokens"]
+            for agent in agents
+        }
+        if run_type is RunType.STAGED_SINGLE_AGENT
+        else {}
+    )
+
     roles = st.session_state.get("run_agent_roles", {})
     agent_setups = {
         agent: AgentSetup(
@@ -2274,6 +2552,9 @@ def _run_provider_settings(run_type: RunType) -> ProviderSettings:
         agent_prompts={
             agent: st.session_state[f"run_{agent}_prompt"] for agent in agents
         },
+        thinking_level=agent_thinking_levels.get(agents[0]),
+        agent_thinking_levels=agent_thinking_levels,
+        agent_max_output_tokens=agent_max_output_tokens,
         provider_api_keys={"gemini": _api_key("gemini")},
         provider_base_urls={
             provider_name: _base_url(provider_name)
@@ -2296,21 +2577,49 @@ def _restore_run_settings(run_type: RunType, settings: ProviderSettings) -> None
             st.session_state[f"run_{agent}_model"] = settings.model_for(agent)
     for agent in RUN_CONFIG_AGENTS[run_type]:
         st.session_state[f"run_{agent}_prompt"] = settings.prompt_for(agent)
+        st.session_state[f"run_{agent}_thinking_level"] = (
+            settings.thinking_level_for(agent) or "minimal"
+        )
+        if run_type is RunType.STAGED_SINGLE_AGENT:
+            st.session_state[f"run_{agent}_max_output_tokens"] = (
+                settings.agent_max_output_tokens.get(
+                    agent, STAGED_OUTPUT_TOKEN_DEFAULTS[agent]
+                )
+            )
 
 
 def _render_run_summary(run_type: RunType, settings: ProviderSettings) -> None:
     st.markdown("#### Run settings")
-    st.table(
-        [
-            {
-                "Agent / step": RUN_AGENT_LABELS[agent],
-                "Provider": _provider_label(settings.provider_for(agent)),
-                "Model": settings.model_for(agent),
-            }
-            for agent in RUN_CONFIG_AGENTS[run_type]
-        ]
+    rows = [
+        {
+            "Agent / step": RUN_AGENT_LABELS[agent],
+            "Provider": _provider_label(settings.provider_for(agent)),
+            "Model": settings.model_for(agent),
+            "Thinking": (
+                settings.thinking_level_for(agent) or "Automatic"
+            ).title(),
+            "Output tokens": (
+                f"{settings.agent_max_output_tokens[agent]:,}"
+                if agent in settings.agent_max_output_tokens
+                else "—"
+            ),
+        }
+        for agent in RUN_CONFIG_AGENTS[run_type]
+    ]
+    rows.append(
+        {
+            "Agent / step": "Judge (fixed)",
+            "Provider": _provider_label(JUDGE_PROVIDER),
+            "Model": _model_label(JUDGE_MODEL),
+            "Thinking": JUDGE_THINKING_LEVEL.title(),
+            "Output tokens": "Fixed policy",
+        }
     )
-    st.caption("The exact provider, model, and prompt configuration is saved with the run.")
+    st.table(rows)
+    st.caption(
+        "The exact provider, model, thinking, token, and prompt configuration "
+        "is saved with the run."
+    )
 
 
 def _render_create(repository: RunRepository) -> None:
@@ -2449,7 +2758,7 @@ def _render_detail(repository: RunRepository) -> None:
             st.rerun()
         st.session_state["selected_run"] = result
     st.title(result.manifest.source_filename)
-    _render_result(result, key_prefix="detail")
+    _render_result(result, repository, key_prefix="detail")
 
 
 def _render_flashes() -> None:

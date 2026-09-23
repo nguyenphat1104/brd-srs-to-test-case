@@ -1,0 +1,82 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Staged Single Agent · Detailed Run Flow",
+    "quality_profile": "showcase",
+    "output": "static/staged-single-agent-flow.html"
+  },
+  "lanes": [
+    { "id": "evidence", "label": "Evidence" },
+    { "id": "generation", "label": "Shared Model · Sequential Steps" },
+    { "id": "quality", "label": "Deterministic Quality" },
+    { "id": "judge", "label": "Fixed Judge" },
+    { "id": "storage", "label": "Saved Result" }
+  ],
+  "phases": [
+    { "id": "extract", "label": "Extract", "fromCol": 0, "toCol": 1 },
+    { "id": "design", "label": "Design", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "evaluate", "label": "Validate & evaluate", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": [
+    "evidence_chunks",
+    "requirements_step",
+    "scenarios_step",
+    "test_cases_step",
+    "assemble_bundle",
+    "validate_bundle",
+    "build_metrics",
+    "persist_result"
+  ],
+  "semanticChecks": {
+    "allowedRoots": ["evidence_chunks"],
+    "allowedTerminals": ["persist_result"],
+    "requiredPaths": [
+      { "from": "evidence_chunks", "to": "persist_result" },
+      { "from": "assemble_bundle", "to": "judge_bundle" }
+    ]
+  },
+  "nodes": [
+    { "id": "evidence_chunks", "lane": "evidence", "col": 0, "type": "external", "label": "Evidence Chunks", "sublabel": "full PDF", "width": 148 },
+    { "id": "requirements_step", "lane": "generation", "col": 1, "type": "backend", "label": "Requirements Step", "sublabel": "→ RequirementBatch", "width": 152 },
+    { "id": "scenarios_step", "lane": "generation", "col": 2, "type": "backend", "label": "Scenarios Step", "sublabel": "→ ScenarioBatch", "width": 148 },
+    { "id": "test_cases_step", "lane": "generation", "col": 3, "type": "backend", "label": "Test Cases Step", "sublabel": "→ TestCaseBatch", "width": 148 },
+    { "id": "assemble_bundle", "lane": "generation", "col": 4, "type": "messagebus", "label": "Assemble Bundle", "sublabel": "REQ + SCN + TC", "width": 148 },
+    { "id": "revise_bundle", "lane": "generation", "col": 5, "type": "backend", "label": "Whole-Bundle Revision", "sublabel": "test-case token limit", "width": 166 },
+    { "id": "validate_bundle", "lane": "quality", "col": 4, "type": "security", "label": "Validate Bundle", "sublabel": "repair links if possible", "width": 156 },
+    { "id": "build_metrics", "lane": "quality", "col": 5, "type": "backend", "label": "RTM & Metrics", "sublabel": "deterministic", "width": 136 },
+    { "id": "judge_bundle", "lane": "judge", "col": 4, "type": "backend", "label": "Judge Bundle", "sublabel": "fixed semantic F1", "width": 144 },
+    { "id": "persist_result", "lane": "storage", "col": 5, "type": "database", "label": "Persist Run Result", "sublabel": "config + outputs", "width": 150 }
+  ],
+  "edges": [
+    { "id": "chunks_to_requirements", "from": "evidence_chunks", "to": "requirements_step", "label": "full evidence", "role": "main" },
+    { "id": "requirements_to_scenarios", "from": "requirements_step", "to": "scenarios_step", "variant": "emphasis", "role": "main" },
+    { "id": "scenarios_to_cases", "from": "scenarios_step", "to": "test_cases_step", "variant": "emphasis", "role": "main" },
+    { "id": "cases_to_bundle", "from": "test_cases_step", "to": "assemble_bundle", "role": "main" },
+    { "id": "bundle_to_validation", "from": "assemble_bundle", "to": "validate_bundle", "label": "canonical citations", "variant": "emphasis", "role": "main" },
+    { "id": "validation_to_metrics", "from": "validate_bundle", "to": "build_metrics", "label": "final report", "role": "main" },
+    { "id": "metrics_to_storage", "from": "build_metrics", "to": "persist_result", "label": "RTM + ratios", "variant": "emphasis", "role": "main" },
+    { "id": "validation_to_revision", "from": "validate_bundle", "to": "revise_bundle", "label": "remaining issue", "variant": "security", "role": "branch" },
+    { "id": "revision_to_validation", "from": "revise_bundle", "to": "validate_bundle", "label": "revalidate once", "variant": "dashed", "role": "return" },
+    { "id": "bundle_to_judge", "from": "validate_bundle", "to": "judge_bundle", "label": "generated bundle", "variant": "dashed", "role": "branch" },
+    { "id": "judge_to_storage", "from": "judge_bundle", "to": "persist_result", "label": "optional F1", "variant": "dashed", "role": "return" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Sequential handoff",
+      "items": [
+        "One shared provider and model perform three isolated generation tasks",
+        "Each typed batch becomes explicit input to the next step"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Per-step controls",
+      "items": [
+        "Requirements, Scenarios, and Test Cases each have prompt, thinking, and output settings",
+        "The final revision inherits the Test Cases output-token limit"
+      ]
+    }
+  ]
+}

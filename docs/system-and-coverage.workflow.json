@@ -1,0 +1,83 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "BRD/SRS Test-Case Generation and Coverage",
+    "quality_profile": "showcase",
+    "output": "static/system-and-coverage-diagram.html"
+  },
+  "lanes": [
+    { "id": "source", "label": "User & Source" },
+    { "id": "generation", "label": "Generation Pipeline" },
+    { "id": "quality", "label": "Deterministic Quality Gates" },
+    { "id": "storage", "label": "Persistence & Results" },
+    { "id": "coverage", "label": "Fixed Judge · Gemini 3.6 Flash" }
+  ],
+  "phases": [
+    { "id": "intake", "label": "Intake", "fromCol": 0, "toCol": 1 },
+    { "id": "produce", "label": "Generate & validate", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "measure", "label": "Measure & publish", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": [
+    "upload_pdf",
+    "parse_chunks",
+    "generate_bundle",
+    "validate_bundle",
+    "compute_metrics",
+    "persist_run",
+    "view_result"
+  ],
+  "semanticChecks": {
+    "allowedRoots": ["upload_pdf"],
+    "allowedTerminals": ["view_result"],
+    "requiredPaths": [
+      { "from": "upload_pdf", "to": "view_result" },
+      { "from": "validate_bundle", "to": "coverage_f1" }
+    ]
+  },
+  "nodes": [
+    { "id": "upload_pdf", "lane": "source", "col": 0, "type": "external", "label": "Upload BRD/SRS PDF", "sublabel": "text-extractable PDF", "width": 156 },
+    { "id": "view_result", "lane": "source", "col": 5, "type": "frontend", "label": "Review Saved Run", "sublabel": "artifacts, RTM, metrics, F1", "width": 150 },
+    { "id": "parse_chunks", "lane": "generation", "col": 1, "type": "backend", "label": "Parse Evidence Chunks", "sublabel": "page, section, hash, excerpt", "width": 156 },
+    { "id": "generate_bundle", "lane": "generation", "col": 2, "type": "backend", "label": "Generate Artifact Bundle", "sublabel": "requirements → scenarios → tests", "width": 168 },
+    { "id": "repair_bundle", "lane": "generation", "col": 4, "type": "messagebus", "label": "Repair or Revise Links", "sublabel": "bounded correction", "width": 150 },
+    { "id": "validate_bundle", "lane": "quality", "col": 3, "type": "security", "label": "Validate Bundle", "sublabel": "IDs, links, citations", "width": 150 },
+    { "id": "compute_metrics", "lane": "quality", "col": 4, "type": "backend", "label": "Build RTM & Metrics", "sublabel": "deterministic ratios", "width": 150 },
+    { "id": "extract_units", "lane": "coverage", "col": 3, "type": "backend", "label": "Extract Coverage Units", "sublabel": "LLM reads source evidence", "width": 156 },
+    { "id": "map_cases", "lane": "coverage", "col": 4, "type": "backend", "label": "Map Test Cases", "sublabel": "LLM judges direct exercise", "width": 150 },
+    { "id": "coverage_f1", "lane": "coverage", "col": 5, "type": "backend", "label": "Compute Coverage F1", "sublabel": "deterministic from mappings", "width": 142 },
+    { "id": "persist_run", "lane": "storage", "col": 5, "type": "database", "label": "Persist Run", "sublabel": "normalized PostgreSQL record", "width": 150 }
+  ],
+  "edges": [
+    { "id": "upload_to_parse", "from": "upload_pdf", "to": "parse_chunks", "label": "PDF bytes", "variant": "default", "role": "main" },
+    { "id": "parse_to_generate", "from": "parse_chunks", "to": "generate_bundle", "label": "trusted chunk IDs", "variant": "emphasis", "role": "main" },
+    { "id": "generate_to_validate", "from": "generate_bundle", "to": "validate_bundle", "label": "typed bundle", "variant": "default", "role": "main" },
+    { "id": "validate_to_metrics", "from": "validate_bundle", "to": "compute_metrics", "label": "validation report", "variant": "emphasis", "role": "main" },
+    { "id": "metrics_to_persist", "from": "compute_metrics", "to": "persist_run", "label": "RTM + ratios", "variant": "default", "role": "main" },
+    { "id": "persist_to_view", "from": "persist_run", "to": "view_result", "label": "reload by run ID", "variant": "emphasis", "role": "main" },
+    { "id": "validation_to_repair", "from": "validate_bundle", "to": "repair_bundle", "label": "repairable issues", "variant": "security", "role": "branch" },
+    { "id": "repair_to_validation", "from": "repair_bundle", "to": "validate_bundle", "label": "revalidate", "variant": "dashed", "role": "return" },
+    { "id": "validation_to_units", "from": "validate_bundle", "to": "extract_units", "label": "artifact bundle", "variant": "dashed", "role": "branch" },
+    { "id": "units_to_mapping", "from": "extract_units", "to": "map_cases", "label": "units + generated tests", "variant": "dashed" },
+    { "id": "mapping_to_f1", "from": "map_cases", "to": "coverage_f1", "label": "known IDs only", "variant": "dashed" },
+    { "id": "f1_to_persist", "from": "coverage_f1", "to": "persist_run", "label": "optional score", "variant": "dashed", "role": "return" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Deterministic traceability",
+      "items": [
+        "Requirement coverage is based on explicit REQ → SCN → TC links",
+        "Validation controls run success; ratios and the RTM are reproducible"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "AI-assisted semantic coverage",
+      "items": [
+        "Gemini 3.6 Flash extracts atomic source units and maps test behavior",
+        "F1 is informational; judge failure never changes the generation outcome"
+      ]
+    }
+  ]
+}

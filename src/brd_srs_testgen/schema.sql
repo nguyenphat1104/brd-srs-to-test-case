@@ -304,3 +304,13 @@ CREATE TABLE IF NOT EXISTS coverage_scores (
     uncovered_unit_ids jsonb NOT NULL DEFAULT '[]',
     unmapped_test_case_ids jsonb NOT NULL DEFAULT '[]'
 );
+
+CREATE TABLE IF NOT EXISTS human_coverage_ratings (
+    run_id text PRIMARY KEY REFERENCES coverage_scores(run_id) ON DELETE CASCADE,
+    human_score smallint NOT NULL CHECK (human_score BETWEEN 1 AND 4),
+    judge_score smallint NOT NULL CHECK (judge_score BETWEEN 1 AND 4),
+    judge_f1 double precision NOT NULL CHECK (judge_f1 BETWEEN 0 AND 1),
+    reason text NOT NULL DEFAULT '' CHECK (length(reason) <= 2000),
+    rubric_version text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);

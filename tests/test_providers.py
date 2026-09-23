@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from brd_srs_testgen.models import RequirementBatch
+from brd_srs_testgen.pipelines import BoundedRequirementBatch
 from brd_srs_testgen.providers import (
     BudgetExceeded,
     BudgetLedger,
@@ -34,8 +35,10 @@ class FakeInteractions:
         self,
         text: str = '{"requirements": []}',
         usage: SimpleNamespace | None = None,
+        status: str = "completed",
     ) -> None:
         self.text = text
+        self.status = status
         self.usage = usage or SimpleNamespace(
             total_input_tokens=10,
             total_output_tokens=5,
@@ -48,6 +51,7 @@ class FakeInteractions:
         return SimpleNamespace(
             output_text=self.text,
             usage=self.usage,
+            status=self.status,
         )
 
 
@@ -208,7 +212,9 @@ def test_gemini_uses_structured_output_and_records_usage() -> None:
     interactions = FakeInteractions()
     client = SimpleNamespace(models=FakeModels(), interactions=interactions)
     ledger = BudgetLedger(limit=100)
-    provider = GeminiProvider(client, "gemini-test", ledger)
+    provider = GeminiProvider(
+        client, "gemini-test", ledger, thinking_level="minimal"
+    )
 
     result = provider.generate(
         [{"role": "user", "content": "Extract requirements"}],
@@ -222,6 +228,24 @@ def test_gemini_uses_structured_output_and_records_usage() -> None:
     assert ledger.used == 15
     assert interactions.kwargs["response_format"]["mime_type"] == "application/json"
     assert interactions.kwargs["generation_config"]["temperature"] == 0.0
+    assert interactions.kwargs["generation_config"]["thinking_level"] == "minimal"
+
+
+def test_gemini_omits_unsupported_max_items_from_response_schema() -> None:
+    interactions = FakeInteractions()
+    provider = GeminiProvider(
+        SimpleNamespace(models=FakeModels(), interactions=interactions),
+        "gemini-test",
+        BudgetLedger(limit=100),
+    )
+
+    provider.generate(
+        [{"role": "user", "content": "Extract requirements"}],
+        BoundedRequirementBatch,
+        max_output_tokens=40,
+    )
+
+    assert "maxItems" not in json.dumps(interactions.kwargs["response_format"])
 
 
 def test_gemini_charges_reported_total_tokens() -> None:
@@ -244,6 +268,23 @@ def test_gemini_charges_reported_total_tokens() -> None:
 
     assert result.total_tokens == 21
     assert ledger.used == 21
+
+
+def test_gemini_reports_incomplete_structured_output_without_hiding_usage() -> None:
+    interactions = FakeInteractions(text='{"requirements":[', status="incomplete")
+    client = SimpleNamespace(models=FakeModels(), interactions=interactions)
+    ledger = BudgetLedger(limit=100)
+    provider = GeminiProvider(client, "gemini-test", ledger)
+
+    with pytest.raises(StructuredOutputError, match="output token limit") as raised:
+        provider.generate(
+            [{"role": "user", "content": "Extract requirements"}],
+            RequirementBatch,
+            max_output_tokens=40,
+        )
+
+    assert raised.value.incomplete
+    assert ledger.used == 15
 
 
 def test_gemini_does_not_undercharge_reported_total_tokens() -> None:
