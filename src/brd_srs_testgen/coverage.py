@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from .documents import canonicalize_source_references, render_chunks
+from .documents import (
+    canonicalize_source_references,
+    render_chunks,
+    verify_source_reference,
+)
 from .models import (
     AgentSetup,
     ArtifactBundle,
@@ -16,7 +20,7 @@ from .models import (
     CoverageUnitBatch,
     DocumentChunk,
 )
-from .pipelines import RULES, PipelineContext, _data_block, _user
+from .pipelines import RULES, PipelineContext, PipelineOutputError, _data_block, _user
 
 
 COVERAGE_RULES = """Rules:
@@ -128,6 +132,12 @@ def extract_coverage_catalog(
         agent="coverage_analyzer",
     )
     batch = canonicalize_source_references(batch, chunks)
+    for unit in batch.units:
+        for reference in unit.source_references:
+            if not verify_source_reference(reference, chunks):
+                raise PipelineOutputError(
+                    f"coverage unit {unit.unit_id} has an unsupported source reference"
+                )
     return CoverageCatalog(
         catalog_id=catalog_id,
         document_hash=document_hash,

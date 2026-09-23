@@ -12,7 +12,7 @@ from brd_srs_testgen.coverage import (
     extract_coverage_units_prompt,
     map_test_cases_prompt,
 )
-from brd_srs_testgen.pipelines import PipelineContext
+from brd_srs_testgen.pipelines import PipelineContext, PipelineOutputError
 from brd_srs_testgen.providers import BudgetLedger, GenerationResult
 from brd_srs_testgen.models import (
     ArtifactBundle,
@@ -209,6 +209,37 @@ class TestCatalogExtractionAndMapping:
         )
 
         assert catalog.units[0].source_references == [_source()]
+
+    def test_extract_coverage_catalog_rejects_unsupported_citations(self) -> None:
+        provider = ScriptedProvider(
+            [
+                CoverageUnitBatch(
+                    units=[
+                        _units(1).units[0].model_copy(
+                            update={
+                                "source_references": [
+                                    _source().model_copy(
+                                        update={"excerpt": "Invented behavior."}
+                                    )
+                                ]
+                            }
+                        )
+                    ]
+                )
+            ]
+        )
+
+        with pytest.raises(
+            PipelineOutputError, match="coverage unit CU-001.*source reference"
+        ):
+            extract_coverage_catalog(
+                PipelineContext(provider=provider, sleep=lambda _seconds: None),
+                [_chunk()],
+                document_hash="a" * 64,
+                evaluator_version="coverage-v2:test",
+                catalog_id="catalog-1",
+                created_at=datetime(2026, 9, 23, tzinfo=UTC),
+            )
 
     def test_evaluate_against_catalog_never_extracts_units(self) -> None:
         provider = ScriptedProvider(
