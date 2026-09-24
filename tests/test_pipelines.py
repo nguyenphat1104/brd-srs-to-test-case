@@ -787,7 +787,31 @@ def test_scout_validator_rejects_invalid_candidate_batches() -> None:
             pipeline_module._canonicalize_scout_candidates(0, batch, group)
 
 
-def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() -> None:
+@pytest.mark.parametrize(
+    ("worker_limit", "expected_groups"),
+    [
+        (
+            2,
+            [
+                ["chunk-001", "chunk-002"],
+                ["chunk-002", "chunk-003", "chunk-004"],
+                ["chunk-004", "chunk-005", "chunk-006"],
+            ],
+        ),
+        (
+            8,
+            [
+                ["chunk-001", "chunk-002"],
+                ["chunk-002", "chunk-003", "chunk-004"],
+                ["chunk-004", "chunk-005", "chunk-006"],
+                ["chunk-006", "chunk-007", "chunk-008"],
+            ],
+        ),
+    ],
+)
+def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces(
+    worker_limit: int, expected_groups: list[list[str]]
+) -> None:
     chunks = [
         chunk().model_copy(
             update={
@@ -800,7 +824,7 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
                 "content_hash": f"{index:x}" * 64,
             }
         )
-        for index in range(1, 9)
+        for index in range(1, 2 * len(expected_groups) + 1)
     ]
     responses = {
         worker: CandidateRequirementBatch(
@@ -828,7 +852,7 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
                 )
             ]
         )
-        for worker in range(4)
+        for worker in range(len(expected_groups))
     }
 
     class ScoutProvider(CentralProvider):
@@ -841,7 +865,9 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
             content = messages[-1]["content"]
             if schema is CandidateRequirementBatch:
                 worker = next(
-                    index for index in range(4) if f"SCOUT {index + 1}/4" in content
+                    index
+                    for index in range(len(expected_groups))
+                    if f"SCOUT {index + 1}/{len(expected_groups)}" in content
                 )
                 with self.lock:
                     self.active += 1
@@ -877,33 +903,31 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
             return super().generate(*args, agent=agent, **kwargs)
 
     provider = ScoutProvider()
-    context = ScoutContext(provider=provider, worker_limit=8)
+    context = ScoutContext(provider=provider, worker_limit=worker_limit)
     run_centralized_multi_agent(context, chunks)
 
     calls = [call for call in provider.calls if call[1] is CandidateRequirementBatch]
-    expected_groups = [
-        ["chunk-001", "chunk-002"],
-        ["chunk-002", "chunk-003", "chunk-004"],
-        ["chunk-004", "chunk-005", "chunk-006"],
-        ["chunk-006", "chunk-007", "chunk-008"],
-    ]
-    assert len(calls) == 4
-    assert context.agents.count("scout") == 4
+    assert len(calls) == len(expected_groups)
+    assert context.agents.count("scout") == len(expected_groups)
     call_by_worker = {
-        index: next(call for call in calls if f"SCOUT {index}/4" in call[0][0]["content"])
-        for index in range(1, 5)
+        index: next(
+            call
+            for call in calls
+            if f"SCOUT {index}/{len(expected_groups)}" in call[0][0]["content"]
+        )
+        for index in range(1, len(expected_groups) + 1)
     }
     assert [
         [line.split(" | ", 1)[0][1:] for line in call_by_worker[index][0][0]["content"].splitlines() if line.startswith("[")]
-        for index in range(1, 5)
+        for index in range(1, len(expected_groups) + 1)
     ] == expected_groups
     assert all(
         f"CAND-{index:03d}-001 upward" in call_by_worker[index][0][0]["content"]
-        for index in range(1, 5)
+        for index in range(1, len(expected_groups) + 1)
     )
-    assert provider.max_active <= 3
+    assert provider.max_active <= min(worker_limit, 3)
     assert [set(left) & set(right) for left, right in zip(expected_groups, expected_groups[1:])] == [
-        {"chunk-002"}, {"chunk-004"}, {"chunk-006"}
+        {group[-1]} for group in expected_groups[:-1]
     ]
     assert [
         [item.chunk_id for item in group]
