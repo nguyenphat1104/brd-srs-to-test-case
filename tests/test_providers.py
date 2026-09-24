@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from brd_srs_testgen.models import RequirementBatch
+from brd_srs_testgen.pipelines import BoundedGeneratedCases
 from brd_srs_testgen.providers import (
     BudgetExceeded,
     BudgetLedger,
@@ -228,6 +229,23 @@ def test_gemini_uses_structured_output_and_records_usage() -> None:
     assert interactions.kwargs["response_format"]["mime_type"] == "application/json"
     assert interactions.kwargs["generation_config"]["temperature"] == 0.0
     assert interactions.kwargs["generation_config"]["thinking_level"] == "minimal"
+
+
+def test_gemini_omits_unsupported_max_items_from_response_schema() -> None:
+    interactions = FakeInteractions('{"scenarios": [], "test_cases": []}')
+    provider = GeminiProvider(
+        SimpleNamespace(models=FakeModels(), interactions=interactions),
+        "gemini-test",
+        BudgetLedger(limit=100),
+    )
+
+    provider.generate(
+        [{"role": "user", "content": "Generate test cases"}],
+        BoundedGeneratedCases,
+        max_output_tokens=40,
+    )
+
+    assert "maxItems" not in json.dumps(interactions.kwargs["response_format"])
 
 
 def test_gemini_charges_reported_total_tokens() -> None:
