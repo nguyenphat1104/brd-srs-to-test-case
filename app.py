@@ -41,6 +41,7 @@ from brd_srs_testgen.models import (
 )
 from brd_srs_testgen.prompts import RUN_PROMPT_DEFAULTS
 from brd_srs_testgen.pipelines import (
+    MIN_OUTPUT_TOKENS,
     MULTI_AGENT_BUDGET_SHARES,
     STAGED_OUTPUT_TOKEN_DEFAULTS,
 )
@@ -2689,11 +2690,11 @@ def _render_thinking_level(agent: str, label: str) -> None:
     )
 
 
-def _render_step_output_tokens(agent: str) -> None:
+def _render_step_output_tokens(agent: str, *, min_value: int = 1_000) -> None:
     label = RUN_AGENT_LABELS[agent]
     st.number_input(
         f"{label} output tokens",
-        min_value=1_000,
+        min_value=min_value,
         max_value=65_000,
         step=1_000,
         key=f"run_{agent}_max_output_tokens",
@@ -2751,7 +2752,7 @@ def _render_run_settings(run_type: RunType) -> None:
                     _render_thinking_level(agent, RUN_AGENT_LABELS[agent])
                 elif provider == "gemini":
                     st.caption("Thinking level is automatic for Gemini 2.5 models.")
-                _render_step_output_tokens(agent)
+                _render_step_output_tokens(agent, min_value=MIN_OUTPUT_TOKENS)
                 st.text_area(
                     f"{RUN_AGENT_LABELS[agent]} prompt",
                     key=f"run_{agent}_prompt",

@@ -576,6 +576,9 @@ def test_staged_settings_share_gemini_36_model_and_have_three_prompts() -> None:
         "Scenarios step output tokens": 24_000,
         "Test cases step output tokens": 48_000,
     }
+    assert {
+        item.min for item in at.number_input if item.label.endswith("output tokens")
+    } == {1_000}
     assert {area.label for area in at.text_area} == {
         "Requirements step prompt",
         "Scenarios step prompt",
@@ -617,6 +620,29 @@ def test_multi_agent_settings_keep_local_defaults_for_every_agent() -> None:
     assert "Gemini 3.6 Flash · Medium thinking" in text
     assert "separate evaluation tokens · Fixed" in text
     assert "llama.cpp base URL" not in {item.label for item in at.text_input}
+
+
+@pytest.mark.parametrize("requested_cap", [1_000, 1_024])
+def test_hierarchical_output_tokens_cannot_submit_below_stage_minimum(requested_cap):
+    at = _app_test()
+    at.run()
+    _open_settings_step(at, RunType.CENTRALIZED_MULTI_AGENT)
+    controls = [
+        item for item in at.number_input if item.label.endswith("output tokens")
+    ]
+    assert len(controls) == 5
+    assert {item.min for item in controls} == {1_024}
+    for control in controls:
+        control.set_value(requested_cap)
+    _element(at.button, "Continue to document").click()
+    at.run()
+
+    assert not at.exception
+    assert at.session_state["create_step"] == 3
+    assert at.session_state["run_provider_settings"].agent_max_output_tokens == {
+        agent: 1_024
+        for agent in ("scout", "curator", "scenario_architect", "test_writer", "critic")
+    }
 
 
 def test_multi_agent_gemini_settings_include_thinking_levels() -> None:
