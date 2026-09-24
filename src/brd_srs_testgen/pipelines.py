@@ -10,7 +10,7 @@ from typing import Literal, TypeVar
 
 from pydantic import BaseModel, Field, create_model
 
-from .documents import canonicalize_source_references
+from .documents import DocumentError, canonicalize_source_references
 from .models import (
     AgentSetup,
     ActivityEvent,
@@ -514,7 +514,7 @@ def _validate_scout_candidates(
 ) -> None:
     prefix = f"CAND-{worker_index + 1:03d}-"
     seen: set[str] = set()
-    chunks = {chunk.chunk_id: chunk for chunk in group}
+    chunk_ids = {chunk.chunk_id for chunk in group}
     for candidate in batch.candidates:
         if not candidate.candidate_id.startswith(prefix):
             raise PipelineOutputError(
@@ -528,23 +528,31 @@ def _validate_scout_candidates(
             )
         seen.add(candidate.candidate_id)
         for reference in candidate.source_references:
-            chunk = chunks.get(reference.chunk_id)
-            if chunk is None:
+            if reference.chunk_id not in chunk_ids:
                 raise PipelineOutputError(
                     f"Candidate {candidate.candidate_id} cites chunk "
                     f"{reference.chunk_id} outside its assigned evidence group."
                 )
-            words = reference.excerpt.split()
-            if not 5 <= len(words) <= 25 or reference.excerpt not in chunk.text:
-                raise PipelineOutputError(
-                    f"Candidate {candidate.candidate_id} must cite an exact "
-                    "5-to-25-word excerpt from its assigned evidence."
-                )
+
+
+def _canonicalize_scout_candidates(
+    worker_index: int,
+    batch: CandidateRequirementBatch,
+    group: list[DocumentChunk],
+) -> CandidateRequirementBatch:
+    _validate_scout_candidates(worker_index, batch, group)
+    try:
+        return canonicalize_source_references(
+            batch, group, repair_excerpt=False, strict=True
+        )
+    except DocumentError as error:
+        raise PipelineOutputError(str(error)) from error
 
 
 def _legacy_requirements_from_candidates(
     batches: Iterable[CandidateRequirementBatch],
 ) -> RequirementBatch:
+    # Temporary compatibility boundary: Task 4 Curator replaces this direct mapping.
     candidates = [candidate for batch in batches for candidate in batch.candidates]
     return RequirementBatch(
         requirements=[
@@ -768,7 +776,7 @@ def run_centralized_multi_agent(
         group: list[DocumentChunk],
         cancellation_event: threading.Event,
     ) -> CandidateRequirementBatch:
-        batch = canonicalize_source_references(context.generate(
+        batch = context.generate(
             [
                 _user(
                     scout_prompt(
@@ -783,9 +791,8 @@ def run_centralized_multi_agent(
             8_000,
             cancellation_event=cancellation_event,
             agent="scout",
-        ), group, repair_excerpt=False)
-        _validate_scout_candidates(worker_index, batch, group)
-        return batch
+        )
+        return _canonicalize_scout_candidates(worker_index, batch, group)
 
     worker_candidates = _run_parallel_workers(
         chunk_groups,

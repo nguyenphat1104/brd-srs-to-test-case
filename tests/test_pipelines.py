@@ -742,6 +742,51 @@ def test_ordered_evidence_groups_do_not_duplicate_a_single_group() -> None:
     assert groups == [chunks]
 
 
+def test_scout_validator_rejects_invalid_candidate_batches() -> None:
+    evidence = " ".join(str(index) for index in range(1, 27))
+    group = [
+        chunk().model_copy(
+            update={"text": evidence, "content_hash": "a" * 64}
+        )
+    ]
+
+    def candidate(
+        *, candidate_id="CAND-001-001", excerpt="1 2 3 4 5", chunk_id=None
+    ) -> CandidateRequirement:
+        return CandidateRequirement(
+            candidate_id=candidate_id,
+            title="Candidate",
+            description="Candidate requirement.",
+            requirement_type="functional",
+            module="Module",
+            priority="high",
+            source_references=[
+                source_reference().model_copy(
+                    update={
+                        "chunk_id": chunk_id or group[0].chunk_id,
+                        "page_number": group[0].page_number,
+                        "section": group[0].section,
+                        "excerpt": excerpt,
+                    }
+                )
+            ],
+        )
+
+    assert pipeline_module._canonicalize_scout_candidates(
+        0, CandidateRequirementBatch(candidates=[]), group
+    ).candidates == []
+    for batch in [
+        CandidateRequirementBatch(candidates=[candidate(), candidate()]),
+        CandidateRequirementBatch(candidates=[candidate(candidate_id="CAND-002-001")]),
+        CandidateRequirementBatch(candidates=[candidate(chunk_id="unassigned")]),
+        CandidateRequirementBatch(candidates=[candidate(excerpt="1 2 3 4 5 invented")]),
+        CandidateRequirementBatch(candidates=[candidate(excerpt="1 2 3 4")]),
+        CandidateRequirementBatch(candidates=[candidate(excerpt=evidence)]),
+    ]:
+        with pytest.raises(PipelineOutputError):
+            pipeline_module._canonicalize_scout_candidates(0, batch, group)
+
+
 def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() -> None:
     chunks = [
         chunk().model_copy(
@@ -755,7 +800,7 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
                 "content_hash": f"{index:x}" * 64,
             }
         )
-        for index in range(1, 7)
+        for index in range(1, 9)
     ]
     responses = {
         worker: CandidateRequirementBatch(
@@ -770,11 +815,11 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
                     source_references=[
                         source_reference().model_copy(
                             update={
-                                "chunk_id": chunks[[0, 1, 3][worker]].chunk_id,
-                                "page_number": chunks[[0, 1, 3][worker]].page_number,
-                                "section": chunks[[0, 1, 3][worker]].section,
+                                "chunk_id": chunks[[0, 1, 3, 5][worker]].chunk_id,
+                                "page_number": chunks[[0, 1, 3, 5][worker]].page_number,
+                                "section": chunks[[0, 1, 3, 5][worker]].section,
                                 "excerpt": (
-                                    f"Requirement {[1, 2, 4][worker]} states users must "
+                                    f"Requirement {[1, 2, 4, 6][worker]} states users must "
                                     "authenticate before access."
                                 ),
                             }
@@ -783,7 +828,7 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
                 )
             ]
         )
-        for worker in range(3)
+        for worker in range(4)
     }
 
     class ScoutProvider(CentralProvider):
@@ -796,7 +841,7 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
             content = messages[-1]["content"]
             if schema is CandidateRequirementBatch:
                 worker = next(
-                    index for index in range(3) if f"SCOUT {index + 1}/3" in content
+                    index for index in range(4) if f"SCOUT {index + 1}/4" in content
                 )
                 with self.lock:
                     self.active += 1
@@ -832,7 +877,7 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
             return super().generate(*args, agent=agent, **kwargs)
 
     provider = ScoutProvider()
-    context = ScoutContext(provider=provider, worker_limit=2)
+    context = ScoutContext(provider=provider, worker_limit=8)
     run_centralized_multi_agent(context, chunks)
 
     calls = [call for call in provider.calls if call[1] is CandidateRequirementBatch]
@@ -840,15 +885,26 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() ->
         ["chunk-001", "chunk-002"],
         ["chunk-002", "chunk-003", "chunk-004"],
         ["chunk-004", "chunk-005", "chunk-006"],
+        ["chunk-006", "chunk-007", "chunk-008"],
     ]
-    assert len(calls) == 3
-    assert context.agents.count("scout") == 3
-    assert all("CAND-" in call[0][0]["content"] for call in calls)
-    assert sorted(
-        [chunk.chunk_id for chunk in chunks if chunk.chunk_id in call[0][0]["content"]]
-        for call in calls
-    ) == sorted(expected_groups)
-    assert provider.max_active <= 2 <= 3
+    assert len(calls) == 4
+    assert context.agents.count("scout") == 4
+    call_by_worker = {
+        index: next(call for call in calls if f"SCOUT {index}/4" in call[0][0]["content"])
+        for index in range(1, 5)
+    }
+    assert [
+        [line.split(" | ", 1)[0][1:] for line in call_by_worker[index][0][0]["content"].splitlines() if line.startswith("[")]
+        for index in range(1, 5)
+    ] == expected_groups
+    assert all(
+        f"CAND-{index:03d}-001 upward" in call_by_worker[index][0][0]["content"]
+        for index in range(1, 5)
+    )
+    assert provider.max_active <= 3
+    assert [set(left) & set(right) for left, right in zip(expected_groups, expected_groups[1:])] == [
+        {"chunk-002"}, {"chunk-004"}, {"chunk-006"}
+    ]
     assert [
         [item.chunk_id for item in group]
         for group in pipeline_module._ordered_evidence_groups(

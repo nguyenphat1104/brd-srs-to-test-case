@@ -178,6 +178,45 @@ def test_strict_canonicalization_does_not_repair_excerpt_text() -> None:
     assert not verify_source_reference(strict.requirements[0].source_references[0], chunks)
 
 
+@pytest.mark.parametrize(
+    "excerpt",
+    [
+        "one two three four",
+        "one two three four five invented",
+        "one two three four five six seven eight nine ten eleven twelve thirteen "
+        "fourteen fifteen sixteen seventeen eighteen nineteen twenty twenty-one "
+        "twenty-two twenty-three twenty-four twenty-five twenty-six",
+    ],
+)
+def test_strict_canonicalization_requires_exact_five_to_twenty_five_word_excerpt(
+    excerpt: str,
+) -> None:
+    evidence = " ".join(str(index) for index in range(1, 27))
+    chunks = chunk_pages([(1, evidence)])
+    batch = RequirementBatch(
+        requirements=[
+            Requirement(
+                requirement_id="REQ-001",
+                title="Requirement",
+                description="Requirement description.",
+                requirement_type=RequirementType.FUNCTIONAL,
+                module="Module",
+                priority=RequirementPriority.HIGH,
+                source_references=[
+                    SourceReference(
+                        chunk_id=chunks[0].chunk_id,
+                        page_number=1,
+                        excerpt=excerpt,
+                    )
+                ],
+            )
+        ]
+    )
+
+    with pytest.raises(DocumentError, match="exact 5-to-25-word excerpt"):
+        canonicalize_source_references(batch, chunks, strict=True)
+
+
 def test_canonicalizes_extract_interrupted_by_step_numbers() -> None:
     chunks = chunk_pages(
         [

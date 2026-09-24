@@ -184,9 +184,14 @@ def verify_source_reference(
 
 
 def canonicalize_source_references(
-    value: T, chunks: list[DocumentChunk], *, repair_excerpt: bool = True
+    value: T,
+    chunks: list[DocumentChunk],
+    *,
+    repair_excerpt: bool = True,
+    strict: bool = False,
 ) -> T:
     data = value.model_dump(mode="json")
+    chunks_by_id = {chunk.chunk_id: chunk for chunk in chunks}
 
     def visit(node: object) -> None:
         if isinstance(node, list):
@@ -194,6 +199,18 @@ def canonicalize_source_references(
                 visit(item)
         elif isinstance(node, dict):
             if {"chunk_id", "page_number", "excerpt"} <= node.keys():
+                if strict:
+                    chunk = chunks_by_id.get(str(node["chunk_id"]))
+                    words = _evidence_key(str(node["excerpt"])).split()
+                    if (
+                        chunk is None
+                        or not 5 <= len(words) <= 25
+                        or str(node["excerpt"]) not in chunk.text
+                    ):
+                        raise DocumentError(
+                            "Source references must cite an exact 5-to-25-word "
+                            "excerpt from an assigned chunk."
+                        )
                 excerpt = _evidence_key(str(node["excerpt"]))
                 matches = [
                     chunk
