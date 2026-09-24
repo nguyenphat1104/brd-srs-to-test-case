@@ -196,7 +196,7 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
     assert len(worker_calls) == 3
     assert all(len(call[0]) == 1 for call in worker_calls)
     assert all(
-        call[1].model_json_schema()["properties"]["requirements"]["maxItems"] == 20
+        "maxItems" not in call[1].model_json_schema()["properties"]["requirements"]
         for call in worker_calls
     )
     assert sum("p0001-c001" not in call[0][0]["content"] for call in worker_calls) == 2
@@ -685,26 +685,78 @@ def test_dependency_context_is_transitive_stable_and_read_only() -> None:
     assert [item.chunk_id for item in evidence] == [item.chunk_id for item in chunks]
 
 
-def test_worker_requirement_merge_deduplicates_and_remaps_dependencies() -> None:
-    _chunks, requirements = dependent_inputs()
-    duplicate = requirements[0].model_copy(update={"requirement_id": "REQ-1001"})
+def test_ordered_evidence_groups_preserve_source_order_with_boundary_overlap() -> None:
+    chunks = [
+        chunk().model_copy(
+            update={
+                "chunk_id": f"chunk-{index:03d}",
+                "text": "x" * 40,
+                "content_hash": f"{index:x}" * 64,
+            }
+        )
+        for index in range(1, 7)
+    ]
 
-    merged = pipeline_module._merge_worker_requirements(
-        [
-            RequirementBatch(requirements=[requirements[0], requirements[1]]),
-            RequirementBatch(requirements=[duplicate, requirements[2]]),
-        ]
+    groups = pipeline_module._ordered_evidence_groups(chunks, char_limit=100)
+
+    assert [[chunk.chunk_id for chunk in group] for group in groups] == [
+        ["chunk-001", "chunk-002"],
+        ["chunk-002", "chunk-003", "chunk-004"],
+        ["chunk-004", "chunk-005", "chunk-006"],
+    ]
+
+
+def test_ordered_evidence_groups_do_not_duplicate_a_single_group() -> None:
+    chunks = [
+        chunk().model_copy(
+            update={"chunk_id": f"chunk-{index:03d}", "content_hash": f"{index:x}" * 64}
+        )
+        for index in range(1, 3)
+    ]
+
+    groups = pipeline_module._ordered_evidence_groups(chunks, char_limit=10_000)
+
+    assert groups == [chunks]
+
+
+class ManyRequirementsProvider(CentralProvider):
+    def generate(self, messages, schema, *, max_output_tokens):
+        content = messages[-1]["content"]
+        if "WORKER REQUIREMENT EXTRACTION 1/3" in content:
+            requirements = [
+                self.artifacts.requirements[0].model_copy(
+                    update={
+                        "requirement_id": f"REQ-{index:03d}",
+                        "title": f"Requirement {index}",
+                        "description": f"Distinct requirement {index}.",
+                    }
+                )
+                for index in range(1, 26)
+            ]
+            value = RequirementBatch(requirements=requirements)
+        elif "WORKER REQUIREMENT EXTRACTION" in content:
+            value = RequirementBatch(requirements=[])
+        elif issubclass(schema, GeneratedCases):
+            value = GeneratedCases(scenarios=[], test_cases=[])
+        else:
+            return super().generate(
+                messages, schema, max_output_tokens=max_output_tokens
+            )
+        return GenerationResult(
+            value=schema.model_validate(value.model_dump(mode="json")),
+            input_tokens=1,
+            output_tokens=1,
+            latency_seconds=0.01,
+        )
+
+
+def test_centralized_pipeline_preserves_all_distinct_worker_requirements() -> None:
+    result = run_centralized_multi_agent(
+        PipelineContext(provider=ManyRequirementsProvider()), [chunk()]
     )
 
-    assert [item.requirement_id for item in merged.requirements] == [
-        "REQ-001",
-        "REQ-002",
-        "REQ-003",
-    ]
-    assert [item.dependency_ids for item in merged.requirements] == [
-        ["REQ-002"],
-        ["REQ-003"],
-        ["REQ-001"],
+    assert [item.requirement_id for item in result.requirements] == [
+        f"REQ-{index:03d}" for index in range(1, 26)
     ]
 
 
@@ -777,7 +829,9 @@ class MergeProvider:
                 for index in range(3)
                 if f"WORKER CASE GENERATION {index + 1}/3" in content
             )
-            requirement = self.requirements[worker]
+            requirement = self.requirements[worker].model_copy(
+                update={"requirement_id": f"REQ-{worker * 1000 + 1:03d}"}
+            )
             scenario_id = f"SCN-{worker * 1000 + 1:03d}"
             scenario = self.artifacts.scenarios[0].model_copy(
                 update={
@@ -814,8 +868,8 @@ def test_centralized_merge_preserves_all_worker_outputs() -> None:
 
     assert [item.requirement_id for item in result.requirements] == [
         "REQ-001",
-        "REQ-002",
-        "REQ-003",
+        "REQ-1001",
+        "REQ-2001",
     ]
     assert [item.scenario_id for item in result.scenarios] == [
         "SCN-001",

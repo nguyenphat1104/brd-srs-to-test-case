@@ -69,10 +69,6 @@ class PipelineOutputError(ValueError):
     pass
 
 
-class BoundedRequirementBatch(RequirementBatch):
-    requirements: list[Requirement] = Field(max_length=20)
-
-
 class BoundedGeneratedCases(GeneratedCases):
     scenarios: list[Scenario] = Field(max_length=8)
     test_cases: list[TestCase] = Field(max_length=8)
@@ -405,6 +401,18 @@ def _bounded_groups(
     return groups
 
 
+def _ordered_evidence_groups(
+    chunks: list[DocumentChunk], *, char_limit: int
+) -> list[list[DocumentChunk]]:
+    groups = _bounded_groups(chunks, lambda chunk: len(chunk.text), char_limit)
+    if len(groups) < 2:
+        return groups
+    return [
+        group if index == 0 else [groups[index - 1][-1], *group]
+        for index, group in enumerate(groups)
+    ]
+
+
 def _chunk_scope(chunks: list[DocumentChunk]) -> str:
     pages = ", ".join(
         str(page) for page in sorted({chunk.page_number for chunk in chunks})
@@ -626,63 +634,6 @@ def _relevant_chunks(
     return [chunk for chunk in chunks if chunk.chunk_id in chunk_ids]
 
 
-def _merge_worker_requirements(
-    batches: Iterable[RequirementBatch],
-) -> RequirementBatch:
-    grouped: dict[tuple[str, str], list[Requirement]] = {}
-    for requirement in (
-        requirement for batch in batches for requirement in batch.requirements
-    ):
-        key = (
-            requirement.title.strip().casefold(),
-            requirement.description.strip().casefold(),
-        )
-        grouped.setdefault(key, []).append(requirement)
-
-    selected = list(grouped.values())[:20]
-    id_map = {
-        requirement.requirement_id: f"REQ-{index:03d}"
-        for index, duplicates in enumerate(selected, 1)
-        for requirement in duplicates
-    }
-    requirements = []
-    for index, duplicates in enumerate(selected, 1):
-        primary = duplicates[0]
-        references = []
-        ambiguities = []
-        dependencies = []
-        seen_references = set()
-        for requirement in duplicates:
-            for reference in requirement.source_references:
-                key = (
-                    reference.chunk_id,
-                    reference.page_number,
-                    reference.section,
-                    reference.excerpt,
-                )
-                if key not in seen_references:
-                    seen_references.add(key)
-                    references.append(reference)
-            for ambiguity in requirement.ambiguities:
-                if ambiguity not in ambiguities:
-                    ambiguities.append(ambiguity)
-            for dependency_id in requirement.dependency_ids:
-                mapped = id_map.get(dependency_id)
-                if mapped and mapped != f"REQ-{index:03d}" and mapped not in dependencies:
-                    dependencies.append(mapped)
-        requirements.append(
-            primary.model_copy(
-                update={
-                    "requirement_id": f"REQ-{index:03d}",
-                    "source_references": references,
-                    "ambiguities": ambiguities,
-                    "dependency_ids": dependencies,
-                }
-            )
-        )
-    return RequirementBatch(requirements=requirements)
-
-
 def _normalize_worker_bundle(bundle: ArtifactBundle) -> ArtifactBundle:
     """Make derived trace links and citations consistent without a model call."""
     requirements_by_id = {
@@ -752,12 +703,13 @@ def run_centralized_multi_agent(
     context: PipelineContext, chunks: Iterable[DocumentChunk]
 ) -> ArtifactBundle:
     chunks = list(chunks)
-    if context.bounded_tasks:
-        chunk_groups = _bounded_groups(
-            chunks, lambda chunk: len(chunk.text), LOCAL_EVIDENCE_CHARS_PER_TASK
+    chunk_groups = _ordered_evidence_groups(
+        chunks, char_limit=LOCAL_EVIDENCE_CHARS_PER_TASK
+    )
+    if not context.bounded_tasks:
+        chunk_groups.extend(
+            [] for _ in range(max(0, WORKER_COUNT - len(chunk_groups)))
         )
-    else:
-        chunk_groups = _balance(chunks, lambda chunk: len(chunk.text))
     context.notify(
         f"Orchestrator: queued {len(chunk_groups)} requirement extraction tasks.",
         agent="Orchestrator",
@@ -781,7 +733,7 @@ def run_centralized_multi_agent(
                     )
                 )
             ],
-            BoundedRequirementBatch,
+            RequirementBatch,
             8_000,
             cancellation_event=cancellation_event,
             agent="analyst",
@@ -817,7 +769,13 @@ def run_centralized_multi_agent(
         ),
     )
 
-    requirements = _merge_worker_requirements(worker_requirements)
+    requirements = RequirementBatch(
+        requirements=[
+            requirement
+            for batch in worker_requirements
+            for requirement in batch.requirements
+        ]
+    )
     context.notify(
         f"Orchestrator: reconciled {len(requirements.requirements)} canonical requirements.",
         agent="Orchestrator",
