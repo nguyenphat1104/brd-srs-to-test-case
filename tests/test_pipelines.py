@@ -107,15 +107,45 @@ def test_curator_prompt_includes_all_candidates_and_ordered_evidence() -> None:
         update={"chunk_id": "p0002-c001-example", "page_number": 2, "content_hash": "b" * 64}
     )
 
+    candidate = candidate.model_copy(
+        update={
+            "source_references": [
+                source_reference().model_copy(
+                    update={
+                        "chunk_id": second.chunk_id,
+                        "page_number": second.page_number,
+                        "excerpt": second.text,
+                    }
+                )
+            ]
+        }
+    )
     prompt = curator_prompt([candidate], [chunk(), second])
+    evidence = prompt.split("<<<BEGIN PDF EVIDENCE DATA>>>", 1)[1].split(
+        "<<<END PDF EVIDENCE DATA>>>", 1
+    )[0]
+    reversed_prompt = curator_prompt([candidate], [second, chunk()])
+    reversed_evidence = reversed_prompt.split("<<<BEGIN PDF EVIDENCE DATA>>>", 1)[1].split(
+        "<<<END PDF EVIDENCE DATA>>>", 1
+    )[0]
 
     assert candidate.model_dump_json() in prompt
-    assert prompt.index(chunk().chunk_id) < prompt.index(second.chunk_id)
+    assert evidence.index(chunk().chunk_id) < evidence.index(second.chunk_id)
+    assert reversed_evidence.index(second.chunk_id) < reversed_evidence.index(chunk().chunk_id)
     assert "exactly one decision per candidate" in prompt
     assert "wording similarity is insufficient" in prompt.lower()
 
 
 def test_validate_synthesis_accepts_semantic_merge_of_adjacent_candidates() -> None:
+    first_chunk = chunk()
+    second_chunk = first_chunk.model_copy(
+        update={
+            "chunk_id": "p0002-c001-semantic",
+            "page_number": 2,
+            "text": "Registered users must sign in before opening the dashboard.",
+            "content_hash": "b" * 64,
+        }
+    )
     first = CandidateRequirement(
         candidate_id="CAND-001-001",
         title="Authenticate users",
@@ -130,6 +160,15 @@ def test_validate_synthesis_accepts_semantic_merge_of_adjacent_candidates() -> N
             "candidate_id": "CAND-001-002",
             "title": "Require login before dashboard access",
             "description": "The dashboard is available only after a registered user signs in.",
+            "source_references": [
+                source_reference().model_copy(
+                    update={
+                        "chunk_id": second_chunk.chunk_id,
+                        "page_number": second_chunk.page_number,
+                        "excerpt": second_chunk.text,
+                    }
+                )
+            ],
         }
     )
     synthesis = RequirementSynthesis(
@@ -139,12 +178,33 @@ def test_validate_synthesis_accepts_semantic_merge_of_adjacent_candidates() -> N
         ],
         requirements=[
             bundle().requirements[0].model_copy(
-                update={"description": "Registered users must sign in before accessing the dashboard."}
+                update={
+                    "description": "Registered users must sign in before accessing the dashboard.",
+                    "source_references": [
+                        first.source_references[0],
+                        second.source_references[0],
+                    ],
+                }
             )
         ],
     )
 
     _validate_synthesis([first, second], synthesis)
+    assert {reference.chunk_id for reference in synthesis.requirements[0].source_references} == {
+        first_chunk.chunk_id,
+        second_chunk.chunk_id,
+    }
+    omitted = synthesis.model_copy(
+        update={
+            "requirements": [
+                synthesis.requirements[0].model_copy(
+                    update={"source_references": first.source_references}
+                )
+            ]
+        }
+    )
+    with pytest.raises(PipelineOutputError, match="must preserve citations"):
+        _validate_synthesis([first, second], omitted)
 
 
 @pytest.mark.parametrize(
@@ -185,7 +245,7 @@ def test_validate_synthesis_accepts_semantic_merge_of_adjacent_candidates() -> N
                 RequirementDecision(candidate_id="CAND-001-002", action="reject", reason="Not supported."),
             ],
             [bundle().requirements[0].model_copy(update={"source_references": [source_reference().model_copy(update={"chunk_id": "other", "page_number": 2})]})],
-            "not sourced from retained or merged candidates",
+            "must preserve citations",
         ),
     ],
 )
@@ -1030,7 +1090,6 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces(
                     with self.lock:
                         self.active -= 1
             if schema is RequirementSynthesis:
-                first = responses[0].candidates[0]
                 return GenerationResult(
                     value=RequirementSynthesis(
                         decisions=[
@@ -1044,7 +1103,14 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces(
                         ],
                         requirements=[
                             self.artifacts.requirements[0].model_copy(
-                                update={"source_references": first.source_references}
+                                update={
+                                    "source_references": [
+                                        reference
+                                        for batch in responses.values()
+                                        for candidate in batch.candidates
+                                        for reference in candidate.source_references
+                                    ]
+                                }
                             )
                         ],
                     ),

@@ -601,19 +601,19 @@ def _validate_synthesis(
         )
     for requirement_id, requirement in requirements_by_id.items():
         allowed_sources = sources_by_requirement[requirement_id]
-        if any(
+        requirement_sources = {
             (
                 reference.chunk_id,
                 reference.page_number,
                 reference.section,
                 reference.excerpt,
             )
-            not in allowed_sources
             for reference in requirement.source_references
-        ):
+        }
+        if requirement_sources != allowed_sources:
             raise PipelineOutputError(
-                f"Canonical requirement {requirement_id} has citations not sourced "
-                "from retained or merged candidates."
+                f"Canonical requirement {requirement_id} must preserve citations "
+                "from retained or merged candidates exactly."
             )
 
 
