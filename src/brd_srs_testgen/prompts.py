@@ -291,7 +291,7 @@ def repair_prompt(
 
 TARGETED ARTIFACT REPAIR
 
-Apply every Critic finding in one repair. Return one complete ArtifactBundle. Change only artifacts named by the findings, preserve every unaffected artifact and ID exactly, and do not perform unrelated cleanup. Keep all original IDs; a new artifact is allowed only when its ID is explicitly named by a finding.
+Apply every Critic finding in one repair. Return one complete ArtifactBundle. Change only existing artifacts named by the findings, preserve every unaffected artifact and ID exactly, keep all original IDs, do not add artifacts, and do not perform unrelated cleanup.
 
 {_agent_setup_block(setup)}
 

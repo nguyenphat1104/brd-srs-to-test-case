@@ -307,6 +307,8 @@ def test_critic_findings_require_grounded_evidence_and_role_ownership() -> None:
             ),
             "wrong responsible role",
         ),
+        (critic_finding(artifact_ids=["TC-999"]), "unknown artifact ID"),
+        (critic_finding(artifact_ids=["TC-nonsense"]), "malformed artifact ID"),
     ):
         provider = CritiqueProvider(
             [CriticReport(accepted=False, findings=[finding])]
@@ -337,6 +339,31 @@ def test_repair_cannot_change_an_unaffected_artifact() -> None:
 
     with pytest.raises(PipelineOutputError, match="outside the findings"):
         _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+
+
+def test_repair_cannot_add_an_artifact_named_only_by_a_finding() -> None:
+    artifacts = bundle()
+    finding = critic_finding(artifact_ids=["TC-999"])
+    added = artifacts.model_copy(
+        update={
+            "test_cases": [
+                *artifacts.test_cases,
+                artifacts.test_cases[0].model_copy(
+                    update={
+                        "test_case_id": "TC-999",
+                        "title": "Added test case",
+                    }
+                ),
+            ]
+        }
+    )
+    provider = CritiqueProvider(
+        [CriticReport(accepted=False, findings=[finding]), added]
+    )
+
+    with pytest.raises(PipelineOutputError, match="unknown artifact ID"):
+        _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+    assert len(provider.calls) == 1
 
 
 def test_semantic_payload_contains_only_authored_behavior() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -721,20 +722,33 @@ def _artifacts_by_id(bundle: ArtifactBundle) -> dict[str, BaseModel]:
     }
 
 
-def _validate_critic_scope(report: CriticReport) -> set[str]:
+def _validate_critic_scope(
+    report: CriticReport, bundle: ArtifactBundle
+) -> set[str]:
     prefixes = {
         "curator": "REQ-",
         "scenario_architect": "SCN-",
         "test_writer": "TC-",
     }
+    existing_ids = set(_artifacts_by_id(bundle))
     target_ids: set[str] = set()
     for finding in report.findings:
         prefix = prefixes[finding.responsible_role]
         for artifact_id in finding.artifact_ids:
+            if re.fullmatch(r"(?:REQ|SCN|TC)-\d{3,}", artifact_id) is None:
+                raise PipelineOutputError(
+                    f"Finding {finding.finding_id} has malformed artifact ID "
+                    f"{artifact_id}."
+                )
             if not artifact_id.startswith(prefix):
                 raise PipelineOutputError(
                     f"Finding {finding.finding_id} assigns {artifact_id} to the "
                     f"wrong responsible role {finding.responsible_role}."
+                )
+            if artifact_id not in existing_ids:
+                raise PipelineOutputError(
+                    f"Finding {finding.finding_id} references unknown artifact ID "
+                    f"{artifact_id}."
                 )
             target_ids.add(artifact_id)
     return target_ids
@@ -798,7 +812,7 @@ def _critique_bundle(
     )
     if report.accepted:
         return bundle
-    target_ids = _validate_critic_scope(report)
+    target_ids = _validate_critic_scope(report, bundle)
     role = _repair_role(report.findings)
     repaired = context.generate(
         [

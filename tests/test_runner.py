@@ -1272,7 +1272,7 @@ def test_invalid_central_worker_output_is_semantic_failure(monkeypatch) -> None:
     assert "outside Scout 1 namespace" in result.manifest.failure_message
 
 
-def test_runner_deterministically_rejects_invalid_critic_repair(monkeypatch) -> None:
+def test_centralized_critic_repair_is_the_only_semantic_revision(monkeypatch) -> None:
     artifacts = bundle()
     invalid = artifacts.model_copy(
         update={
@@ -1309,10 +1309,13 @@ def test_runner_deterministically_rejects_invalid_critic_repair(monkeypatch) -> 
         b"pdf",
         "sample.pdf",
         RunType.CENTRALIZED_MULTI_AGENT,
-        settings(provider="llama_cpp"),
+        settings(provider="gemini", api_key="generation-key"),
         repository=repository,
         provider_factory=lambda _run_type, ledger: ScriptedProvider(
             ledger, [CriticReport(accepted=False, findings=[finding]), invalid]
+        ),
+        judge_provider_factory=lambda ledger: NamedProvider(
+            ledger, runner.JUDGE_MODEL
         ),
     )
 

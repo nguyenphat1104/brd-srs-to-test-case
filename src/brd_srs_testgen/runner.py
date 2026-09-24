@@ -676,14 +676,23 @@ def run_generation(
             PIPELINES[run_type](context, chunks), chunks
         )
         validation = validate_bundle(bundle, chunks)
-        if validation.issues and all(
-            issue.code == "uncovered_requirement" for issue in validation.issues
+        if (
+            run_type is not RunType.CENTRALIZED_MULTI_AGENT
+            and validation.issues
+            and all(
+                issue.code == "uncovered_requirement"
+                for issue in validation.issues
+            )
         ):
             bundle = _repair_coverage(
                 context, bundle, validation.uncovered_requirement_ids
             )
             validation = validate_bundle(bundle, chunks)
-        if not validation.valid and context.max_request_tokens is None:
+        if (
+            run_type is not RunType.CENTRALIZED_MULTI_AGENT
+            and not validation.valid
+            and context.max_request_tokens is None
+        ):
             bundle = context.revise(
                 [],
                 "artifact bundle",
