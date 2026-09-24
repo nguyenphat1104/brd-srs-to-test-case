@@ -1236,7 +1236,7 @@ def _render_agent_blackboard(result: RunResult) -> None:
                 f"blackboard-{result.manifest.run_id}-{row.stage}-{row.task_index}"
             ),
         ):
-            st.code(_json(row.output), language="json")
+            st.code(_json(row.output), language="json", height=400)
 
     repair = next((row for row in rows if row.stage == "repair"), None)
     critic = next((row for row in rows if row.stage == "critic"), None)

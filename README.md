@@ -36,7 +36,7 @@ Provider, model, prompt, thinking level, and output-token settings are configura
     },
     "critic": {
       "provider": "gemini",
-      "model": "gemini-2.5-pro",
+      "model": "gemini-3.6-flash",
       "prompt": "Find material coverage and traceability gaps.",
       "thinking_level": "high",
       "max_output_tokens": 12000
