@@ -45,10 +45,12 @@ from .prompts import (
     requirements_prompt,
     review_prompt,
     revision_prompt,
+    scenario_architect_prompt,
     scenarios_prompt,
     curator_prompt,
     scout_prompt,
     single_prompt,
+    test_writer_prompt,
     test_cases_prompt,
     worker_cases_prompt,
 )
@@ -547,9 +549,13 @@ def _canonicalize_scout_candidates(
     group: list[DocumentChunk],
 ) -> CandidateRequirementBatch:
     _validate_scout_candidates(worker_index, batch, group)
+    return _canonicalize_grounded(batch, group)
+
+
+def _canonicalize_grounded(value: T, chunks: list[DocumentChunk]) -> T:
     try:
         return canonicalize_source_references(
-            batch, group, repair_excerpt=False, strict=True
+            value, chunks, repair_excerpt=False, strict=True
         )
     except DocumentError as error:
         raise PipelineOutputError(str(error)) from error
@@ -615,6 +621,67 @@ def _validate_synthesis(
                 f"Canonical requirement {requirement_id} must preserve citations "
                 "from retained or merged candidates exactly."
             )
+
+
+def _validate_scenario_batch(
+    batch: ScenarioBatch, requirements: list[Requirement]
+) -> None:
+    scenario_ids = [scenario.scenario_id for scenario in batch.scenarios]
+    if len(scenario_ids) != len(set(scenario_ids)):
+        raise PipelineOutputError("Architect returned duplicate canonical scenario IDs.")
+    expected_ids = [f"SCN-{index:03d}" for index in range(1, len(scenario_ids) + 1)]
+    if scenario_ids != expected_ids:
+        raise PipelineOutputError(
+            "Architect scenario IDs must begin SCN-001 and increase by one."
+        )
+    canonical_ids = {requirement.requirement_id for requirement in requirements}
+    covered_ids: set[str] = set()
+    for scenario in batch.scenarios:
+        unknown_ids = set(scenario.requirement_ids) - canonical_ids
+        if unknown_ids:
+            raise PipelineOutputError(
+                f"Scenario {scenario.scenario_id} references unknown canonical "
+                f"requirement IDs {sorted(unknown_ids)}."
+            )
+        covered_ids.update(scenario.requirement_ids)
+    if covered_ids != canonical_ids:
+        raise PipelineOutputError(
+            "Architect must cover every canonical requirement with a scenario."
+        )
+
+
+def _validate_writer_cases(
+    worker_index: int,
+    batch: TestCaseBatch,
+    assigned_scenarios: list[Scenario],
+) -> None:
+    _validate_worker_ids(
+        worker_index,
+        "test case",
+        "TC",
+        (test_case.test_case_id for test_case in batch.test_cases),
+    )
+    scenarios_by_id = {
+        scenario.scenario_id: scenario for scenario in assigned_scenarios
+    }
+    covered_ids: set[str] = set()
+    for test_case in batch.test_cases:
+        scenario = scenarios_by_id.get(test_case.scenario_id)
+        if scenario is None:
+            raise PipelineOutputError(
+                f"Test case {test_case.test_case_id} references scenario "
+                f"{test_case.scenario_id} outside its assigned scenarios."
+            )
+        if not set(test_case.requirement_ids) <= set(scenario.requirement_ids):
+            raise PipelineOutputError(
+                f"Test case {test_case.test_case_id} references requirement IDs "
+                "outside its assigned scenario."
+            )
+        covered_ids.add(test_case.scenario_id)
+    if covered_ids != set(scenarios_by_id):
+        raise PipelineOutputError(
+            f"Test Writer {worker_index + 1} must cover every assigned scenario."
+        )
 
 
 def _validate_worker_cases(
@@ -724,12 +791,12 @@ def _dependency_context(
 
 
 def _relevant_chunks(
-    requirements: list[Requirement], chunks: list[DocumentChunk]
+    artifacts: list[Requirement | Scenario], chunks: list[DocumentChunk]
 ) -> list[DocumentChunk]:
     chunk_ids = {
         reference.chunk_id
-        for requirement in requirements
-        for reference in requirement.source_references
+        for artifact in artifacts
+        for reference in artifact.source_references
     }
     return [chunk for chunk in chunks if chunk.chunk_id in chunk_ids]
 
@@ -899,105 +966,132 @@ def run_centralized_multi_agent(
         artifact_label="Canonical requirements",
     )
 
-    if context.bounded_tasks:
-        chunk_sizes = {chunk.chunk_id: len(chunk.text) for chunk in chunks}
-
-        def requirement_weight(requirement: Requirement) -> int:
-            return len(requirement.description) + sum(
-                chunk_sizes.get(chunk_id, 0)
-                for chunk_id in {
-                    reference.chunk_id
-                    for reference in requirement.source_references
-                }
-            )
-
-        requirement_groups = _bounded_groups(
-            requirements.requirements,
-            requirement_weight,
-            LOCAL_EVIDENCE_CHARS_PER_TASK,
-            max_items=LOCAL_REQUIREMENTS_PER_TASK,
-        )
-    else:
-        requirement_groups = _balance(
-            requirements.requirements,
-            lambda requirement: len(requirement.description)
-            + 100 * len(requirement.source_references),
-        )
+    scenario_batch = _canonicalize_grounded(
+        context.generate(
+            [
+                _user(
+                    scenario_architect_prompt(
+                        requirements,
+                        chunks,
+                        setup=context.agent_setup("scenario_architect"),
+                    )
+                )
+            ],
+            ScenarioBatch,
+            16_000,
+            agent="scenario_architect",
+        ),
+        chunks,
+    )
+    _validate_scenario_batch(scenario_batch, requirements.requirements)
     context.notify(
-        f"Orchestrator: queued {len(requirement_groups)} test generation tasks.",
+        f"Scenario Architect: planned {len(scenario_batch.scenarios)} canonical scenarios.",
+        agent="Scenario Architect",
+        role=context.agent_setup("scenario_architect").role,
+        model=context.model_for("scenario_architect"),
+        state="complete",
+        artifact=scenario_batch,
+        artifact_label="Canonical scenarios",
+    )
+
+    scenario_groups = _bounded_groups(
+        scenario_batch.scenarios,
+        lambda item: len(item.objective),
+        LOCAL_EVIDENCE_CHARS_PER_TASK,
+        max_items=3,
+    )
+    context.notify(
+        f"Orchestrator: queued {len(scenario_groups)} test writing tasks.",
         agent="Orchestrator",
         role="Policy coordinator",
         state="working",
     )
 
-    def generate_cases(
+    def write_tests(
         worker_index: int,
-        group: list[Requirement],
+        group: list[Scenario],
         cancellation_event: threading.Event,
-    ) -> GeneratedCases:
+    ) -> TestCaseBatch:
         if not group:
-            return GeneratedCases(scenarios=[], test_cases=[])
-        dependencies = _dependency_context(group, requirements.requirements)
-        case_schema = _scoped_worker_cases_schema(
-            requirement.requirement_id for requirement in requirements.requirements
+            return TestCaseBatch(test_cases=[])
+        assigned_ids = {
+            requirement_id
+            for scenario in group
+            for requirement_id in scenario.requirement_ids
+        }
+        assigned_requirements = [
+            requirement
+            for requirement in requirements.requirements
+            if requirement.requirement_id in assigned_ids
+        ]
+        dependencies = _dependency_context(
+            assigned_requirements, requirements.requirements
         )
-        batch = canonicalize_source_references(context.generate(
-            [
-                _user(
-                    worker_cases_prompt(
-                        worker_index,
-                        group,
-                        _relevant_chunks([*group, *dependencies], chunks),
-                        dependency_context=dependencies,
-                        setup=context.agent_setup("test_generator"),
-                        worker_count=len(requirement_groups),
+        relevant_chunks = _relevant_chunks(
+            [*group, *assigned_requirements, *dependencies], chunks
+        )
+        batch = _canonicalize_grounded(
+            context.generate(
+                [
+                    _user(
+                        test_writer_prompt(
+                            worker_index,
+                            group,
+                            assigned_requirements,
+                            relevant_chunks,
+                            dependency_context=dependencies,
+                            setup=context.agent_setup("test_writer"),
+                            worker_count=len(scenario_groups),
+                        )
                     )
-                )
-            ],
-            case_schema,
-            8_000,
-            cancellation_event=cancellation_event,
-            agent="test_generator",
-        ), chunks)
-        batch = _namespace_worker_case_ids(worker_index, batch)
-        _validate_worker_cases(
-            worker_index,
-            batch,
-            (requirement.requirement_id for requirement in requirements.requirements),
+                ],
+                TestCaseBatch,
+                8_000,
+                cancellation_event=cancellation_event,
+                agent="test_writer",
+            ),
+            relevant_chunks,
         )
+        _validate_writer_cases(worker_index, batch, group)
         return batch
 
     worker_cases = _run_parallel_workers(
-        requirement_groups,
-        generate_cases,
-        max_workers=context.worker_limit,
+        scenario_groups,
+        write_tests,
+        max_workers=min(WORKER_COUNT, context.worker_limit),
         on_started=lambda index: context.notify(
-            f"Test Generator {index + 1}: working — creating scenarios and test cases.",
-            agent=f"Test Generator {index + 1}",
-            role=context.agent_setup("test_generator").role,
-            model=context.model_for("test_generator"),
+            f"Test Writer {index + 1}: working — expanding canonical scenarios.",
+            agent=f"Test Writer {index + 1}",
+            role=context.agent_setup("test_writer").role,
+            model=context.model_for("test_writer"),
             state="working",
         ),
         on_completed=lambda index, batch: context.notify(
-            f"Test Generator {index + 1}: done — handed artifacts to the orchestrator.",
-            agent=f"Test Generator {index + 1}",
-            role=context.agent_setup("test_generator").role,
-            model=context.model_for("test_generator"),
+            f"Test Writer {index + 1}: done — handed test cases to the orchestrator.",
+            agent=f"Test Writer {index + 1}",
+            role=context.agent_setup("test_writer").role,
+            model=context.model_for("test_writer"),
             state="complete",
             artifact=batch,
-            artifact_label="Scenarios and test cases",
+            artifact_label="Test cases",
         ),
     )
 
-    bundle = _normalize_worker_bundle(
-        canonicalize_source_references(
-            ArtifactBundle(
-            requirements=requirements.requirements,
-            scenarios=[scenario for batch in worker_cases for scenario in batch.scenarios],
-            test_cases=[test_case for batch in worker_cases for test_case in batch.test_cases],
+    test_cases = [
+        test_case.model_copy(update={"test_case_id": f"TC-{index:03d}"})
+        for index, test_case in enumerate(
+            (
+                test_case
+                for batch in worker_cases
+                for test_case in batch.test_cases
             ),
-            chunks,
+            1,
         )
+    ]
+    bundle = ArtifactBundle(
+        requirements=synthesis.requirements,
+        scenarios=scenario_batch.scenarios,
+        test_cases=test_cases,
     )
     context.notify(
         "Orchestrator: merging the generated artifacts.",

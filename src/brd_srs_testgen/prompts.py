@@ -13,6 +13,7 @@ from .models import (
     Requirement,
     RequirementBatch,
     ReviewResult,
+    Scenario,
     ScenarioBatch,
 )
 
@@ -187,6 +188,67 @@ Reconcile every Scout candidate against the complete ordered evidence. Return on
 
 Scout candidates JSON:
 {_data_block("SCOUT CANDIDATES JSON", candidate_json)}
+
+{_evidence(chunks)}"""
+
+
+def scenario_architect_prompt(
+    requirements: RequirementBatch,
+    chunks: Iterable[DocumentChunk],
+    *,
+    setup: AgentSetup | None = None,
+) -> str:
+    return f"""{RULES}
+{CANONICAL_ID_RULES}
+
+SCENARIO ARCHITECTURE
+
+Plan supported positive, negative, boundary, edge, and state-transition scenarios from the complete canonical requirement catalog and all supporting evidence. Do not target an arbitrary total count. Every canonical requirement ID must appear in at least one scenario. Scenario IDs must begin SCN-001 and increase by one without gaps. Return one ScenarioBatch.
+
+{_agent_setup_block(setup)}
+
+Complete canonical RequirementBatch JSON:
+{_data_block("CANONICAL REQUIREMENTS JSON", requirements.model_dump_json())}
+
+{_evidence(chunks)}"""
+
+
+def test_writer_prompt(
+    worker_index: int,
+    scenarios: list[Scenario],
+    requirements: list[Requirement],
+    chunks: Iterable[DocumentChunk],
+    *,
+    dependency_context: Iterable[Requirement] = (),
+    setup: AgentSetup | None = None,
+    worker_count: int = WORKER_COUNT,
+) -> str:
+    worker = worker_index + 1
+    lower = worker_index * 1000 + 1
+    upper = (worker_index + 1) * 1000
+    scenario_json = ScenarioBatch(scenarios=scenarios).model_dump_json()
+    requirement_json = RequirementBatch(requirements=requirements).model_dump_json()
+    dependency_json = json.dumps(
+        [item.model_dump(mode="json") for item in dependency_context],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"""{RULES}
+
+TEST WRITER {worker}/{worker_count}
+
+Write executable manual test cases only for the assigned canonical scenarios. You must not create, rename, or modify scenarios. Cover every assigned scenario with at least one test case. Each test case must reference an assigned scenario ID, and its requirement_ids must be a subset of that scenario's requirement_ids. Test-case IDs must use the inclusive worker namespace TC-{lower:03d} through TC-{upper:03d}. Return one TestCaseBatch.
+
+{_agent_setup_block(setup)}
+
+Assigned canonical scenarios JSON:
+{_data_block("ASSIGNED SCENARIOS JSON", scenario_json)}
+
+Referenced canonical requirements JSON:
+{_data_block("REFERENCED REQUIREMENTS JSON", requirement_json)}
+
+Dependency context JSON (read only; do not add dependency-only requirement IDs to test cases):
+{_data_block("DEPENDENCY CONTEXT JSON", dependency_json)}
 
 {_evidence(chunks)}"""
 

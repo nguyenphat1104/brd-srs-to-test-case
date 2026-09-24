@@ -334,6 +334,242 @@ def test_hierarchical_role_defaults_preserve_legacy_setups() -> None:
     assert all("evidence" in RUN_PROMPT_DEFAULTS[role].lower() for role in roles)
 
 
+def hierarchical_inputs(count: int = 4):
+    artifacts = bundle()
+    chunks = []
+    requirements = []
+    scenarios = []
+    for index in range(1, count + 1):
+        text = (
+            f"Requirement number {index} requires registered users to authenticate "
+            "before protected access."
+        )
+        evidence = chunk().model_copy(
+            update={
+                "chunk_id": f"p{index:04d}-c001-hierarchical",
+                "page_number": index,
+                "text": text,
+                "content_hash": f"{index:x}" * 64,
+            }
+        )
+        reference = source_reference().model_copy(
+            update={
+                "chunk_id": evidence.chunk_id,
+                "page_number": evidence.page_number,
+                "excerpt": text,
+            }
+        )
+        requirement = artifacts.requirements[0].model_copy(
+            update={
+                "requirement_id": f"REQ-{index:03d}",
+                "title": f"Requirement {index}",
+                "description": f"Protected access rule {index}.",
+                "source_references": [reference],
+            }
+        )
+        scenario = artifacts.scenarios[0].model_copy(
+            update={
+                "scenario_id": f"SCN-{index:03d}",
+                "title": f"Scenario {index}",
+                "objective": f"Verify protected access rule number {index}.",
+                "requirement_ids": [requirement.requirement_id],
+                "source_references": [reference],
+            }
+        )
+        chunks.append(evidence)
+        requirements.append(requirement)
+        scenarios.append(scenario)
+    return chunks, requirements, scenarios
+
+
+def assigned_scenario_ids(prompt: str) -> list[str]:
+    payload = prompt.split("<<<BEGIN ASSIGNED SCENARIOS JSON DATA>>>", 1)[1].split(
+        "<<<END ASSIGNED SCENARIOS JSON DATA>>>", 1
+    )[0]
+    return [item["scenario_id"] for item in json.loads(payload)["scenarios"]]
+
+
+class HierarchicalProvider:
+    model = "test-model"
+
+    def __init__(self) -> None:
+        self.ledger = BudgetLedger(100_000)
+        self.calls = []
+        self.lock = threading.Lock()
+        self.active_writers = 0
+        self.max_active_writers = 0
+        self.writer_output_ids = {}
+        self.chunks, self.requirements, self.scenarios = hierarchical_inputs()
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        content = messages[-1]["content"]
+        with self.lock:
+            self.calls.append((messages, schema, max_output_tokens))
+        if schema is CandidateRequirementBatch:
+            candidates = []
+            if "SCOUT 1/" in content:
+                candidates = [
+                    CandidateRequirement(
+                        candidate_id=f"CAND-001-{index:03d}",
+                        title=requirement.title,
+                        description=requirement.description,
+                        requirement_type=requirement.requirement_type,
+                        module=requirement.module,
+                        priority=requirement.priority,
+                        source_references=requirement.source_references,
+                    )
+                    for index, requirement in enumerate(self.requirements, 1)
+                ]
+            value = CandidateRequirementBatch(candidates=candidates)
+        elif schema is RequirementSynthesis:
+            value = RequirementSynthesis(
+                decisions=[
+                    RequirementDecision(
+                        candidate_id=f"CAND-001-{index:03d}",
+                        action="retain",
+                        canonical_requirement_id=requirement.requirement_id,
+                        reason="Distinct supported requirement.",
+                    )
+                    for index, requirement in enumerate(self.requirements, 1)
+                ],
+                requirements=self.requirements,
+            )
+        elif schema is ScenarioBatch:
+            value = ScenarioBatch(scenarios=self.scenarios)
+        elif schema is ModelTestCaseBatch:
+            worker = next(
+                index for index in range(2) if f"TEST WRITER {index + 1}/2" in content
+            )
+            assigned = self.scenarios[:3] if worker == 0 else self.scenarios[3:]
+            with self.lock:
+                self.active_writers += 1
+                self.max_active_writers = max(
+                    self.max_active_writers, self.active_writers
+                )
+            try:
+                time.sleep(0.01)
+                value = ModelTestCaseBatch(
+                    test_cases=[
+                        bundle().test_cases[0].model_copy(
+                            update={
+                                "test_case_id": f"TC-{worker * 1000 + offset:03d}",
+                                "scenario_id": scenario.scenario_id,
+                                "requirement_ids": scenario.requirement_ids,
+                                "source_references": scenario.source_references,
+                            }
+                        )
+                        for offset, scenario in enumerate(assigned, 1)
+                    ]
+                )
+                with self.lock:
+                    self.writer_output_ids[worker] = [
+                        item.test_case_id for item in value.test_cases
+                    ]
+            finally:
+                with self.lock:
+                    self.active_writers -= 1
+        else:
+            raise AssertionError(f"Unexpected schema: {schema}")
+        return GenerationResult(
+            value=schema.model_validate(value.model_dump(mode="json")),
+            input_tokens=1,
+            output_tokens=1,
+            latency_seconds=0.01,
+        )
+
+
+class AgentRecordingContext(PipelineContext):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.agents = []
+
+    def generate(self, *args, agent="default", **kwargs):
+        with self._lock:
+            self.agents.append(agent)
+        return super().generate(*args, agent=agent, **kwargs)
+
+
+@pytest.mark.parametrize(("worker_limit", "expected_concurrency"), [(1, 1), (8, 2)])
+def test_architect_plans_globally_before_parallel_writers(
+    worker_limit: int, expected_concurrency: int
+) -> None:
+    provider = HierarchicalProvider()
+    context = AgentRecordingContext(provider=provider, worker_limit=worker_limit)
+
+    result = run_centralized_multi_agent(context, provider.chunks)
+
+    architect_calls = [call for call in provider.calls if call[1] is ScenarioBatch]
+    writer_calls = [call for call in provider.calls if call[1] is ModelTestCaseBatch]
+    assert len(architect_calls) == 1
+    architect_prompt = architect_calls[0][0][-1]["content"]
+    assert all(item.requirement_id in architect_prompt for item in provider.requirements)
+    assert all(item.chunk_id in architect_prompt for item in provider.chunks)
+    assert "Do not target an arbitrary total count" in architect_prompt
+    assert len(writer_calls) == 2
+    assert context.agents.count("scenario_architect") == 1
+    assert context.agents.count("test_writer") == 2
+    assert provider.max_active_writers == expected_concurrency
+    assert provider.max_active_writers <= 3
+    assert [item.scenario_id for item in result.scenarios] == [
+        f"SCN-{index:03d}" for index in range(1, 5)
+    ]
+    assert [item.test_case_id for item in result.test_cases] == [
+        f"TC-{index:03d}" for index in range(1, 5)
+    ]
+    assert provider.writer_output_ids == {
+        0: ["TC-001", "TC-002", "TC-003"],
+        1: ["TC-1001"],
+    }
+    assert [item.scenario_id for item in result.test_cases] == [
+        item.scenario_id for item in result.scenarios
+    ]
+    assert all(
+        set(test_case.requirement_ids)
+        <= set(
+            next(
+                scenario.requirement_ids
+                for scenario in result.scenarios
+                if scenario.scenario_id == test_case.scenario_id
+            )
+        )
+        for test_case in result.test_cases
+    )
+    first_writer = next(
+        call for call in writer_calls if "TEST WRITER 1/2" in call[0][-1]["content"]
+    )[0][-1]["content"]
+    second_writer = next(
+        call for call in writer_calls if "TEST WRITER 2/2" in call[0][-1]["content"]
+    )[0][-1]["content"]
+    assert all(f"SCN-{index:03d}" in first_writer for index in range(1, 4))
+    assert "SCN-004" not in first_writer
+    assert "SCN-004" in second_writer
+    assert all(f"SCN-{index:03d}" not in second_writer for index in range(1, 4))
+    assert "must not create" in first_writer.lower()
+    assert all(item.chunk_id in first_writer for item in provider.chunks[:3])
+    assert provider.chunks[3].chunk_id not in first_writer
+    assert provider.chunks[3].chunk_id in second_writer
+    assert all(item.chunk_id not in second_writer for item in provider.chunks[:3])
+
+
+def test_architect_and_writer_reject_invalid_handoffs() -> None:
+    chunks, requirements, scenarios = hierarchical_inputs(2)
+    missing_coverage = ScenarioBatch(scenarios=scenarios[:1])
+    with pytest.raises(PipelineOutputError, match="cover every canonical requirement"):
+        pipeline_module._validate_scenario_batch(missing_coverage, requirements)
+
+    invalid_case = bundle().test_cases[0].model_copy(
+        update={
+            "scenario_id": scenarios[0].scenario_id,
+            "requirement_ids": [requirements[1].requirement_id],
+            "source_references": scenarios[0].source_references,
+        }
+    )
+    with pytest.raises(PipelineOutputError, match="outside its assigned scenario"):
+        pipeline_module._validate_writer_cases(
+            0, ModelTestCaseBatch(test_cases=[invalid_case]), scenarios[:1]
+        )
+
+
 class CentralProvider:
     model = "test-model"
 
@@ -378,6 +614,10 @@ class CentralProvider:
                 ],
                 requirements=self.artifacts.requirements,
             )
+        elif schema is ScenarioBatch:
+            value = ScenarioBatch(scenarios=self.artifacts.scenarios)
+        elif schema is ModelTestCaseBatch:
+            value = ModelTestCaseBatch(test_cases=self.artifacts.test_cases)
         elif issubclass(schema, RequirementBatch):
             value = RequirementBatch(requirements=self.artifacts.requirements)
         elif issubclass(schema, GeneratedCases):
@@ -415,13 +655,8 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
         for call in worker_calls
     )
     assert sum("p0001-c001" not in call[0][0]["content"] for call in worker_calls) == 2
-    case_calls = [call for call in provider.calls if issubclass(call[1], GeneratedCases)]
-    assert len(case_calls) == 1
-    assert all(
-        call[1].model_json_schema()["properties"]["scenarios"]["maxItems"] == 8
-        and call[1].model_json_schema()["properties"]["test_cases"]["maxItems"] == 8
-        for call in case_calls
-    )
+    assert len([call for call in provider.calls if call[1] is ScenarioBatch]) == 1
+    assert len([call for call in provider.calls if call[1] is ModelTestCaseBatch]) == 1
     assert not any("WORKER REQUIREMENT REVIEW" in call[0][0]["content"] for call in provider.calls)
     assert not any("REVIEWED CANDIDATES JSON" in call[0][0]["content"] for call in provider.calls)
 
@@ -474,10 +709,12 @@ def test_local_centralized_run_uses_bounded_serial_tasks() -> None:
 def test_centralized_routes_each_agent_role_to_its_provider() -> None:
     scout = CentralProvider()
     curator = CentralProvider()
-    generator = CentralProvider()
+    architect = CentralProvider()
+    writer = CentralProvider()
     scout.model = "scout-model"
     curator.model = "curator-model"
-    generator.model = "generator-model"
+    architect.model = "architect-model"
+    writer.model = "writer-model"
     activity = []
 
     result = run_centralized_multi_agent(
@@ -486,7 +723,8 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
             providers={
                 "scout": scout,
                 "curator": curator,
-                "test_generator": generator,
+                "scenario_architect": architect,
+                "test_writer": writer,
             },
             progress=activity.append,
         ),
@@ -499,8 +737,10 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
         "SCOUT" in call[0][0]["content"]
         for call in scout.calls
     )
-    assert len(generator.calls) == 1
-    assert all(issubclass(call[1], GeneratedCases) for call in generator.calls)
+    assert len(architect.calls) == 1
+    assert architect.calls[0][1] is ScenarioBatch
+    assert len(writer.calls) == 1
+    assert writer.calls[0][1] is ModelTestCaseBatch
     assert len(curator.calls) == 1
     assert curator.calls[0][1] is RequirementSynthesis
     assert {
@@ -511,8 +751,8 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
     assert {
         event.model
         for event in activity
-        if getattr(event, "role", "") == "Test designer"
-    } == {"generator-model"}
+        if getattr(event, "role", "") == "Test writer"
+    } == {"writer-model"}
 
 
 def test_centralized_activity_reports_orchestrator_handoffs() -> None:
@@ -525,7 +765,7 @@ def test_centralized_activity_reports_orchestrator_handoffs() -> None:
     assert activity[0] == "Orchestrator: queued 3 requirement extraction tasks."
     assert "Orchestrator: reconciled 1 canonical requirements." in activity
     assert (
-        "Orchestrator: queued 3 test generation tasks."
+        "Orchestrator: queued 1 test writing tasks."
         in activity
     )
     assert activity[-1] == "Orchestrator: merging the generated artifacts."
@@ -535,14 +775,9 @@ def test_centralized_activity_reports_orchestrator_handoffs() -> None:
             f"Scout {index}: done — handed requirements to the orchestrator."
             in activity
         )
-        assert (
-            f"Test Generator {index}: working — creating scenarios and test cases."
-            in activity
-        )
-        assert (
-            f"Test Generator {index}: done — handed artifacts to the orchestrator."
-            in activity
-        )
+    assert "Scenario Architect: planned 1 canonical scenarios." in activity
+    assert "Test Writer 1: working — expanding canonical scenarios." in activity
+    assert "Test Writer 1: done — handed test cases to the orchestrator." in activity
 
     analyst_artifacts = [
         event
@@ -557,7 +792,7 @@ def test_centralized_activity_reports_orchestrator_handoffs() -> None:
     generator_artifacts = [
         event
         for event in activity
-        if getattr(event, "artifact_label", "") == "Scenarios and test cases"
+        if getattr(event, "artifact_label", "") == "Test cases"
     ]
     assert all(event.model == "test-model" and event.artifact is not None for event in analyst_artifacts)
     assert all(event.model == "test-model" and event.artifact is not None for event in generator_artifacts)
@@ -639,14 +874,10 @@ class InvalidWorkerProvider(CentralProvider):
                     )
                 ]
             )
-        elif self.invalid == "duplicate" and "WORKER CASE GENERATION 1/3" in content:
-            value = GeneratedCases(
-                scenarios=[self.artifacts.scenarios[0]] * 2,
-                test_cases=self.artifacts.test_cases,
-            )
-        elif self.invalid == "parent" and "WORKER CASE GENERATION 1/3" in content:
-            value = GeneratedCases(
-                scenarios=self.artifacts.scenarios,
+        elif self.invalid == "duplicate" and schema is ScenarioBatch:
+            value = ScenarioBatch(scenarios=[self.artifacts.scenarios[0]] * 2)
+        elif self.invalid == "parent" and schema is ModelTestCaseBatch:
+            value = ModelTestCaseBatch(
                 test_cases=[
                     self.artifacts.test_cases[0].model_copy(
                         update={"scenario_id": "SCN-002"}
@@ -671,14 +902,14 @@ def test_centralized_rejects_out_of_range_worker_id() -> None:
 
 
 def test_centralized_rejects_duplicate_worker_id() -> None:
-    with pytest.raises(PipelineOutputError, match="duplicate scenario ID"):
+    with pytest.raises(PipelineOutputError, match="duplicate canonical scenario ID"):
         run_centralized_multi_agent(
             PipelineContext(provider=InvalidWorkerProvider("duplicate")), [chunk()]
         )
 
 
 def test_centralized_rejects_bad_scenario_parent() -> None:
-    with pytest.raises(PipelineOutputError, match="unknown worker scenario"):
+    with pytest.raises(PipelineOutputError, match="outside its assigned scenarios"):
         run_centralized_multi_agent(
             PipelineContext(provider=InvalidWorkerProvider("parent")), [chunk()]
         )
@@ -1118,6 +1349,38 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces(
                     output_tokens=1,
                     latency_seconds=0.01,
                 )
+            references = [
+                reference
+                for batch in responses.values()
+                for candidate in batch.candidates
+                for reference in candidate.source_references
+            ]
+            if schema is ScenarioBatch:
+                return GenerationResult(
+                    value=ScenarioBatch(
+                        scenarios=[
+                            self.artifacts.scenarios[0].model_copy(
+                                update={"source_references": references}
+                            )
+                        ]
+                    ),
+                    input_tokens=1,
+                    output_tokens=1,
+                    latency_seconds=0.01,
+                )
+            if schema is ModelTestCaseBatch:
+                return GenerationResult(
+                    value=ModelTestCaseBatch(
+                        test_cases=[
+                            self.artifacts.test_cases[0].model_copy(
+                                update={"source_references": references}
+                            )
+                        ]
+                    ),
+                    input_tokens=1,
+                    output_tokens=1,
+                    latency_seconds=0.01,
+                )
             if issubclass(schema, GeneratedCases):
                 return GenerationResult(
                     value=schema(scenarios=[], test_cases=[]),
@@ -1214,6 +1477,37 @@ class ManyRequirementsProvider(CentralProvider):
             )
         elif "SCOUT" in content:
             value = CandidateRequirementBatch(candidates=[])
+        elif schema is ScenarioBatch:
+            value = ScenarioBatch(
+                scenarios=[
+                    self.artifacts.scenarios[0].model_copy(
+                        update={
+                            "scenario_id": f"SCN-{index:03d}",
+                            "title": f"Scenario {index}",
+                            "requirement_ids": [f"REQ-{index:03d}"],
+                        }
+                    )
+                    for index in range(1, 26)
+                ]
+            )
+        elif schema is ModelTestCaseBatch:
+            worker = int(content.split("TEST WRITER ", 1)[1].split("/", 1)[0]) - 1
+            value = ModelTestCaseBatch(
+                test_cases=[
+                    self.artifacts.test_cases[0].model_copy(
+                        update={
+                            "test_case_id": f"TC-{worker * 1000 + offset:03d}",
+                            "scenario_id": scenario_id,
+                            "requirement_ids": [
+                                f"REQ-{int(scenario_id.removeprefix('SCN-')):03d}"
+                            ],
+                        }
+                    )
+                    for offset, scenario_id in enumerate(
+                        assigned_scenario_ids(content), 1
+                    )
+                ]
+            )
         elif issubclass(schema, GeneratedCases):
             value = GeneratedCases(scenarios=[], test_cases=[])
         else:
@@ -1325,6 +1619,39 @@ class MergeProvider:
                 if "Dependency evidence" in content
                 else []
             )
+        elif schema is ScenarioBatch:
+            value = ScenarioBatch(
+                scenarios=[
+                    self.artifacts.scenarios[0].model_copy(
+                        update={
+                            "scenario_id": f"SCN-{index:03d}",
+                            "requirement_ids": [f"REQ-{index:03d}"],
+                            "source_references": requirement.source_references,
+                        }
+                    )
+                    for index, requirement in enumerate(self.requirements, 1)
+                ]
+            )
+        elif schema is ModelTestCaseBatch:
+            worker = int(content.split("TEST WRITER ", 1)[1].split("/", 1)[0]) - 1
+            scenario_ids = assigned_scenario_ids(content)
+            value = ModelTestCaseBatch(
+                test_cases=[
+                    self.artifacts.test_cases[0].model_copy(
+                        update={
+                            "test_case_id": f"TC-{worker * 1000 + offset:03d}",
+                            "scenario_id": scenario_id,
+                            "requirement_ids": [
+                                f"REQ-{int(scenario_id.removeprefix('SCN-')):03d}"
+                            ],
+                            "source_references": self.requirements[
+                                int(scenario_id.removeprefix("SCN-")) - 1
+                            ].source_references,
+                        }
+                    )
+                    for offset, scenario_id in enumerate(scenario_ids, 1)
+                ]
+            )
         elif issubclass(schema, GeneratedCases):
             worker = next(
                 index
@@ -1375,13 +1702,13 @@ def test_centralized_merge_preserves_all_worker_outputs() -> None:
     ]
     assert [item.scenario_id for item in result.scenarios] == [
         "SCN-001",
-        "SCN-1001",
-        "SCN-2001",
+        "SCN-002",
+        "SCN-003",
     ]
     assert [item.test_case_id for item in result.test_cases] == [
         "TC-001",
-        "TC-1001",
-        "TC-2001",
+        "TC-002",
+        "TC-003",
     ]
     assert [item.scenario_id for item in result.test_cases] == [
         item.scenario_id for item in result.scenarios
