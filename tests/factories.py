@@ -31,7 +31,7 @@ def chunk() -> DocumentChunk:
     )
 
 
-def source() -> SourceReference:
+def source_reference() -> SourceReference:
     item = chunk()
     return SourceReference(
         chunk_id=item.chunk_id,
@@ -39,6 +39,10 @@ def source() -> SourceReference:
         section=item.section,
         excerpt=item.text,
     )
+
+
+def source() -> SourceReference:
+    return source_reference()
 
 
 def bundle() -> ArtifactBundle:

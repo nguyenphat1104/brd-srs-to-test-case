@@ -1,6 +1,7 @@
 import json
 import threading
 from collections import deque
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -8,12 +9,22 @@ from pydantic import ValidationError
 from brd_srs_testgen import pipelines as pipeline_module
 from brd_srs_testgen.models import (
     AgentSetup,
+    AgentStageOutput,
     ArtifactBundle,
+    CandidateRequirement,
+    CandidateRequirementBatch,
+    CriticFinding,
+    CriticReport,
+    CriticSeverity,
     GeneratedCases,
+    RequirementDecision,
+    RequirementDecisionAction,
     RequirementBatch,
+    RequirementSynthesis,
     ReviewResult,
     ScenarioBatch,
     TestCaseBatch as ModelTestCaseBatch,
+    default_agent_setups,
 )
 from brd_srs_testgen.pipelines import (
     PipelineOutputError,
@@ -33,7 +44,85 @@ from brd_srs_testgen.providers import (
     ProviderError,
     StructuredOutputError,
 )
-from tests.factories import bundle, chunk
+from brd_srs_testgen.prompts import RUN_PROMPT_DEFAULTS
+from tests.factories import bundle, chunk, source_reference
+
+
+def test_hierarchical_handoff_contracts_construct_valid_artifacts() -> None:
+    candidate = CandidateRequirement(
+        candidate_id="CAND-001-001",
+        title="Authenticate users",
+        description="Registered users can sign in.",
+        requirement_type="functional",
+        module="Authentication",
+        priority="high",
+        source_references=[source_reference()],
+    )
+    decision = RequirementDecision(
+        candidate_id=candidate.candidate_id,
+        action=RequirementDecisionAction.MERGE,
+        canonical_requirement_id="REQ-001",
+        reason="It duplicates the canonical requirement.",
+    )
+    scenarios = ScenarioBatch(scenarios=bundle().scenarios)
+    finding = CriticFinding(
+        finding_id="FIND-001",
+        severity=CriticSeverity.HIGH,
+        finding_type="missing_coverage",
+        artifact_ids=["SCN-001"],
+        responsible_role="test_writer",
+        required_action="Add the missing test case.",
+        source_references=[source_reference()],
+    )
+    snapshot = AgentStageOutput(
+        stage="curator",
+        task_index=0,
+        role="Requirement curator",
+        output={"decision_count": 1},
+        created_at=datetime(2026, 9, 24, tzinfo=UTC),
+    )
+
+    assert CandidateRequirementBatch(candidates=[candidate]).candidates == [candidate]
+    assert RequirementSynthesis(
+        decisions=[decision], requirements=bundle().requirements
+    ).decisions == [decision]
+    assert scenarios.scenarios == bundle().scenarios
+    assert CriticReport(accepted=False, findings=[finding]).findings == [finding]
+    assert snapshot.output == {"decision_count": 1}
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        {"action": "reject", "canonical_requirement_id": "REQ-001"},
+        {"action": "merge"},
+    ],
+)
+def test_requirement_decisions_enforce_canonical_id_rules(decision) -> None:
+    with pytest.raises(ValidationError):
+        RequirementDecision(
+            candidate_id="CAND-001-001",
+            reason="Curator decision.",
+            **decision,
+        )
+
+
+@pytest.mark.parametrize(
+    ("accepted", "findings"),
+    [(True, [object()]), (False, [])],
+)
+def test_critic_reports_match_their_acceptance_state(accepted, findings) -> None:
+    with pytest.raises(ValidationError):
+        CriticReport(accepted=accepted, findings=findings)
+
+
+def test_hierarchical_role_defaults_preserve_legacy_setups() -> None:
+    roles = {"scout", "curator", "scenario_architect", "test_writer", "critic"}
+    setups = default_agent_setups()
+
+    assert roles <= setups.keys()
+    assert {"analyst", "test_generator", "reviewer"} <= setups.keys()
+    assert all("evidence" in RUN_PROMPT_DEFAULTS[role].lower() for role in roles)
 
 
 class CentralProvider:

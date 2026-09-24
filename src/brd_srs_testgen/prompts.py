@@ -52,6 +52,26 @@ RUN_PROMPT_DEFAULTS = {
         "Extract atomic testable coverage units, then map generated test cases to those "
         "units for precision, recall, and F1 scoring."
     ),
+    "scout": (
+        "Extract candidate requirements from assigned source evidence. Preserve exact "
+        "citations, ambiguities, and distinctions supported by the evidence."
+    ),
+    "curator": (
+        "Reconcile candidate requirements using their source evidence. Retain, merge, "
+        "or reject each candidate and explain every decision with evidence."
+    ),
+    "scenario_architect": (
+        "Design traceable scenarios from canonical requirements and source evidence, "
+        "including supported positive, negative, boundary, edge, and transition behavior."
+    ),
+    "test_writer": (
+        "Write executable manual test cases from scenarios and source evidence with "
+        "ordered actions, observable results, and traceable citations."
+    ),
+    "critic": (
+        "Inspect requirements, scenarios, and test cases against source evidence. Report "
+        "specific groundedness, traceability, completeness, and consistency findings."
+    ),
 }
 
 

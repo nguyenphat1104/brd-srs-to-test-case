@@ -104,7 +104,17 @@ class FailureCategory(StrEnum):
 
 
 class AgentSetup(StrictModel):
-    agent: Literal["analyst", "test_generator", "reviewer", "coverage_analyzer"]
+    agent: Literal[
+        "analyst",
+        "test_generator",
+        "reviewer",
+        "coverage_analyzer",
+        "scout",
+        "curator",
+        "scenario_architect",
+        "test_writer",
+        "critic",
+    ]
     role: str = Field(min_length=1, max_length=120)
     instructions: str = Field(default="", max_length=4_000)
 
@@ -117,6 +127,13 @@ def default_agent_setups() -> dict[str, AgentSetup]:
         "coverage_analyzer": AgentSetup(
             agent="coverage_analyzer", role="Coverage analyst"
         ),
+        "scout": AgentSetup(agent="scout", role="Evidence scout"),
+        "curator": AgentSetup(agent="curator", role="Requirement curator"),
+        "scenario_architect": AgentSetup(
+            agent="scenario_architect", role="Scenario architect"
+        ),
+        "test_writer": AgentSetup(agent="test_writer", role="Test writer"),
+        "critic": AgentSetup(agent="critic", role="Artifact critic"),
     }
 
 
@@ -144,6 +161,17 @@ class Requirement(StrictModel):
     priority: RequirementPriority
     ambiguities: list[str] = Field(default_factory=list)
     dependency_ids: list[str] = Field(default_factory=list)
+    source_references: list[SourceReference] = Field(min_length=1)
+
+
+class CandidateRequirement(StrictModel):
+    candidate_id: str = Field(pattern=r"^CAND-\d{3}-\d{3,}$")
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    requirement_type: RequirementType
+    module: str = Field(min_length=1)
+    priority: RequirementPriority
+    ambiguities: list[str] = Field(default_factory=list)
     source_references: list[SourceReference] = Field(min_length=1)
 
 
@@ -185,6 +213,37 @@ class RequirementBatch(StrictModel):
     requirements: list[Requirement]
 
 
+class CandidateRequirementBatch(StrictModel):
+    candidates: list[CandidateRequirement]
+
+
+class RequirementDecisionAction(StrEnum):
+    RETAIN = "retain"
+    MERGE = "merge"
+    REJECT = "reject"
+
+
+class RequirementDecision(StrictModel):
+    candidate_id: str = Field(pattern=r"^CAND-\d{3}-\d{3,}$")
+    action: RequirementDecisionAction
+    canonical_requirement_id: str | None = Field(default=None, pattern=r"^REQ-\d{3,}$")
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_canonical_requirement_id(self) -> Self:
+        if self.action is RequirementDecisionAction.REJECT:
+            if self.canonical_requirement_id is not None:
+                raise ValueError("rejected candidates cannot have a canonical requirement ID")
+        elif self.canonical_requirement_id is None:
+            raise ValueError("retained and merged candidates require a canonical requirement ID")
+        return self
+
+
+class RequirementSynthesis(StrictModel):
+    decisions: list[RequirementDecision]
+    requirements: list[Requirement]
+
+
 class ScenarioBatch(StrictModel):
     scenarios: list[Scenario]
 
@@ -216,6 +275,46 @@ class ReviewIssue(StrictModel):
 class ReviewResult(StrictModel):
     accepted: bool
     issues: list[ReviewIssue] = Field(default_factory=list)
+
+
+class CriticSeverity(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class CriticFinding(StrictModel):
+    finding_id: str = Field(pattern=r"^FIND-\d{3,}$")
+    severity: CriticSeverity
+    finding_type: str = Field(min_length=1)
+    artifact_ids: list[str] = Field(min_length=1)
+    responsible_role: Literal["curator", "scenario_architect", "test_writer"]
+    required_action: str = Field(min_length=1)
+    source_references: list[SourceReference] = Field(min_length=1)
+
+
+class CriticReport(StrictModel):
+    accepted: bool
+    findings: list[CriticFinding] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_findings(self) -> Self:
+        if self.accepted and self.findings:
+            raise ValueError("accepted reports cannot contain findings")
+        if not self.accepted and not self.findings:
+            raise ValueError("rejected reports require at least one finding")
+        return self
+
+
+class AgentStageOutput(StrictModel):
+    stage: Literal[
+        "scout", "curator", "scenario_architect", "test_writer", "critic", "repair"
+    ]
+    task_index: int = Field(ge=0)
+    role: str = Field(min_length=1)
+    input_ids: list[str] = Field(default_factory=list)
+    output: dict[str, JsonValue]
+    created_at: AwareDatetime
 
 
 class ValidationIssue(StrictModel):
