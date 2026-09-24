@@ -696,11 +696,13 @@ def _semantic_payload(bundle: ArtifactBundle) -> dict[str, list[object]]:
     return {
         "requirements": [
             (item.title, item.description, item.ambiguities)
-            for item in bundle.requirements
+            for item in sorted(
+                bundle.requirements, key=lambda item: item.requirement_id
+            )
         ],
         "scenarios": [
             (item.title, item.objective, item.preconditions)
-            for item in bundle.scenarios
+            for item in sorted(bundle.scenarios, key=lambda item: item.scenario_id)
         ],
         "tests": [
             (
@@ -709,7 +711,7 @@ def _semantic_payload(bundle: ArtifactBundle) -> dict[str, list[object]]:
                 item.test_data,
                 [(step.action, step.expected_result) for step in item.steps],
             )
-            for item in bundle.test_cases
+            for item in sorted(bundle.test_cases, key=lambda item: item.test_case_id)
         ],
     }
 
@@ -829,11 +831,11 @@ def _critique_bundle(
         16_000,
         agent=role,
     )
-    with context._lock:
-        context.semantic_revisions += 1
     if _semantic_payload(repaired) == _semantic_payload(bundle):
         raise PipelineOutputError("Repair changed links only.")
     _validate_repair_scope(bundle, repaired, target_ids)
+    with context._lock:
+        context.semantic_revisions += 1
     return repaired
 
 

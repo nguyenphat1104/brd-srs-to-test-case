@@ -252,6 +252,87 @@ def test_critique_rejects_link_only_repair() -> None:
         _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
 
 
+def test_critique_rejects_reordered_link_only_repair_without_revision() -> None:
+    artifacts = bundle()
+    second_requirement = artifacts.requirements[0].model_copy(
+        update={
+            "requirement_id": "REQ-002",
+            "title": "Authorize users",
+            "description": "Registered users can access the dashboard.",
+        }
+    )
+    second_scenario = artifacts.scenarios[0].model_copy(
+        update={
+            "scenario_id": "SCN-002",
+            "title": "Open dashboard",
+            "objective": "Verify an authorized user opens the dashboard.",
+            "requirement_ids": ["REQ-002"],
+        }
+    )
+    second_test = artifacts.test_cases[0].model_copy(
+        update={
+            "test_case_id": "TC-002",
+            "scenario_id": "SCN-002",
+            "requirement_ids": ["REQ-002"],
+            "title": "Verify dashboard access",
+        }
+    )
+    artifacts = ArtifactBundle(
+        requirements=[artifacts.requirements[0], second_requirement],
+        scenarios=[artifacts.scenarios[0], second_scenario],
+        test_cases=[artifacts.test_cases[0], second_test],
+    )
+    repaired = ArtifactBundle(
+        requirements=[
+            second_requirement.model_copy(update={"dependency_ids": ["REQ-001"]}),
+            artifacts.requirements[0].model_copy(
+                update={"dependency_ids": ["REQ-002"]}
+            ),
+        ],
+        scenarios=[
+            second_scenario.model_copy(update={"requirement_ids": ["REQ-001"]}),
+            artifacts.scenarios[0].model_copy(
+                update={"requirement_ids": ["REQ-002"]}
+            ),
+        ],
+        test_cases=[
+            second_test.model_copy(
+                update={"scenario_id": "SCN-001", "requirement_ids": ["REQ-001"]}
+            ),
+            artifacts.test_cases[0].model_copy(
+                update={"scenario_id": "SCN-002", "requirement_ids": ["REQ-002"]}
+            ),
+        ],
+    )
+    findings = [
+        critic_finding(
+            finding_id="FIND-001",
+            artifact_ids=["REQ-001", "REQ-002"],
+            responsible_role="curator",
+        ),
+        critic_finding(
+            finding_id="FIND-002",
+            severity="medium",
+            artifact_ids=["SCN-001", "SCN-002"],
+            responsible_role="scenario_architect",
+        ),
+        critic_finding(
+            finding_id="FIND-003",
+            severity="low",
+            artifact_ids=["TC-001", "TC-002"],
+            responsible_role="test_writer",
+        ),
+    ]
+    provider = CritiqueProvider(
+        [CriticReport(accepted=False, findings=findings), repaired]
+    )
+    context = PipelineContext(provider=provider)
+
+    with pytest.raises(PipelineOutputError, match="^Repair changed links only\\.$"):
+        _critique_bundle(context, artifacts, [chunk()])
+    assert context.semantic_revisions == 0
+
+
 def test_critique_leaves_full_repaired_bundle_validation_to_runner() -> None:
     artifacts = bundle()
     repaired = artifacts.model_copy(
