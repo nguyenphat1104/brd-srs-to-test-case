@@ -30,6 +30,8 @@ from brd_srs_testgen.pipelines import (
     PipelineOutputError,
     RULES,
     PipelineContext,
+    _critique_bundle,
+    _semantic_payload,
     _validate_synthesis,
     run_centralized_multi_agent,
     run_single_prompt,
@@ -46,10 +48,314 @@ from brd_srs_testgen.providers import (
 )
 from brd_srs_testgen.prompts import (
     RUN_PROMPT_DEFAULTS,
+    critic_prompt,
     curator_prompt,
+    repair_prompt,
     test_writer_prompt as build_test_writer_prompt,
 )
 from tests.factories import bundle, chunk, source_reference
+
+
+class CritiqueProvider:
+    model = "test-model"
+
+    def __init__(self, responses) -> None:
+        self.ledger = BudgetLedger(100_000)
+        self.responses = deque(responses)
+        self.calls = []
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        self.calls.append((messages, schema, max_output_tokens))
+        value = self.responses.popleft()
+        return GenerationResult(
+            value=schema.model_validate(value.model_dump(mode="json")),
+            input_tokens=1,
+            output_tokens=1,
+            latency_seconds=0.01,
+        )
+
+
+def critic_finding(
+    *,
+    finding_id="FIND-001",
+    severity="high",
+    artifact_ids=None,
+    responsible_role="test_writer",
+) -> CriticFinding:
+    return CriticFinding(
+        finding_id=finding_id,
+        severity=severity,
+        finding_type="weak_expected_result",
+        artifact_ids=artifact_ids or ["TC-001"],
+        responsible_role=responsible_role,
+        required_action="Make the expected result observable.",
+        source_references=[source_reference()],
+    )
+
+
+def test_critic_prompt_includes_complete_bundle_evidence_and_review_scope() -> None:
+    artifacts = bundle()
+
+    prompt = critic_prompt(artifacts, [chunk()])
+
+    assert artifacts.model_dump_json() in prompt
+    assert chunk().chunk_id in prompt
+    for concern in (
+        "missing source behaviors",
+        "unsupported content",
+        "weak expected results",
+        "non-executable steps",
+        "duplicates",
+        "invalid trace links",
+        "missing boundary and negative paths",
+    ):
+        assert concern in prompt
+    assert "cite source evidence for every finding" in prompt.lower()
+
+
+def test_accepted_critique_returns_bundle_unchanged_without_revision() -> None:
+    artifacts = bundle()
+    provider = CritiqueProvider([CriticReport(accepted=True)])
+    context = PipelineContext(provider=provider)
+
+    result = _critique_bundle(context, artifacts, [chunk()])
+
+    assert result == artifacts
+    assert context.semantic_revisions == 0
+    assert [call[1] for call in provider.calls] == [CriticReport]
+
+
+def test_critique_repairs_once_via_highest_severity_role_with_all_findings() -> None:
+    artifacts = bundle()
+    repaired = artifacts.model_copy(
+        update={
+            "requirements": [
+                artifacts.requirements[0].model_copy(
+                    update={"title": "Authenticate registered users"}
+                )
+            ],
+            "scenarios": [
+                artifacts.scenarios[0].model_copy(
+                    update={"title": "Registered user authentication"}
+                )
+            ],
+            "test_cases": [
+                artifacts.test_cases[0].model_copy(
+                    update={"title": "Verify registered user authentication"}
+                )
+            ],
+        }
+    )
+    findings = [
+        critic_finding(
+            finding_id="FIND-001",
+            severity="medium",
+            artifact_ids=["REQ-001"],
+            responsible_role="curator",
+        ),
+        critic_finding(
+            finding_id="FIND-002",
+            severity="high",
+            responsible_role="test_writer",
+        ),
+        critic_finding(
+            finding_id="FIND-003",
+            severity="low",
+            artifact_ids=["SCN-001"],
+            responsible_role="scenario_architect",
+        ),
+    ]
+    critic = CritiqueProvider([CriticReport(accepted=False, findings=findings)])
+    writer = CritiqueProvider([repaired])
+    context = AgentRecordingContext(
+        provider=critic,
+        providers={"test_writer": writer},
+        agent_prompts={"test_writer": "Keep the repair narrowly scoped."},
+    )
+
+    result = _critique_bundle(context, artifacts, [chunk()])
+
+    assert result == repaired
+    assert context.agents == ["critic", "test_writer"]
+    assert context.semantic_revisions == 1
+    assert len(critic.calls) == len(writer.calls) == 1
+    repair_messages = writer.calls[0][0]
+    assert "Keep the repair narrowly scoped." in repair_messages[0]["content"]
+    repair_content = repair_messages[-1]["content"]
+    assert all(finding.finding_id in repair_content for finding in findings)
+    assert repair_content == repair_prompt(
+        artifacts,
+        findings,
+        [chunk()],
+        setup=context.agent_setup("test_writer"),
+    )
+
+
+def test_highest_severity_uses_original_finding_order_to_select_repair_role() -> None:
+    artifacts = bundle()
+    repaired = artifacts.model_copy(
+        update={
+            "requirements": [
+                artifacts.requirements[0].model_copy(
+                    update={"title": "Authenticate every registered user"}
+                )
+            ],
+            "scenarios": [
+                artifacts.scenarios[0].model_copy(
+                    update={"title": "Authenticate a registered user"}
+                )
+            ],
+        }
+    )
+    findings = [
+        critic_finding(
+            severity="high",
+            artifact_ids=["REQ-001"],
+            responsible_role="curator",
+        ),
+        critic_finding(
+            finding_id="FIND-002",
+            severity="high",
+            artifact_ids=["SCN-001"],
+            responsible_role="scenario_architect",
+        ),
+    ]
+    provider = CritiqueProvider(
+        [CriticReport(accepted=False, findings=findings), repaired]
+    )
+    context = AgentRecordingContext(provider=provider)
+
+    _critique_bundle(context, artifacts, [chunk()])
+
+    assert context.agents == ["critic", "curator"]
+
+
+def test_critique_rejects_link_only_repair() -> None:
+    artifacts = bundle()
+    repaired = artifacts.model_copy(
+        update={
+            "test_cases": [
+                artifacts.test_cases[0].model_copy(
+                    update={"requirement_ids": ["REQ-999"]}
+                )
+            ]
+        }
+    )
+    provider = CritiqueProvider(
+        [
+            CriticReport(accepted=False, findings=[critic_finding()]),
+            repaired,
+        ]
+    )
+
+    with pytest.raises(PipelineOutputError, match="^Repair changed links only\\.$"):
+        _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+
+
+def test_critique_leaves_full_repaired_bundle_validation_to_runner() -> None:
+    artifacts = bundle()
+    repaired = artifacts.model_copy(
+        update={
+            "test_cases": [
+                artifacts.test_cases[0].model_copy(
+                    update={
+                        "title": "Verify authentication result",
+                        "scenario_id": "SCN-999",
+                    }
+                )
+            ]
+        }
+    )
+    provider = CritiqueProvider(
+        [
+            CriticReport(accepted=False, findings=[critic_finding()]),
+            repaired,
+        ]
+    )
+
+    result = _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+
+    from brd_srs_testgen.validation import validate_bundle
+
+    assert result == repaired
+    assert not validate_bundle(result, [chunk()]).valid
+
+
+def test_critic_can_be_disabled_for_ablation() -> None:
+    provider = CritiqueProvider([])
+    context = PipelineContext(provider=provider, critic_enabled=False)
+
+    assert _critique_bundle(context, bundle(), [chunk()]) == bundle()
+    assert provider.calls == []
+    assert context.semantic_revisions == 0
+
+
+def test_critic_findings_require_grounded_evidence_and_role_ownership() -> None:
+    artifacts = bundle()
+    unsupported = critic_finding().model_copy(
+        update={
+            "source_references": [
+                source_reference().model_copy(update={"excerpt": "invented evidence"})
+            ]
+        }
+    )
+    for finding, message in (
+        (unsupported, "exact 5-to-25-word excerpt"),
+        (
+            critic_finding(
+                artifact_ids=["REQ-001"], responsible_role="test_writer"
+            ),
+            "wrong responsible role",
+        ),
+    ):
+        provider = CritiqueProvider(
+            [CriticReport(accepted=False, findings=[finding])]
+        )
+        with pytest.raises(PipelineOutputError, match=message):
+            _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+
+
+def test_repair_cannot_change_an_unaffected_artifact() -> None:
+    artifacts = bundle()
+    repaired = artifacts.model_copy(
+        update={
+            "requirements": [
+                artifacts.requirements[0].model_copy(
+                    update={"title": "Authenticate registered users"}
+                )
+            ],
+            "test_cases": [
+                artifacts.test_cases[0].model_copy(
+                    update={"title": "Verify registered user authentication"}
+                )
+            ],
+        }
+    )
+    provider = CritiqueProvider(
+        [CriticReport(accepted=False, findings=[critic_finding()]), repaired]
+    )
+
+    with pytest.raises(PipelineOutputError, match="outside the findings"):
+        _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+
+
+def test_semantic_payload_contains_only_authored_behavior() -> None:
+    artifacts = bundle()
+    changed_links = artifacts.model_copy(
+        update={
+            "test_cases": [
+                artifacts.test_cases[0].model_copy(
+                    update={
+                        "test_case_id": "TC-999",
+                        "scenario_id": "SCN-999",
+                        "requirement_ids": ["REQ-999"],
+                    }
+                )
+            ]
+        }
+    )
+
+    assert _semantic_payload(changed_links) == _semantic_payload(artifacts)
 
 
 def test_hierarchical_handoff_contracts_construct_valid_artifacts() -> None:
@@ -470,6 +776,8 @@ class HierarchicalProvider:
             finally:
                 with self.lock:
                     self.active_writers -= 1
+        elif schema is CriticReport:
+            value = CriticReport(accepted=True)
         else:
             raise AssertionError(f"Unexpected schema: {schema}")
         return GenerationResult(
@@ -641,6 +949,8 @@ class CentralProvider:
             value = RequirementBatch(requirements=self.artifacts.requirements)
         elif schema is ReviewResult:
             value = ReviewResult(accepted=True)
+        elif schema is CriticReport:
+            value = CriticReport(accepted=True)
         else:
             value = self.artifacts
         return GenerationResult(
@@ -670,6 +980,7 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
     assert sum("p0001-c001" not in call[0][0]["content"] for call in worker_calls) == 2
     assert len([call for call in provider.calls if call[1] is ScenarioBatch]) == 1
     assert len([call for call in provider.calls if call[1] is ModelTestCaseBatch]) == 1
+    assert len([call for call in provider.calls if call[1] is CriticReport]) == 1
     assert not any("WORKER REQUIREMENT REVIEW" in call[0][0]["content"] for call in provider.calls)
     assert not any("REVIEWED CANDIDATES JSON" in call[0][0]["content"] for call in provider.calls)
 
@@ -724,10 +1035,12 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
     curator = CentralProvider()
     architect = CentralProvider()
     writer = CentralProvider()
+    critic = CentralProvider()
     scout.model = "scout-model"
     curator.model = "curator-model"
     architect.model = "architect-model"
     writer.model = "writer-model"
+    critic.model = "critic-model"
     activity = []
 
     result = run_centralized_multi_agent(
@@ -738,6 +1051,7 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
                 "curator": curator,
                 "scenario_architect": architect,
                 "test_writer": writer,
+                "critic": critic,
             },
             progress=activity.append,
         ),
@@ -756,6 +1070,8 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
     assert writer.calls[0][1] is ModelTestCaseBatch
     assert len(curator.calls) == 1
     assert curator.calls[0][1] is RequirementSynthesis
+    assert len(critic.calls) == 1
+    assert critic.calls[0][1] is CriticReport
     assert {
         event.model
         for event in activity
@@ -1540,6 +1856,8 @@ class MergeProvider:
                     for offset, scenario_id in enumerate(scenario_ids, 1)
                 ]
             )
+        elif schema is CriticReport:
+            value = CriticReport(accepted=True)
         else:
             value = ReviewResult(accepted=True)
         return GenerationResult(

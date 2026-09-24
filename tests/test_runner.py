@@ -13,6 +13,8 @@ from brd_srs_testgen.models import (
     ArtifactBundle,
     CandidateRequirement,
     CandidateRequirementBatch,
+    CriticFinding,
+    CriticReport,
     CoverageAssignment,
     CoverageCatalog,
     CoverageCatalogStatus,
@@ -31,7 +33,7 @@ from brd_srs_testgen.models import (
     RunType,
     ValidationReport,
 )
-from brd_srs_testgen.pipelines import PipelineOutputError
+from brd_srs_testgen.pipelines import PipelineOutputError, _critique_bundle
 from brd_srs_testgen.providers import (
     BudgetLedger,
     GenerationResult,
@@ -1268,6 +1270,56 @@ def test_invalid_central_worker_output_is_semantic_failure(monkeypatch) -> None:
 
     assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
     assert "outside Scout 1 namespace" in result.manifest.failure_message
+
+
+def test_runner_deterministically_rejects_invalid_critic_repair(monkeypatch) -> None:
+    artifacts = bundle()
+    invalid = artifacts.model_copy(
+        update={
+            "test_cases": [
+                artifacts.test_cases[0].model_copy(
+                    update={
+                        "title": "Verify authentication result",
+                        "scenario_id": "SCN-999",
+                    }
+                )
+            ]
+        }
+    )
+    finding = CriticFinding(
+        finding_id="FIND-001",
+        severity="high",
+        finding_type="weak_expected_result",
+        artifact_ids=["TC-001"],
+        responsible_role="test_writer",
+        required_action="Make the result observable.",
+        source_references=artifacts.test_cases[0].source_references,
+    )
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    monkeypatch.setitem(
+        runner.PIPELINES,
+        RunType.CENTRALIZED_MULTI_AGENT,
+        lambda context, chunks: _critique_bundle(
+            context, artifacts, list(chunks)
+        ),
+    )
+
+    result = run_generation(
+        b"pdf",
+        "sample.pdf",
+        RunType.CENTRALIZED_MULTI_AGENT,
+        settings(provider="llama_cpp"),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(
+            ledger, [CriticReport(accepted=False, findings=[finding]), invalid]
+        ),
+    )
+
+    assert result.bundle == invalid
+    assert result.manifest.status is RunStatus.FAILED
+    assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
+    assert result.metrics.semantic_revisions == 1
 
 
 def test_centralized_builds_generation_agents_and_a_separate_fixed_judge(

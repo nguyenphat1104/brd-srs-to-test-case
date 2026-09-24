@@ -17,6 +17,9 @@ from .models import (
     ArtifactBundle,
     CandidateRequirement,
     CandidateRequirementBatch,
+    CriticFinding,
+    CriticReport,
+    CriticSeverity,
     DocumentChunk,
     Requirement,
     RequirementBatch,
@@ -40,8 +43,10 @@ from .prompts import (
     _assistant,
     _data_block,
     _user,
+    critic_prompt,
     requirements_prompt,
     review_prompt,
+    repair_prompt,
     revision_prompt,
     scenario_architect_prompt,
     scenarios_prompt,
@@ -89,6 +94,7 @@ class PipelineContext:
     max_request_tokens: int | None = None
     worker_limit: int = WORKER_COUNT
     bounded_tasks: bool = False
+    critic_enabled: bool = True
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     @property
@@ -685,6 +691,138 @@ def _relevant_chunks(
     return [chunk for chunk in chunks if chunk.chunk_id in chunk_ids]
 
 
+def _semantic_payload(bundle: ArtifactBundle) -> dict[str, list[object]]:
+    return {
+        "requirements": [
+            (item.title, item.description, item.ambiguities)
+            for item in bundle.requirements
+        ],
+        "scenarios": [
+            (item.title, item.objective, item.preconditions)
+            for item in bundle.scenarios
+        ],
+        "tests": [
+            (
+                item.title,
+                item.preconditions,
+                item.test_data,
+                [(step.action, step.expected_result) for step in item.steps],
+            )
+            for item in bundle.test_cases
+        ],
+    }
+
+
+def _artifacts_by_id(bundle: ArtifactBundle) -> dict[str, BaseModel]:
+    return {
+        **{item.requirement_id: item for item in bundle.requirements},
+        **{item.scenario_id: item for item in bundle.scenarios},
+        **{item.test_case_id: item for item in bundle.test_cases},
+    }
+
+
+def _validate_critic_scope(report: CriticReport) -> set[str]:
+    prefixes = {
+        "curator": "REQ-",
+        "scenario_architect": "SCN-",
+        "test_writer": "TC-",
+    }
+    target_ids: set[str] = set()
+    for finding in report.findings:
+        prefix = prefixes[finding.responsible_role]
+        for artifact_id in finding.artifact_ids:
+            if not artifact_id.startswith(prefix):
+                raise PipelineOutputError(
+                    f"Finding {finding.finding_id} assigns {artifact_id} to the "
+                    f"wrong responsible role {finding.responsible_role}."
+                )
+            target_ids.add(artifact_id)
+    return target_ids
+
+
+def _validate_repair_scope(
+    original: ArtifactBundle, repaired: ArtifactBundle, target_ids: set[str]
+) -> None:
+    original_by_id = _artifacts_by_id(original)
+    repaired_by_id = _artifacts_by_id(repaired)
+    if not set(original_by_id) <= set(repaired_by_id):
+        raise PipelineOutputError("Repair must preserve every original artifact ID.")
+    added_ids = set(repaired_by_id) - set(original_by_id)
+    if not added_ids <= target_ids:
+        raise PipelineOutputError("Repair added artifacts outside the findings.")
+    changed_ids = {
+        artifact_id
+        for artifact_id, artifact in original_by_id.items()
+        if repaired_by_id[artifact_id] != artifact
+    } | added_ids
+    if not changed_ids <= target_ids:
+        raise PipelineOutputError("Repair changed artifacts outside the findings.")
+    if not target_ids <= changed_ids:
+        raise PipelineOutputError("Repair did not address every named artifact.")
+
+
+def _repair_role(findings: list[CriticFinding]) -> str:
+    severity_order = {
+        CriticSeverity.HIGH: 0,
+        CriticSeverity.MEDIUM: 1,
+        CriticSeverity.LOW: 2,
+    }
+    return min(
+        findings, key=lambda finding: severity_order[finding.severity]
+    ).responsible_role
+
+
+def _critique_bundle(
+    context: PipelineContext,
+    bundle: ArtifactBundle,
+    chunks: list[DocumentChunk],
+) -> ArtifactBundle:
+    if not context.critic_enabled:
+        return bundle
+    report = _canonicalize_grounded(
+        context.generate(
+            [
+                _user(
+                    critic_prompt(
+                        bundle,
+                        chunks,
+                        setup=context.agent_setup("critic"),
+                    )
+                )
+            ],
+            CriticReport,
+            8_000,
+            agent="critic",
+        ),
+        chunks,
+    )
+    if report.accepted:
+        return bundle
+    target_ids = _validate_critic_scope(report)
+    role = _repair_role(report.findings)
+    repaired = context.generate(
+        [
+            _user(
+                repair_prompt(
+                    bundle,
+                    report.findings,
+                    chunks,
+                    setup=context.agent_setup(role),
+                )
+            )
+        ],
+        ArtifactBundle,
+        16_000,
+        agent=role,
+    )
+    with context._lock:
+        context.semantic_revisions += 1
+    if _semantic_payload(repaired) == _semantic_payload(bundle):
+        raise PipelineOutputError("Repair changed links only.")
+    _validate_repair_scope(bundle, repaired, target_ids)
+    return repaired
+
+
 def run_centralized_multi_agent(
     context: PipelineContext, chunks: Iterable[DocumentChunk]
 ) -> ArtifactBundle:
@@ -920,4 +1058,4 @@ def run_centralized_multi_agent(
         artifact=bundle,
         artifact_label="Merged artifact bundle",
     )
-    return bundle
+    return _critique_bundle(context, bundle, chunks)

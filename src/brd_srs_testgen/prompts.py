@@ -8,7 +8,9 @@ from pydantic import BaseModel
 from .documents import render_chunks
 from .models import (
     AgentSetup,
+    ArtifactBundle,
     CandidateRequirement,
+    CriticFinding,
     DocumentChunk,
     Requirement,
     RequirementBatch,
@@ -249,6 +251,55 @@ Referenced canonical requirements JSON:
 
 Dependency context JSON (read only; do not add dependency-only requirement IDs to test cases):
 {_data_block("DEPENDENCY CONTEXT JSON", dependency_json)}
+
+{_evidence(chunks)}"""
+
+
+def critic_prompt(
+    bundle: ArtifactBundle,
+    chunks: Iterable[DocumentChunk],
+    *,
+    setup: AgentSetup | None = None,
+) -> str:
+    return f"""{RULES}
+
+ARTIFACT CRITIQUE
+
+Inspect the complete ArtifactBundle against all source evidence. Check for missing source behaviors, unsupported content, weak expected results, non-executable steps, duplicates, invalid trace links, and missing boundary and negative paths. Cite source evidence for every finding. Name every affected artifact ID and assign the responsible role: curator for requirements, scenario_architect for scenarios, or test_writer for test cases. Return one CriticReport. Set accepted to true only when there are no findings.
+
+{_agent_setup_block(setup)}
+
+Complete ArtifactBundle JSON:
+{_data_block("ARTIFACT BUNDLE JSON", bundle.model_dump_json())}
+
+{_evidence(chunks)}"""
+
+
+def repair_prompt(
+    bundle: ArtifactBundle,
+    findings: Iterable[CriticFinding],
+    chunks: Iterable[DocumentChunk],
+    *,
+    setup: AgentSetup | None = None,
+) -> str:
+    findings_json = json.dumps(
+        [finding.model_dump(mode="json") for finding in findings],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"""{RULES}
+
+TARGETED ARTIFACT REPAIR
+
+Apply every Critic finding in one repair. Return one complete ArtifactBundle. Change only artifacts named by the findings, preserve every unaffected artifact and ID exactly, and do not perform unrelated cleanup. Keep all original IDs; a new artifact is allowed only when its ID is explicitly named by a finding.
+
+{_agent_setup_block(setup)}
+
+Complete ArtifactBundle JSON:
+{_data_block("ARTIFACT BUNDLE JSON", bundle.model_dump_json())}
+
+All Critic findings JSON:
+{_data_block("CRITIC FINDINGS JSON", findings_json)}
 
 {_evidence(chunks)}"""
 
