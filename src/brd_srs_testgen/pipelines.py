@@ -15,6 +15,7 @@ from .models import (
     AgentSetup,
     ActivityEvent,
     ArtifactBundle,
+    CandidateRequirementBatch,
     DocumentChunk,
     GeneratedCases,
     Requirement,
@@ -43,10 +44,10 @@ from .prompts import (
     review_prompt,
     revision_prompt,
     scenarios_prompt,
+    scout_prompt,
     single_prompt,
     test_cases_prompt,
     worker_cases_prompt,
-    worker_requirements_prompt,
 )
 
 
@@ -506,14 +507,59 @@ def _validate_worker_ids(
         seen.add(item_id)
 
 
-def _validate_worker_requirements(
-    worker_index: int, batch: RequirementBatch
+def _validate_scout_candidates(
+    worker_index: int,
+    batch: CandidateRequirementBatch,
+    group: list[DocumentChunk],
 ) -> None:
-    _validate_worker_ids(
-        worker_index,
-        "requirement",
-        "REQ",
-        (requirement.requirement_id for requirement in batch.requirements),
+    prefix = f"CAND-{worker_index + 1:03d}-"
+    seen: set[str] = set()
+    chunks = {chunk.chunk_id: chunk for chunk in group}
+    for candidate in batch.candidates:
+        if not candidate.candidate_id.startswith(prefix):
+            raise PipelineOutputError(
+                f"Candidate ID {candidate.candidate_id} is outside Scout "
+                f"{worker_index + 1} namespace {prefix}001 upward."
+            )
+        if candidate.candidate_id in seen:
+            raise PipelineOutputError(
+                f"Scout {worker_index + 1} returned duplicate candidate ID "
+                f"{candidate.candidate_id}."
+            )
+        seen.add(candidate.candidate_id)
+        for reference in candidate.source_references:
+            chunk = chunks.get(reference.chunk_id)
+            if chunk is None:
+                raise PipelineOutputError(
+                    f"Candidate {candidate.candidate_id} cites chunk "
+                    f"{reference.chunk_id} outside its assigned evidence group."
+                )
+            words = reference.excerpt.split()
+            if not 5 <= len(words) <= 25 or reference.excerpt not in chunk.text:
+                raise PipelineOutputError(
+                    f"Candidate {candidate.candidate_id} must cite an exact "
+                    "5-to-25-word excerpt from its assigned evidence."
+                )
+
+
+def _legacy_requirements_from_candidates(
+    batches: Iterable[CandidateRequirementBatch],
+) -> RequirementBatch:
+    candidates = [candidate for batch in batches for candidate in batch.candidates]
+    return RequirementBatch(
+        requirements=[
+            Requirement(
+                requirement_id=f"REQ-{index:03d}",
+                title=candidate.title,
+                description=candidate.description,
+                requirement_type=candidate.requirement_type,
+                module=candidate.module,
+                priority=candidate.priority,
+                ambiguities=candidate.ambiguities,
+                source_references=candidate.source_references,
+            )
+            for index, candidate in enumerate(candidates, 1)
+        ]
     )
 
 
@@ -717,39 +763,39 @@ def run_centralized_multi_agent(
         state="working",
     )
 
-    def extract_requirements(
+    def scout(
         worker_index: int,
         group: list[DocumentChunk],
         cancellation_event: threading.Event,
-    ) -> RequirementBatch:
+    ) -> CandidateRequirementBatch:
         batch = canonicalize_source_references(context.generate(
             [
                 _user(
-                    worker_requirements_prompt(
+                    scout_prompt(
                         worker_index,
                         group,
-                        setup=context.agent_setup("analyst"),
+                        setup=context.agent_setup("scout"),
                         worker_count=len(chunk_groups),
                     )
                 )
             ],
-            RequirementBatch,
+            CandidateRequirementBatch,
             8_000,
             cancellation_event=cancellation_event,
-            agent="analyst",
-        ), chunks)
-        _validate_worker_requirements(worker_index, batch)
+            agent="scout",
+        ), group, repair_excerpt=False)
+        _validate_scout_candidates(worker_index, batch, group)
         return batch
 
-    worker_requirements = _run_parallel_workers(
+    worker_candidates = _run_parallel_workers(
         chunk_groups,
-        extract_requirements,
-        max_workers=context.worker_limit,
+        scout,
+        max_workers=min(WORKER_COUNT, context.worker_limit),
         on_started=lambda index: context.notify(
-            f"Analyzer {index + 1}: working — extracting requirements.",
-            agent=f"Analyzer {index + 1}",
-            role=context.agent_setup("analyst").role,
-            model=context.model_for("analyst"),
+            f"Scout {index + 1}: working — extracting requirements.",
+            agent=f"Scout {index + 1}",
+            role=context.agent_setup("scout").role,
+            model=context.model_for("scout"),
             state="working",
             task=(
                 "Extract testable business rules, validations, and exceptions "
@@ -759,23 +805,17 @@ def run_centralized_multi_agent(
             deliverable="Candidate requirements for reviewer reconciliation.",
         ),
         on_completed=lambda index, batch: context.notify(
-            f"Analyzer {index + 1}: done — handed requirements to the orchestrator.",
-            agent=f"Analyzer {index + 1}",
-            role=context.agent_setup("analyst").role,
-            model=context.model_for("analyst"),
+            f"Scout {index + 1}: done — handed requirements to the orchestrator.",
+            agent=f"Scout {index + 1}",
+            role=context.agent_setup("scout").role,
+            model=context.model_for("scout"),
             state="complete",
             artifact=batch,
             artifact_label="Candidate requirements",
         ),
     )
 
-    requirements = RequirementBatch(
-        requirements=[
-            requirement
-            for batch in worker_requirements
-            for requirement in batch.requirements
-        ]
-    )
+    requirements = _legacy_requirements_from_candidates(worker_candidates)
     context.notify(
         f"Orchestrator: reconciled {len(requirements.requirements)} canonical requirements.",
         agent="Orchestrator",

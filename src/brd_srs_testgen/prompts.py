@@ -146,20 +146,19 @@ Return one RequirementBatch.
 {_evidence(chunks)}"""
 
 
-def worker_requirements_prompt(
+def scout_prompt(
     worker_index: int,
     chunks: Iterable[DocumentChunk],
     *,
     setup: AgentSetup | None = None,
     worker_count: int = WORKER_COUNT,
 ) -> str:
-    lower = worker_index * 1000 + 1
-    upper = (worker_index + 1) * 1000
+    worker = worker_index + 1
     return f"""{RULES}
 
-WORKER REQUIREMENT EXTRACTION {worker_index + 1}/{worker_count}
+SCOUT {worker}/{worker_count}
 
-Inspect only the assigned evidence. Extract every supported functional, nonfunctional, and business requirement, preserving dependencies, ambiguities, and exact evidence citations. Candidate IDs must use the inclusive range REQ-{lower:03d} through REQ-{upper:03d}; you must not emit IDs outside these ranges. Return one RequirementBatch. If the assignment is empty, return {{"requirements":[]}}.
+Extract atomic candidate requirements only from the assigned ordered evidence. Keep separate rules separate and preserve ambiguity. Every candidate must cite one contiguous verbatim 5-to-25-word excerpt. Candidate IDs must use CAND-{worker:03d}-001 upward. Do not deduplicate across Scouts; the Curator owns cross-worker reconciliation. Return one CandidateRequirementBatch. Boundary duplicates are intentional. Non-empty assignments may return {{"candidates":[]}}.
 
 {_agent_setup_block(setup)}
 

@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from collections import deque
 from datetime import UTC, datetime
 
@@ -33,10 +34,10 @@ from brd_srs_testgen.pipelines import (
     run_centralized_multi_agent,
     run_single_prompt,
     run_staged_single_agent,
+    scout_prompt,
     scenarios_prompt,
     single_prompt,
     worker_cases_prompt,
-    worker_requirements_prompt,
 )
 from brd_srs_testgen.providers import (
     BudgetLedger,
@@ -159,9 +160,24 @@ class CentralProvider:
         content = messages[-1]["content"]
         with self.lock:
             self.calls.append((messages, schema, max_output_tokens))
-        if "WORKER REQUIREMENT EXTRACTION" in content:
-            value = RequirementBatch(
-                requirements=self.artifacts.requirements if "p0001-c001" in content else []
+        if schema is CandidateRequirementBatch:
+            worker = next(index for index in range(3) if f"SCOUT {index + 1}/" in content)
+            requirement = self.artifacts.requirements[0]
+            value = CandidateRequirementBatch(
+                candidates=[
+                    CandidateRequirement(
+                        candidate_id=f"CAND-{worker + 1:03d}-001",
+                        title=requirement.title,
+                        description=requirement.description,
+                        requirement_type=requirement.requirement_type,
+                        module=requirement.module,
+                        priority=requirement.priority,
+                        ambiguities=requirement.ambiguities,
+                        source_references=requirement.source_references,
+                    )
+                ]
+                if "p0001-c001" in content
+                else []
             )
         elif issubclass(schema, RequirementBatch):
             value = RequirementBatch(requirements=self.artifacts.requirements)
@@ -191,12 +207,12 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
 
     assert result == bundle()
     worker_calls = [
-        call for call in provider.calls if "WORKER REQUIREMENT EXTRACTION" in call[0][0]["content"]
+        call for call in provider.calls if "SCOUT" in call[0][0]["content"]
     ]
     assert len(worker_calls) == 3
     assert all(len(call[0]) == 1 for call in worker_calls)
     assert all(
-        "maxItems" not in call[1].model_json_schema()["properties"]["requirements"]
+        "maxItems" not in call[1].model_json_schema()["properties"]["candidates"]
         for call in worker_calls
     )
     assert sum("p0001-c001" not in call[0][0]["content"] for call in worker_calls) == 2
@@ -240,7 +256,7 @@ def test_local_centralized_run_uses_bounded_serial_tasks() -> None:
     extraction_calls = [
         call
         for call in provider.calls
-        if "WORKER REQUIREMENT EXTRACTION" in call[0][0]["content"]
+        if "SCOUT" in call[0][0]["content"]
     ]
     assert len(extraction_calls) == 2
     assert all("/2" in call[0][0]["content"] for call in extraction_calls)
@@ -248,18 +264,18 @@ def test_local_centralized_run_uses_bounded_serial_tasks() -> None:
     assert chunks[1].chunk_id in extraction_calls[0][0][0]["content"]
     assert chunks[2].chunk_id not in extraction_calls[0][0][0]["content"]
     first_done = activity.index(
-        "Analyzer 1: done — handed requirements to the orchestrator."
+        "Scout 1: done — handed requirements to the orchestrator."
     )
     second_started = activity.index(
-        "Analyzer 2: working — extracting requirements."
+        "Scout 2: working — extracting requirements."
     )
     assert first_done < second_started
 
 
 def test_centralized_routes_each_agent_role_to_its_provider() -> None:
-    analyst = CentralProvider()
+    scout = CentralProvider()
     generator = CentralProvider()
-    analyst.model = "analyst-model"
+    scout.model = "scout-model"
     generator.model = "generator-model"
     activity = []
 
@@ -267,7 +283,7 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
         PipelineContext(
             provider=CentralProvider(),
             providers={
-                "analyst": analyst,
+                "scout": scout,
                 "test_generator": generator,
             },
             progress=activity.append,
@@ -276,18 +292,18 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
     )
 
     assert result == bundle()
-    assert len(analyst.calls) == 3
+    assert len(scout.calls) == 3
     assert all(
-        "WORKER REQUIREMENT EXTRACTION" in call[0][0]["content"]
-        for call in analyst.calls
+        "SCOUT" in call[0][0]["content"]
+        for call in scout.calls
     )
     assert len(generator.calls) == 1
     assert all(issubclass(call[1], GeneratedCases) for call in generator.calls)
     assert {
         event.model
         for event in activity
-        if getattr(event, "role", "") == "Requirement analyst"
-    } == {"analyst-model"}
+        if getattr(event, "role", "") == "Evidence scout"
+    } == {"scout-model"}
     assert {
         event.model
         for event in activity
@@ -310,9 +326,9 @@ def test_centralized_activity_reports_orchestrator_handoffs() -> None:
     )
     assert activity[-1] == "Orchestrator: merging the generated artifacts."
     for index in range(1, 4):
-        assert f"Analyzer {index}: working — extracting requirements." in activity
+        assert f"Scout {index}: working — extracting requirements." in activity
         assert (
-            f"Analyzer {index}: done — handed requirements to the orchestrator."
+            f"Scout {index}: done — handed requirements to the orchestrator."
             in activity
         )
         assert (
@@ -353,16 +369,16 @@ def test_centralized_activity_reports_orchestrator_handoffs() -> None:
 def test_worker_prompts_use_disjoint_inclusive_id_ranges(
     worker_index: int, lower: int, upper: int
 ) -> None:
-    requirements = worker_requirements_prompt(worker_index, [chunk()])
+    requirements = scout_prompt(worker_index, [chunk()])
     cases = worker_cases_prompt(worker_index, bundle().requirements, [chunk()])
     canonical_rule = (
         "Use unique canonical IDs in increasing order: REQ-001, SCN-001, and TC-001."
     )
 
-    assert f"REQ-{lower:03d} through REQ-{upper:03d}" in requirements
+    assert f"CAND-{worker_index + 1:03d}-001 upward" in requirements
     assert f"SCN-{lower:03d} through SCN-{upper:03d}" in cases
     assert f"TC-{lower:03d} through TC-{upper:03d}" in cases
-    assert "must not emit IDs outside these ranges" in requirements
+    assert "Do not deduplicate across Scouts" in requirements
     assert "must not emit IDs outside these ranges" in cases
     assert canonical_rule not in requirements
     assert canonical_rule not in cases
@@ -370,11 +386,11 @@ def test_worker_prompts_use_disjoint_inclusive_id_ranges(
 
 
 def test_worker_prompt_includes_configured_agent_setup() -> None:
-    prompt = worker_requirements_prompt(
+    prompt = scout_prompt(
         1,
         [chunk()],
         setup=AgentSetup(
-            agent="analyst",
+            agent="scout",
             role="Payments requirement specialist",
             instructions="Prioritize validation and exception rules.",
         ),
@@ -385,10 +401,10 @@ def test_worker_prompt_includes_configured_agent_setup() -> None:
 
 
 def test_worker_prompt_omits_unconfigured_instruction_fallback() -> None:
-    prompt = worker_requirements_prompt(
+    prompt = scout_prompt(
         0,
         [chunk()],
-        setup=AgentSetup(agent="analyst", role="Requirement analyst"),
+        setup=AgentSetup(agent="scout", role="Evidence scout"),
     )
 
     assert "Additional instructions:" not in prompt
@@ -404,11 +420,18 @@ class InvalidWorkerProvider(CentralProvider):
             messages, schema, max_output_tokens=max_output_tokens
         )
         content = messages[-1]["content"]
-        if self.invalid == "range" and "WORKER REQUIREMENT EXTRACTION 1/3" in content:
-            value = RequirementBatch(
-                requirements=[
-                    self.artifacts.requirements[0].model_copy(
-                        update={"requirement_id": "REQ-1001"}
+        if self.invalid == "range" and "SCOUT 1/3" in content:
+            requirement = self.artifacts.requirements[0]
+            value = CandidateRequirementBatch(
+                candidates=[
+                    CandidateRequirement(
+                        candidate_id="CAND-002-001",
+                        title=requirement.title,
+                        description=requirement.description,
+                        requirement_type=requirement.requirement_type,
+                        module=requirement.module,
+                        priority=requirement.priority,
+                        source_references=requirement.source_references,
                     )
                 ]
             )
@@ -437,7 +460,7 @@ class InvalidWorkerProvider(CentralProvider):
 
 
 def test_centralized_rejects_out_of_range_worker_id() -> None:
-    with pytest.raises(PipelineOutputError, match="outside worker 1 range"):
+    with pytest.raises(PipelineOutputError, match="outside Scout 1 namespace"):
         run_centralized_multi_agent(
             PipelineContext(provider=InvalidWorkerProvider("range")), [chunk()]
         )
@@ -584,16 +607,16 @@ class FailingWorkerProvider:
         content = messages[-1]["content"]
         with self.lock:
             self.calls.append((messages, schema, max_output_tokens))
-        if "WORKER REQUIREMENT EXTRACTION 1/3" in content:
+        if "SCOUT 1/3" in content:
             assert self.transient_started.wait(1)
             raise ProviderError("fatal worker", code=400, retryable=False)
-        if "WORKER REQUIREMENT EXTRACTION 2/3" in content:
+        if "SCOUT 2/3" in content:
             self.transient_started.set()
             assert self.cancellation_event is not None
             assert self.cancellation_event.wait(1)
             raise ProviderError("transient sibling", code=503, retryable=True)
         return GenerationResult(
-            value=RequirementBatch(requirements=[]),
+            value=CandidateRequirementBatch(candidates=[]),
             input_tokens=1,
             output_tokens=1,
             latency_seconds=0.01,
@@ -611,7 +634,7 @@ def test_worker_failure_cancels_sibling_retry_and_follow_up_stages() -> None:
     assert context.retries == 0
     assert delays == []
     assert all(
-        "WORKER REQUIREMENT EXTRACTION" in call[0][0]["content"]
+        "SCOUT" in call[0][0]["content"]
         for call in provider.calls
     )
 
@@ -622,7 +645,7 @@ def dependent_inputs():
     chunks = []
     requirements = []
     for index in range(1, 4):
-        text = f"Dependency evidence {index}."
+        text = f"Dependency evidence number {index} supports this requirement."
         item = chunk().model_copy(
             update={
                 "chunk_id": f"p000{index}-c001-dependency",
@@ -719,23 +742,142 @@ def test_ordered_evidence_groups_do_not_duplicate_a_single_group() -> None:
     assert groups == [chunks]
 
 
+def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces() -> None:
+    chunks = [
+        chunk().model_copy(
+            update={
+                "chunk_id": f"chunk-{index:03d}",
+                "page_number": index,
+                "text": (
+                    f"Requirement {index} states users must authenticate before access. "
+                    + "x" * 2_900
+                ),
+                "content_hash": f"{index:x}" * 64,
+            }
+        )
+        for index in range(1, 7)
+    ]
+    responses = {
+        worker: CandidateRequirementBatch(
+            candidates=[
+                CandidateRequirement(
+                    candidate_id=f"CAND-{worker + 1:03d}-001",
+                    title=f"Candidate {worker + 1}",
+                    description="Users must authenticate before access.",
+                    requirement_type="functional",
+                    module="Authentication",
+                    priority="high",
+                    source_references=[
+                        source_reference().model_copy(
+                            update={
+                                "chunk_id": chunks[[0, 1, 3][worker]].chunk_id,
+                                "page_number": chunks[[0, 1, 3][worker]].page_number,
+                                "section": chunks[[0, 1, 3][worker]].section,
+                                "excerpt": (
+                                    f"Requirement {[1, 2, 4][worker]} states users must "
+                                    "authenticate before access."
+                                ),
+                            }
+                        )
+                    ],
+                )
+            ]
+        )
+        for worker in range(3)
+    }
+
+    class ScoutProvider(CentralProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.max_active = 0
+
+        def generate(self, messages, schema, *, max_output_tokens):
+            content = messages[-1]["content"]
+            if schema is CandidateRequirementBatch:
+                worker = next(
+                    index for index in range(3) if f"SCOUT {index + 1}/3" in content
+                )
+                with self.lock:
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                try:
+                    time.sleep(0.01)
+                    self.calls.append((messages, schema, max_output_tokens))
+                    return GenerationResult(
+                        value=responses[worker],
+                        input_tokens=1,
+                        output_tokens=1,
+                        latency_seconds=0.01,
+                    )
+                finally:
+                    with self.lock:
+                        self.active -= 1
+            if issubclass(schema, GeneratedCases):
+                return GenerationResult(
+                    value=schema(scenarios=[], test_cases=[]),
+                    input_tokens=1,
+                    output_tokens=1,
+                    latency_seconds=0.01,
+                )
+            return super().generate(messages, schema, max_output_tokens=max_output_tokens)
+
+    class ScoutContext(PipelineContext):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.agents = []
+
+        def generate(self, *args, agent="default", **kwargs):
+            self.agents.append(agent)
+            return super().generate(*args, agent=agent, **kwargs)
+
+    provider = ScoutProvider()
+    context = ScoutContext(provider=provider, worker_limit=2)
+    run_centralized_multi_agent(context, chunks)
+
+    calls = [call for call in provider.calls if call[1] is CandidateRequirementBatch]
+    expected_groups = [
+        ["chunk-001", "chunk-002"],
+        ["chunk-002", "chunk-003", "chunk-004"],
+        ["chunk-004", "chunk-005", "chunk-006"],
+    ]
+    assert len(calls) == 3
+    assert context.agents.count("scout") == 3
+    assert all("CAND-" in call[0][0]["content"] for call in calls)
+    assert sorted(
+        [chunk.chunk_id for chunk in chunks if chunk.chunk_id in call[0][0]["content"]]
+        for call in calls
+    ) == sorted(expected_groups)
+    assert provider.max_active <= 2 <= 3
+    assert [
+        [item.chunk_id for item in group]
+        for group in pipeline_module._ordered_evidence_groups(
+            chunks, char_limit=pipeline_module.LOCAL_EVIDENCE_CHARS_PER_TASK
+        )
+    ] == expected_groups
+
+
 class ManyRequirementsProvider(CentralProvider):
     def generate(self, messages, schema, *, max_output_tokens):
         content = messages[-1]["content"]
-        if "WORKER REQUIREMENT EXTRACTION 1/3" in content:
-            requirements = [
-                self.artifacts.requirements[0].model_copy(
-                    update={
-                        "requirement_id": f"REQ-{index:03d}",
-                        "title": f"Requirement {index}",
-                        "description": f"Distinct requirement {index}.",
-                    }
-                )
-                for index in range(1, 26)
-            ]
-            value = RequirementBatch(requirements=requirements)
-        elif "WORKER REQUIREMENT EXTRACTION" in content:
-            value = RequirementBatch(requirements=[])
+        if "SCOUT 1/3" in content:
+            requirement = self.artifacts.requirements[0]
+            value = CandidateRequirementBatch(
+                candidates=[
+                    CandidateRequirement(
+                        candidate_id=f"CAND-001-{index:03d}",
+                        title=f"Requirement {index}",
+                        description=f"Distinct requirement {index}.",
+                        requirement_type=requirement.requirement_type,
+                        module=requirement.module,
+                        priority=requirement.priority,
+                        source_references=requirement.source_references,
+                    )
+                    for index in range(1, 26)
+                ]
+            )
+        elif "SCOUT" in content:
+            value = CandidateRequirementBatch(candidates=[])
         elif issubclass(schema, GeneratedCases):
             value = GeneratedCases(scenarios=[], test_cases=[])
         else:
@@ -811,17 +953,23 @@ class MergeProvider:
         content = messages[-1]["content"]
         with self.lock:
             self.calls.append((messages, schema, max_output_tokens))
-        if issubclass(schema, RequirementBatch):
-            label = "WORKER REQUIREMENT EXTRACTION"
-            worker = next(
-                index for index in range(3) if f"{label} {index + 1}/3" in content
-            )
-            value = RequirementBatch(
-                requirements=[
-                    self.requirements[worker].model_copy(
-                        update={"requirement_id": f"REQ-{worker * 1000 + 1:03d}"}
+        if schema is CandidateRequirementBatch:
+            value = CandidateRequirementBatch(
+                candidates=[
+                    CandidateRequirement(
+                        candidate_id=f"CAND-001-{index:03d}",
+                        title=requirement.title,
+                        description=requirement.description,
+                        requirement_type=requirement.requirement_type,
+                        module=requirement.module,
+                        priority=requirement.priority,
+                        ambiguities=requirement.ambiguities,
+                        source_references=requirement.source_references,
                     )
+                    for index, requirement in enumerate(self.requirements, 1)
                 ]
+                if "Dependency evidence" in content
+                else []
             )
         elif issubclass(schema, GeneratedCases):
             worker = next(
@@ -830,7 +978,7 @@ class MergeProvider:
                 if f"WORKER CASE GENERATION {index + 1}/3" in content
             )
             requirement = self.requirements[worker].model_copy(
-                update={"requirement_id": f"REQ-{worker * 1000 + 1:03d}"}
+                update={"requirement_id": f"REQ-{worker + 1:03d}"}
             )
             scenario_id = f"SCN-{worker * 1000 + 1:03d}"
             scenario = self.artifacts.scenarios[0].model_copy(
@@ -868,8 +1016,8 @@ def test_centralized_merge_preserves_all_worker_outputs() -> None:
 
     assert [item.requirement_id for item in result.requirements] == [
         "REQ-001",
-        "REQ-1001",
-        "REQ-2001",
+        "REQ-002",
+        "REQ-003",
     ]
     assert [item.scenario_id for item in result.scenarios] == [
         "SCN-001",
