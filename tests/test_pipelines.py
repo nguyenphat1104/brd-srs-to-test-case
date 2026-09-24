@@ -109,10 +109,31 @@ def test_requirement_decisions_enforce_canonical_id_rules(decision) -> None:
 
 @pytest.mark.parametrize(
     ("accepted", "findings"),
-    [(True, [object()]), (False, [])],
+    [
+        (
+            True,
+            [
+                CriticFinding(
+                    finding_id="FIND-001",
+                    severity=CriticSeverity.HIGH,
+                    finding_type="missing_coverage",
+                    artifact_ids=["SCN-001"],
+                    responsible_role="test_writer",
+                    required_action="Add the missing test case.",
+                    source_references=[source_reference()],
+                )
+            ],
+        ),
+        (False, []),
+    ],
 )
 def test_critic_reports_match_their_acceptance_state(accepted, findings) -> None:
-    with pytest.raises(ValidationError):
+    message = (
+        "accepted reports cannot contain findings"
+        if accepted
+        else "rejected reports require at least one finding"
+    )
+    with pytest.raises(ValidationError, match=message):
         CriticReport(accepted=accepted, findings=findings)
 
 

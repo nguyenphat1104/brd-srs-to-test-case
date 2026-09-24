@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS agent_setups (
     updated_at timestamptz NOT NULL
 );
 
+ALTER TABLE agent_setups
+    DROP CONSTRAINT IF EXISTS agent_setups_agent_check;
+
+ALTER TABLE agent_setups
+    ADD CONSTRAINT agent_setups_agent_check CHECK (agent IN (
+        'analyst', 'test_generator', 'reviewer', 'coverage_analyzer', 'scout',
+        'curator', 'scenario_architect', 'test_writer', 'critic'
+    ));
+
 INSERT INTO agent_setups (agent, role, instructions, updated_at)
 VALUES
     (

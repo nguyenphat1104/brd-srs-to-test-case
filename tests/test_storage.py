@@ -27,6 +27,7 @@ from brd_srs_testgen.models import (
     RunStatus,
     RunType,
     SourceReference,
+    default_agent_setups,
 )
 from brd_srs_testgen.storage import ImmutableRunError, RunRepository, StorageError
 from brd_srs_testgen.validation import build_rtm, compute_metrics, validate_bundle
@@ -1438,12 +1439,10 @@ def test_agent_setups_round_trip_as_shared_configuration(
     repository: RunRepository,
 ) -> None:
     setups = repository.load_agent_setups()
-    assert setups["analyst"].role == "Requirement analyst"
-    assert setups["analyst"].instructions == (
-        "Extract supported functional, nonfunctional, and business requirements "
-        "from assigned evidence. Preserve dependencies, ambiguities, and exact "
-        "citations. Do not infer unsupported behavior."
-    )
+    assert setups.keys() == default_agent_setups().keys()
+    assert len(setups) == 9
+    repository.save_agent_setups(setups.values())
+    assert repository.load_agent_setups() == setups
 
     setups["analyst"] = AgentSetup(
         agent="analyst",
@@ -1451,5 +1450,6 @@ def test_agent_setups_round_trip_as_shared_configuration(
         instructions="Prioritize validation and exception rules.",
     )
     repository.save_agent_setups(setups.values())
+    repository.initialize()
 
     assert repository.load_agent_setups() == setups
