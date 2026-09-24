@@ -2,6 +2,7 @@ import hashlib
 import threading
 from collections import deque
 from datetime import UTC, datetime
+from dataclasses import fields, replace
 from types import SimpleNamespace
 
 import pytest
@@ -34,8 +35,12 @@ from brd_srs_testgen.models import (
     RunResult,
     RunType,
     ValidationReport,
+    default_agent_setups,
 )
-from brd_srs_testgen.pipelines import PipelineOutputError, _critique_bundle
+from brd_srs_testgen.pipelines import (
+    MULTI_AGENT_BUDGET_SHARES, PipelineOutputError, _critique_bundle,
+    stage_output_tokens,
+)
 from brd_srs_testgen.providers import (
     BudgetLedger,
     GenerationResult,
@@ -1327,8 +1332,9 @@ def test_centralized_critic_repair_is_the_only_semantic_revision(monkeypatch) ->
     assert result.metrics.semantic_revisions == 1
 
 
+@pytest.mark.parametrize("output_cap", [2_000, 65_000])
 def test_centralized_builds_generation_agents_and_a_separate_fixed_judge(
-    monkeypatch,
+    monkeypatch, output_cap,
 ) -> None:
     built = []
     captured = []
@@ -1336,7 +1342,7 @@ def test_centralized_builds_generation_agents_and_a_separate_fixed_judge(
     monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
 
     def make_provider(config, ledger):
-        built.append((config.model, ledger))
+        built.append((config, ledger))
         return NamedProvider(ledger, config.model)
 
     monkeypatch.setattr(runner, "_make_provider", make_provider)
@@ -1352,31 +1358,77 @@ def test_centralized_builds_generation_agents_and_a_separate_fixed_judge(
         RunType.CENTRALIZED_MULTI_AGENT,
         settings(
             model="primary",
-            analyst_model="analyst",
-            test_generator_model="generator",
-            reviewer_model="reviewer",
+            agent_providers={agent: "gemini" for agent in HIERARCHICAL_ROLES},
+            agent_models={agent: f"gemini-3-{agent}" for agent in HIERARCHICAL_ROLES},
+            agent_prompts={agent: f"Prompt for {agent}" for agent in HIERARCHICAL_ROLES},
+            agent_thinking_levels={agent: "low" for agent in HIERARCHICAL_ROLES},
+            agent_max_output_tokens={agent: output_cap for agent in HIERARCHICAL_ROLES},
             provider_api_keys={"gemini": "judge-key"},
         ),
         repository=repository,
     )
 
     assert result.manifest.status is RunStatus.COMPLETED
-    assert [model for model, _ledger in built] == [
-        "analyst",
-        "generator",
-        "reviewer",
-        runner.JUDGE_MODEL,
+    assert [config.model for config, _ledger in built] == [
+        *(f"gemini-3-{agent}" for agent in HIERARCHICAL_ROLES), runner.JUDGE_MODEL,
     ]
+    assert all(config.provider == "gemini" for config, _ledger in built)
+    assert all(config.thinking_level == "low" for config, _ledger in built[:-1])
     assert len({id(ledger) for _model, ledger in built}) == 2
     assert built[-1][1] is not captured[0].provider.ledger
     assert {
         agent: provider.model for agent, provider in captured[0].providers.items()
-    } == {
-        "test_generator": "generator",
-        "reviewer": "reviewer",
+    } == {agent: f"gemini-3-{agent}" for agent in HIERARCHICAL_ROLES[1:]}
+    assert captured[0].agent_prompts == {
+        agent: f"Prompt for {agent}" for agent in HIERARCHICAL_ROLES
     }
-    assert captured[0].bounded_tasks is True
-    assert captured[0].worker_limit == 1
+    assert captured[0].agent_max_output_tokens == {
+        agent: output_cap for agent in HIERARCHICAL_ROLES
+    }
+    for agent in HIERARCHICAL_ROLES:
+        assert stage_output_tokens(captured[0], agent, token_ceiling=20_000) == min(
+            output_cap, int(20_000 * MULTI_AGENT_BUDGET_SHARES[agent])
+        )
+    assert captured[0].bounded_tasks is False
+    assert captured[0].worker_limit == runner.WORKER_COUNT
+
+
+HIERARCHICAL_ROLES = ("scout", "curator", "scenario_architect", "test_writer", "critic")
+
+
+@pytest.mark.parametrize("agent", HIERARCHICAL_ROLES)
+@pytest.mark.parametrize("field, value", [
+    ("provider", "gemini"), ("model", "gemini-3.6-flash"),
+    ("prompt", "Custom instructions."), ("thinking_level", "low"),
+    ("max_output_tokens", 8_000),
+])
+def test_hierarchical_snapshot_isolates_each_role_setting(agent, field, value):
+    shared = default_agent_setups()
+    before = {name: setup.model_copy(deep=True) for name, setup in shared.items()}
+    baseline = settings(agent_setups=shared)
+    original = baseline.snapshot(RunType.CENTRALIZED_MULTI_AGENT)
+    names = {"provider": "agent_providers", "model": "agent_models",
+             "prompt": "agent_prompts", "thinking_level": "agent_thinking_levels",
+             "max_output_tokens": "agent_max_output_tokens"}
+    customized = replace(baseline, **{names[field]: {agent: value}})
+    snapshot = customized.snapshot(RunType.CENTRALIZED_MULTI_AGENT)
+
+    assert runner.RUN_AGENTS[RunType.CENTRALIZED_MULTI_AGENT] == HIERARCHICAL_ROLES
+    assert set(snapshot["agents"]) == {*HIERARCHICAL_ROLES, "judge"}
+    for role in HIERARCHICAL_ROLES:
+        expected = dict(original["agents"][role])
+        assert set(expected) == set(names)
+        if role == agent:
+            expected[field] = value
+        assert snapshot["agents"][role] == expected
+    assert baseline.snapshot(RunType.CENTRALIZED_MULTI_AGENT) == original
+    assert shared == before == default_agent_setups()
+
+
+def test_provider_settings_has_no_dedicated_legacy_generation_model_fields():
+    assert not {"analyst_model", "test_generator_model", "reviewer_model"} & {
+        field.name for field in fields(ProviderSettings)
+    }
 
 
 def test_run_snapshot_keeps_each_agent_config_but_not_credentials() -> None:

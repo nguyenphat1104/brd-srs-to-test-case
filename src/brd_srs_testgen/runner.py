@@ -82,9 +82,11 @@ RUN_AGENTS = {
     RunType.SINGLE_PROMPT: ("single",),
     RunType.STAGED_SINGLE_AGENT: ("requirements", "scenarios", "test_cases"),
     RunType.CENTRALIZED_MULTI_AGENT: (
-        "analyst",
-        "test_generator",
-        "reviewer",
+        "scout",
+        "curator",
+        "scenario_architect",
+        "test_writer",
+        "critic",
     ),
 }
 ProviderFactory = Callable[[RunType, BudgetLedger], StructuredProvider]
@@ -103,9 +105,6 @@ class ProviderSettings:
     token_ceiling: int
     api_key: str = field(default="", repr=False)
     base_url: str = field(default="http://localhost:11434", repr=False)
-    analyst_model: str = ""
-    test_generator_model: str = ""
-    reviewer_model: str = ""
     coverage_analyzer_model: str = ""
     agent_setups: dict[str, AgentSetup] = field(default_factory=dict)
     agent_providers: dict[str, str] = field(default_factory=dict)
@@ -134,7 +133,12 @@ class ProviderSettings:
         configured = self.agent_thinking_levels.get(agent)
         if configured is not None:
             return configured
-        return self.thinking_level if self.provider_for(agent) == self.provider else None
+        return (
+            self.thinking_level
+            if self.provider_for(agent) == self.provider
+            and self.model_for(agent).startswith("gemini-3")
+            else None
+        )
 
     def api_key_for(self, provider: str) -> str:
         return self.provider_api_keys.get(
@@ -244,11 +248,8 @@ class ProviderSettings:
         base_url = self.base_url_for(provider)
         if not isinstance(api_key, str):
             raise ValueError("API key must be a string.")
-        for agent in ("analyst", "test_generator", "reviewer", "coverage_analyzer"):
-            if not isinstance(getattr(self, f"{agent}_model"), str):
-                raise ValueError(
-                    f"{agent.replace('_', ' ').title()} model must be a string."
-                )
+        if not isinstance(self.coverage_analyzer_model, str):
+            raise ValueError("Coverage Analyzer model must be a string.")
         if provider == "gemini" and not api_key.strip():
             raise ValueError("Gemini API key is required.")
         if provider in LOCAL_PROVIDERS:

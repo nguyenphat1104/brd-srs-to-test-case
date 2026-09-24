@@ -1436,8 +1436,9 @@ def test_terminal_chunks_events_and_finalization_are_immutable(
     assert repository.load_events(result.manifest.run_id) == original_events
 
 
+@pytest.mark.parametrize("agent", ["analyst", "critic"])
 def test_agent_setups_round_trip_as_shared_configuration(
-    repository: RunRepository,
+    repository: RunRepository, agent: str,
 ) -> None:
     setups = repository.load_agent_setups()
     assert setups.keys() == default_agent_setups().keys()
@@ -1445,8 +1446,8 @@ def test_agent_setups_round_trip_as_shared_configuration(
     repository.save_agent_setups(setups.values())
     assert repository.load_agent_setups() == setups
 
-    setups["analyst"] = AgentSetup(
-        agent="analyst",
+    setups[agent] = AgentSetup(
+        agent=agent,
         role="Payments requirement specialist",
         instructions="Prioritize validation and exception rules.",
     )
@@ -1454,6 +1455,49 @@ def test_agent_setups_round_trip_as_shared_configuration(
     repository.initialize()
 
     assert repository.load_agent_setups() == setups
+
+
+def test_agent_role_migration_seeds_defaults_and_preserves_legacy_rows(
+    repository: RunRepository, test_database_connection,
+) -> None:
+    connection = test_database_connection
+    seeded = connection.execute("SELECT agent, instructions FROM agent_setups").fetchall()
+    assert {agent for agent, _instructions in seeded} == set(default_agent_setups())
+    assert all(instructions for _agent, instructions in seeded)
+    connection.execute(
+        "DELETE FROM agent_setups WHERE agent IN "
+        "('scout', 'curator', 'scenario_architect', 'test_writer', 'critic')"
+    )
+    connection.execute(
+        "ALTER TABLE agent_setups DROP CONSTRAINT agent_setups_agent_check"
+    )
+    connection.execute(
+        "ALTER TABLE agent_setups ADD CONSTRAINT agent_setups_agent_check "
+        "CHECK (agent IN ('analyst', 'test_generator', 'reviewer', 'coverage_analyzer'))"
+    )
+    connection.execute(
+        "UPDATE agent_setups SET instructions = 'Historical custom instructions' "
+        "WHERE agent = 'analyst'"
+    )
+    configuration = {"analyst_model": "old-model", "agents": {
+        agent: {"model": f"old-{agent}", "prompt": "Historical prompt"}
+        for agent in ("analyst", "test_generator", "reviewer")
+    }}
+    running = manifest(configuration=configuration)
+    repository.create_run(running)
+
+    repository.initialize()
+    repository.initialize()
+
+    setups = repository.load_agent_setups()
+    assert set(setups) == set(default_agent_setups())
+    assert setups["analyst"].instructions == "Historical custom instructions"
+    assert repository.load_run(running.run_id).manifest.configuration == configuration
+    assert connection.execute("SELECT count(*) FROM agent_setups").fetchone()[0] == 9
+    assert connection.execute(
+        "SELECT count(*) FROM pg_constraint WHERE conrelid = 'agent_setups'::regclass "
+        "AND conname = 'agent_setups_agent_check'"
+    ).fetchone()[0] == 1
 
 
 @pytest.mark.parametrize("with_repair", [False, True])

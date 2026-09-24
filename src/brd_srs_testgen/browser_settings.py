@@ -47,9 +47,11 @@ class AppSettings(BaseModel):
             token_ceiling=self.token_ceiling,
             api_key=self.api_key,
             base_url=self.base_url,
-            analyst_model=self.analyst_model,
-            test_generator_model=self.test_generator_model,
-            reviewer_model=self.reviewer_model,
+            agent_models={
+                "analyst": self.analyst_model,
+                "test_generator": self.test_generator_model,
+                "reviewer": self.reviewer_model,
+            },
             coverage_analyzer_model=self.coverage_analyzer_model,
         )
         settings.validate()

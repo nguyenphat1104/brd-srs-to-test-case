@@ -597,16 +597,21 @@ def test_multi_agent_settings_keep_local_defaults_for_every_agent() -> None:
         for item in at.selectbox
         if item.label.endswith(" model")
     } == {
-        "Analyst model": "qwen",
-        "Test generator model": "gemma",
-        "Reviewer model": "phi",
+        "Scout model": "qwen",
+        "Curator model": "phi",
+        "Scenario architect model": "gemma",
+        "Test writer model": "gemma",
+        "Critic model": "phi",
     }
     assert {
         tuple(item.options)
         for item in at.selectbox
         if item.label.endswith(" model")
     } == {tuple(label for _model, label in LOCAL_TEST_MODELS)}
-    assert len(at.text_area) == 3
+    assert len(at.text_area) == 5
+    assert len([item for item in at.number_input if item.label.endswith("output tokens")]) == 5
+    assert not at.checkbox
+    assert not at.toggle
     text = _rendered_text(at)
     assert "Judge" in text
     assert "Gemini 3.6 Flash · Medium thinking" in text
@@ -629,22 +634,43 @@ def test_multi_agent_gemini_settings_include_thinking_levels() -> None:
         for item in at.selectbox
         if item.label.endswith("thinking level")
     } == {
-        "Analyst thinking level": "minimal",
-        "Test generator thinking level": "minimal",
-        "Reviewer thinking level": "minimal",
+        "Scout thinking level": "minimal",
+        "Curator thinking level": "minimal",
+        "Scenario architect thinking level": "minimal",
+        "Test writer thinking level": "minimal",
+        "Critic thinking level": "minimal",
     }
+    _element(at.selectbox, "Critic thinking level").set_value("high")
+    _element(at.selectbox, "Test writer model").set_value("gemini-2.5-pro")
+    _element(at.text_area, "Scout prompt").set_value("Prioritize exceptions.")
+    _element(at.number_input, "Curator output tokens").set_value(12_000)
     _element(at.button, "Continue to document").click()
     at.run()
 
     settings = at.session_state["run_provider_settings"]
     assert {
         agent: settings.thinking_level_for(agent)
-        for agent in ("analyst", "test_generator", "reviewer")
+        for agent in ("scout", "curator", "scenario_architect", "test_writer", "critic")
     } == {
-        "analyst": "minimal",
-        "test_generator": "minimal",
-        "reviewer": "minimal",
+        "scout": "minimal",
+        "curator": "minimal",
+        "scenario_architect": "minimal",
+        "test_writer": None,
+        "critic": "high",
     }
+    assert settings.critic_enabled is True
+    assert settings.model_for("test_writer") == "gemini-2.5-pro"
+    assert settings.prompt_for("scout") == "Prioritize exceptions."
+    assert settings.agent_max_output_tokens["curator"] == 12_000
+    snapshot = settings.snapshot(RunType.CENTRALIZED_MULTI_AGENT)
+    _element(at.button, "Edit run settings").click()
+    at.run()
+    assert not at.exception
+    assert "Test writer thinking level" not in {item.label for item in at.selectbox}
+    assert _element(at.number_input, "Curator output tokens").value == 12_000
+    _element(at.button, "Continue to document").click()
+    at.run()
+    assert at.session_state["run_provider_settings"].snapshot(RunType.CENTRALIZED_MULTI_AGENT) == snapshot
 
 
 def test_llama_cpp_model_api_error_disables_model_selection() -> None:
@@ -1478,8 +1504,8 @@ def test_edit_run_settings_preserves_upload_and_run_type() -> None:
 
 def test_multi_agent_prompts_start_from_shared_agent_setup() -> None:
     repository = FakeRepository()
-    repository.agent_setups["analyst"] = AgentSetup(
-        agent="analyst",
+    repository.agent_setups["scout"] = AgentSetup(
+        agent="scout",
         role="Payments requirement specialist",
         instructions="Prioritize validation and exception rules.",
     )
@@ -1487,9 +1513,36 @@ def test_multi_agent_prompts_start_from_shared_agent_setup() -> None:
     at.run()
     _open_settings_step(at, RunType.CENTRALIZED_MULTI_AGENT)
 
-    assert _element(at.text_area, "Analyst prompt").value == (
+    assert _element(at.text_area, "Scout prompt").value == (
         "Prioritize validation and exception rules."
     )
+    original = repository.agent_setups.copy()
+    _element(at.text_area, "Scout prompt").set_value("Run-specific prompt.")
+    _element(at.button, "Continue to document").click()
+    at.run()
+    assert repository.agent_setups == original
+
+
+def test_historical_agent_configuration_renders_without_migration() -> None:
+    result = _detailed_run()
+    configuration = {
+        "analyst_model": "old-analyst",
+        "agents": {
+            agent: {"model": f"old-{agent}", "prompt": f"Historical {agent}."}
+            for agent in ("analyst", "test_generator", "reviewer")
+        },
+    }
+    result = result.model_copy(update={"manifest": result.manifest.model_copy(
+        update={"run_type": RunType.CENTRALIZED_MULTI_AGENT, "configuration": configuration}
+    )})
+    at = _app_test()
+    _show_detail(at, result)
+    at.run()
+    assert not at.exception
+    assert {item.value for item in at.text_area if item.disabled} >= {
+        "Historical analyst.", "Historical test_generator.", "Historical reviewer."
+    }
+    assert result.manifest.configuration == configuration
 
 
 def test_run_settings_capture_custom_prompts_without_credentials() -> None:

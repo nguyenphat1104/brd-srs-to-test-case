@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS agent_stage_outputs (
 );
 
 CREATE TABLE IF NOT EXISTS agent_setups (
-    agent text PRIMARY KEY CHECK (agent IN ('analyst', 'test_generator', 'reviewer', 'coverage_analyzer')),
+    agent text PRIMARY KEY,
     role text NOT NULL CHECK (role <> ''),
     instructions text NOT NULL,
     updated_at timestamptz NOT NULL
@@ -82,6 +82,36 @@ VALUES
         'coverage_analyzer',
         'Coverage analyst',
         'Extract testable coverage units from the source document as ground truth, then map generated test cases to those units for precision/recall/F1 scoring.',
+        now()
+    ),
+    (
+        'scout',
+        'Evidence scout',
+        'Extract candidate requirements from assigned source evidence. Preserve exact citations, ambiguities, and distinctions supported by the evidence.',
+        now()
+    ),
+    (
+        'curator',
+        'Requirement curator',
+        'Reconcile candidate requirements using their source evidence. Retain, merge, or reject each candidate and explain every decision with evidence.',
+        now()
+    ),
+    (
+        'scenario_architect',
+        'Scenario architect',
+        'Design traceable scenarios from canonical requirements and source evidence, including supported positive, negative, boundary, edge, and transition behavior.',
+        now()
+    ),
+    (
+        'test_writer',
+        'Test writer',
+        'Write executable manual test cases from scenarios and source evidence with ordered actions, observable results, and traceable citations.',
+        now()
+    ),
+    (
+        'critic',
+        'Artifact critic',
+        'Inspect requirements, scenarios, and test cases against source evidence. Report specific groundedness, traceability, completeness, and consistency findings.',
         now()
     )
 ON CONFLICT (agent) DO NOTHING;

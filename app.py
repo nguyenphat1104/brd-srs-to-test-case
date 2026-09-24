@@ -40,7 +40,10 @@ from brd_srs_testgen.models import (
     default_agent_setups,
 )
 from brd_srs_testgen.prompts import RUN_PROMPT_DEFAULTS
-from brd_srs_testgen.pipelines import STAGED_OUTPUT_TOKEN_DEFAULTS
+from brd_srs_testgen.pipelines import (
+    MULTI_AGENT_BUDGET_SHARES,
+    STAGED_OUTPUT_TOKEN_DEFAULTS,
+)
 from brd_srs_testgen.providers import list_llama_cpp_models
 from brd_srs_testgen.runner import (
     JUDGE_MODEL,
@@ -122,20 +125,33 @@ RUN_CONFIG_AGENTS = {
     RunType.SINGLE_PROMPT: ("single",),
     RunType.STAGED_SINGLE_AGENT: ("requirements", "scenarios", "test_cases"),
     RunType.CENTRALIZED_MULTI_AGENT: (
-        "analyst",
-        "test_generator",
-        "reviewer",
+        "scout",
+        "curator",
+        "scenario_architect",
+        "test_writer",
+        "critic",
     ),
 }
 AGENT_LABELS = {
-    "analyst": "Analyst",
-    "test_generator": "Test generator",
-    "reviewer": "Reviewer",
+    "scout": "Scout",
+    "curator": "Curator",
+    "scenario_architect": "Scenario architect",
+    "test_writer": "Test writer",
+    "critic": "Critic",
+}
+RUN_OUTPUT_TOKEN_DEFAULTS = {
+    **STAGED_OUTPUT_TOKEN_DEFAULTS,
+    **{
+        agent: int(DEFAULT_TOKEN_CEILING * MULTI_AGENT_BUDGET_SHARES[agent])
+        for agent in AGENT_LABELS
+    },
 }
 LOCAL_AGENT_MODEL_HINTS = {
-    "analyst": "qwen",
-    "test_generator": "gemma",
-    "reviewer": "phi",
+    "scout": "qwen",
+    "curator": "phi",
+    "scenario_architect": "gemma",
+    "test_writer": "gemma",
+    "critic": "phi",
 }
 RUN_AGENT_LABELS = {
     "single": "Test suite generator",
@@ -2604,10 +2620,10 @@ def _initialize_run_settings(
             f"run_{agent}_prompt", RUN_PROMPT_DEFAULTS[agent]
         )
         st.session_state.setdefault(f"run_{agent}_thinking_level", "minimal")
-        if run_type is RunType.STAGED_SINGLE_AGENT:
+        if agent in RUN_OUTPUT_TOKEN_DEFAULTS:
             st.session_state.setdefault(
                 f"run_{agent}_max_output_tokens",
-                STAGED_OUTPUT_TOKEN_DEFAULTS[agent],
+                RUN_OUTPUT_TOKEN_DEFAULTS[agent],
             )
 
 
@@ -2735,6 +2751,7 @@ def _render_run_settings(run_type: RunType) -> None:
                     _render_thinking_level(agent, RUN_AGENT_LABELS[agent])
                 elif provider == "gemini":
                     st.caption("Thinking level is automatic for Gemini 2.5 models.")
+                _render_step_output_tokens(agent)
                 st.text_area(
                     f"{RUN_AGENT_LABELS[agent]} prompt",
                     key=f"run_{agent}_prompt",
@@ -2791,7 +2808,7 @@ def _run_provider_settings(run_type: RunType) -> ProviderSettings:
             agent: st.session_state[f"run_{agent}_max_output_tokens"]
             for agent in agents
         }
-        if run_type is RunType.STAGED_SINGLE_AGENT
+        if run_type is not RunType.SINGLE_PROMPT
         else {}
     )
 
@@ -2843,10 +2860,10 @@ def _restore_run_settings(run_type: RunType, settings: ProviderSettings) -> None
         st.session_state[f"run_{agent}_thinking_level"] = (
             settings.thinking_level_for(agent) or "minimal"
         )
-        if run_type is RunType.STAGED_SINGLE_AGENT:
+        if agent in RUN_OUTPUT_TOKEN_DEFAULTS:
             st.session_state[f"run_{agent}_max_output_tokens"] = (
                 settings.agent_max_output_tokens.get(
-                    agent, STAGED_OUTPUT_TOKEN_DEFAULTS[agent]
+                    agent, RUN_OUTPUT_TOKEN_DEFAULTS[agent]
                 )
             )
 
