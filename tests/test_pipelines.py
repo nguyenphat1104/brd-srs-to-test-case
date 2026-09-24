@@ -514,6 +514,70 @@ def test_critique_rejects_link_only_change_on_one_of_two_named_artifacts() -> No
         _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
 
 
+@pytest.mark.parametrize("metadata", ["priority", "step_number"])
+def test_critique_rejects_requirement_link_with_only_test_metadata_change(
+    metadata,
+) -> None:
+    artifacts = bundle()
+    update = {"requirement_ids": ["REQ-999"]}
+    if metadata == "priority":
+        update["priority"] = artifacts.test_cases[0].priority.__class__.P2
+    else:
+        update["steps"] = [
+            artifacts.test_cases[0].steps[0].model_copy(update={"step_number": 2})
+        ]
+    repaired = artifacts.model_copy(
+        update={
+            "test_cases": [artifacts.test_cases[0].model_copy(update=update)]
+        }
+    )
+    provider = CritiqueProvider(
+        [
+            CriticReport(accepted=False, findings=[critic_finding()]),
+            repaired,
+        ]
+    )
+
+    with pytest.raises(PipelineOutputError, match="^Repair changed links only\\.$"):
+        _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+
+
+@pytest.mark.parametrize("change", ["title", "action", "expected_result"])
+def test_critique_accepts_real_test_authored_changes(change) -> None:
+    artifacts = bundle()
+    update = {}
+    if change == "title":
+        update["title"] = "Verify authenticated dashboard access"
+    else:
+        update["steps"] = [
+            artifacts.test_cases[0].steps[0].model_copy(
+                update={
+                    change: (
+                        "Open the dashboard."
+                        if change == "action"
+                        else "The authenticated dashboard is displayed."
+                    )
+                }
+            )
+        ]
+    repaired = artifacts.model_copy(
+        update={
+            "test_cases": [artifacts.test_cases[0].model_copy(update=update)]
+        }
+    )
+    provider = CritiqueProvider(
+        [
+            CriticReport(accepted=False, findings=[critic_finding()]),
+            repaired,
+        ]
+    )
+
+    assert (
+        _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+        == repaired
+    )
+
+
 def test_repair_cannot_add_an_artifact_named_only_by_a_finding() -> None:
     artifacts = bundle()
     finding = critic_finding(artifact_ids=["TC-999"])

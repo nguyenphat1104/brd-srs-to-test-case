@@ -30,6 +30,7 @@ from .models import (
     ReviewResult,
     Scenario,
     ScenarioBatch,
+    TestCase,
     TestCaseBatch,
     default_agent_setups,
 )
@@ -775,18 +776,19 @@ def _artifacts_by_id(bundle: ArtifactBundle) -> dict[str, BaseModel]:
     }
 
 
-def _authored_semantic_payload(artifact: BaseModel) -> dict[str, object]:
-    payload = artifact.model_dump(mode="json")
-    for field in (
-        "requirement_id",
-        "scenario_id",
-        "test_case_id",
-        "dependency_ids",
-        "requirement_ids",
-        "source_references",
-    ):
-        payload.pop(field, None)
-    return payload
+def _authored_semantic_payload(artifact: BaseModel) -> object:
+    if isinstance(artifact, Requirement):
+        return artifact.title, artifact.description, artifact.ambiguities
+    if isinstance(artifact, Scenario):
+        return artifact.title, artifact.objective, artifact.preconditions
+    if isinstance(artifact, TestCase):
+        return (
+            artifact.title,
+            artifact.preconditions,
+            artifact.test_data,
+            [(step.action, step.expected_result) for step in artifact.steps],
+        )
+    raise TypeError(f"Unknown artifact type {type(artifact).__name__}.")
 
 
 def _citation_set(artifact: BaseModel) -> set[tuple[str, int, str, str]]:
