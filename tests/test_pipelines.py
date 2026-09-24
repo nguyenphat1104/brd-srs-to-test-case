@@ -334,15 +334,18 @@ def test_critique_rejects_reordered_link_only_repair_without_revision() -> None:
     assert context.semantic_revisions == 0
 
 
-def test_critique_leaves_full_repaired_bundle_validation_to_runner() -> None:
+@pytest.mark.parametrize("excerpt", ["invented evidence", "authenticate"])
+def test_critique_rejects_invalid_repaired_test_citations(excerpt) -> None:
     artifacts = bundle()
     repaired = artifacts.model_copy(
         update={
             "test_cases": [
                 artifacts.test_cases[0].model_copy(
                     update={
-                        "title": "Verify authentication result",
-                        "scenario_id": "SCN-999",
+                        "title": "Verify the authenticated dashboard",
+                        "source_references": [
+                            source_reference().model_copy(update={"excerpt": excerpt})
+                        ],
                     }
                 )
             ]
@@ -355,12 +358,68 @@ def test_critique_leaves_full_repaired_bundle_validation_to_runner() -> None:
         ]
     )
 
-    result = _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+    context = PipelineContext(provider=provider)
+    with pytest.raises(PipelineOutputError, match="exact 5-to-25-word excerpt"):
+        _critique_bundle(context, artifacts, [chunk()])
+    assert [row.stage for row in context.stage_outputs] == ["critic"]
 
-    from brd_srs_testgen.validation import validate_bundle
 
-    assert result == repaired
-    assert not validate_bundle(result, [chunk()]).valid
+def test_critique_repair_preserves_merged_requirement_citations() -> None:
+    artifacts = bundle()
+    second_chunk = chunk().model_copy(
+        update={
+            "chunk_id": "p0002-c001-merged",
+            "page_number": 2,
+            "text": "Authenticated users can view their account dashboard.",
+            "content_hash": "b" * 64,
+        }
+    )
+    second_source = source_reference().model_copy(
+        update={
+            "chunk_id": second_chunk.chunk_id,
+            "page_number": second_chunk.page_number,
+            "excerpt": second_chunk.text,
+        }
+    )
+    artifacts = artifacts.model_copy(
+        update={
+            "requirements": [
+                artifacts.requirements[0].model_copy(
+                    update={"source_references": [source_reference(), second_source]}
+                )
+            ]
+        }
+    )
+    repaired = artifacts.model_copy(
+        update={
+            "requirements": [
+                artifacts.requirements[0].model_copy(
+                    update={
+                        "title": "Authenticate users before dashboard access",
+                        "source_references": [source_reference()],
+                    }
+                )
+            ]
+        }
+    )
+    provider = CritiqueProvider(
+        [
+            CriticReport(
+                accepted=False,
+                findings=[
+                    critic_finding(
+                        artifact_ids=["REQ-001"], responsible_role="curator"
+                    )
+                ],
+            ),
+            repaired,
+        ]
+    )
+
+    context = PipelineContext(provider=provider)
+    with pytest.raises(PipelineOutputError, match="preserve citations"):
+        _critique_bundle(context, artifacts, [chunk(), second_chunk])
+    assert [row.stage for row in context.stage_outputs] == ["critic"]
 
 
 def test_critic_can_be_disabled_for_ablation() -> None:
@@ -420,6 +479,38 @@ def test_repair_cannot_change_an_unaffected_artifact() -> None:
     )
 
     with pytest.raises(PipelineOutputError, match="outside the findings"):
+        _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
+
+
+def test_critique_rejects_link_only_change_on_one_of_two_named_artifacts() -> None:
+    artifacts = bundle()
+    second = artifacts.test_cases[0].model_copy(
+        update={"test_case_id": "TC-002", "title": "Sign in as another user"}
+    )
+    artifacts = artifacts.model_copy(
+        update={"test_cases": [artifacts.test_cases[0], second]}
+    )
+    repaired = artifacts.model_copy(
+        update={
+            "test_cases": [
+                artifacts.test_cases[0].model_copy(
+                    update={"title": "Verify valid user sign in"}
+                ),
+                second.model_copy(update={"requirement_ids": ["REQ-999"]}),
+            ]
+        }
+    )
+    provider = CritiqueProvider(
+        [
+            CriticReport(
+                accepted=False,
+                findings=[critic_finding(artifact_ids=["TC-001", "TC-002"])],
+            ),
+            repaired,
+        ]
+    )
+
+    with pytest.raises(PipelineOutputError, match="^Repair changed links only\\.$"):
         _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
 
 
@@ -2403,8 +2494,8 @@ def test_failed_handoff_preserves_only_validated_stage_outputs() -> None:
 
 
 @pytest.mark.parametrize("role", ["curator", "scenario_architect", "test_writer"])
-@pytest.mark.parametrize("repair_cap", [2_000, 99_000])
-def test_repair_budget_and_blackboard_use_actual_responsible_role(role, repair_cap) -> None:
+@pytest.mark.parametrize("role_cap", [1_024, 2_000, 99_000])
+def test_repair_budget_and_blackboard_use_actual_responsible_role(role, role_cap) -> None:
     artifacts = bundle()
     field, artifact_id = {
         "curator": ("requirements", "REQ-001"),
@@ -2420,10 +2511,10 @@ def test_repair_budget_and_blackboard_use_actual_responsible_role(role, repair_c
     provider = CritiqueProvider([report, repaired])
     context = PipelineContext(
         provider=provider, token_ceiling=60_000,
-        agent_max_output_tokens={role: 99_000, "repair": repair_cap},
+        agent_max_output_tokens={role: role_cap},
     )
     assert _critique_bundle(context, artifacts, [chunk()]) == repaired
-    assert [call[2] for call in provider.calls] == [6_000, min(repair_cap, 3_000)]
+    assert [call[2] for call in provider.calls] == [6_000, min(role_cap, 3_000)]
     assert [(row.stage, row.role) for row in context.stage_outputs] == [
         ("critic", "critic"), ("repair", role),
     ]
@@ -2442,9 +2533,8 @@ def test_invalid_critic_and_repair_outputs_are_not_recorded() -> None:
     context = PipelineContext(provider=CritiqueProvider([
         CriticReport(accepted=False, findings=[critic_finding()]), artifacts
     ]))
-    with pytest.raises(PipelineOutputError, match="changed links only"):
-        _critique_bundle(context, artifacts, [chunk()])
-    assert [row.stage for row in context.stage_outputs] == ["critic"]
+    assert _critique_bundle(context, artifacts, [chunk()]) == artifacts
+    assert [row.stage for row in context.stage_outputs] == ["critic", "repair"]
 
 
 def test_shared_ledger_still_stops_hierarchical_generation() -> None:

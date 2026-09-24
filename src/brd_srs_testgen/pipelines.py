@@ -319,10 +319,17 @@ class PipelineContext:
 
 
 def stage_output_tokens(
-    context: PipelineContext, stage: str, *, token_ceiling: int, task_count: int = 1
+    context: PipelineContext,
+    stage: str,
+    *,
+    token_ceiling: int,
+    task_count: int = 1,
+    configured_stage: str | None = None,
 ) -> int:
     allocation = int(token_ceiling * MULTI_AGENT_BUDGET_SHARES[stage] / task_count)
-    configured = context.agent_max_output_tokens.get(stage, allocation)
+    configured = context.agent_max_output_tokens.get(
+        configured_stage or stage, allocation
+    )
     return max(MIN_OUTPUT_TOKENS, min(configured, allocation))
 
 
@@ -768,6 +775,32 @@ def _artifacts_by_id(bundle: ArtifactBundle) -> dict[str, BaseModel]:
     }
 
 
+def _authored_semantic_payload(artifact: BaseModel) -> dict[str, object]:
+    payload = artifact.model_dump(mode="json")
+    for field in (
+        "requirement_id",
+        "scenario_id",
+        "test_case_id",
+        "dependency_ids",
+        "requirement_ids",
+        "source_references",
+    ):
+        payload.pop(field, None)
+    return payload
+
+
+def _citation_set(artifact: BaseModel) -> set[tuple[str, int, str, str]]:
+    return {
+        (
+            reference.chunk_id,
+            reference.page_number,
+            reference.section,
+            reference.excerpt,
+        )
+        for reference in artifact.source_references
+    }
+
+
 def _validate_critic_scope(
     report: CriticReport, bundle: ArtifactBundle
 ) -> set[str]:
@@ -817,8 +850,30 @@ def _validate_repair_scope(
     } | added_ids
     if not changed_ids <= target_ids:
         raise PipelineOutputError("Repair changed artifacts outside the findings.")
-    if not target_ids <= changed_ids:
-        raise PipelineOutputError("Repair did not address every named artifact.")
+    if any(
+        _authored_semantic_payload(repaired_by_id[artifact_id])
+        == _authored_semantic_payload(original_by_id[artifact_id])
+        for artifact_id in changed_ids - added_ids
+    ):
+        raise PipelineOutputError("Repair changed links only.")
+
+
+def _validate_repair_citations(
+    original: ArtifactBundle, repaired: ArtifactBundle
+) -> None:
+    repaired_requirements = {
+        item.requirement_id: item for item in repaired.requirements
+    }
+    for requirement in original.requirements:
+        repaired_requirement = repaired_requirements.get(requirement.requirement_id)
+        if (
+            repaired_requirement is not None
+            and _citation_set(repaired_requirement) != _citation_set(requirement)
+        ):
+            raise PipelineOutputError(
+                f"Canonical requirement {requirement.requirement_id} must preserve "
+                "citations from the original accumulated set exactly."
+            )
 
 
 def _repair_role(findings: list[CriticFinding]) -> str:
@@ -873,12 +928,17 @@ def _critique_bundle(
             )
         ],
         ArtifactBundle,
-        stage_output_tokens(context, "repair", token_ceiling=context.token_ceiling),
+        stage_output_tokens(
+            context,
+            "repair",
+            token_ceiling=context.token_ceiling,
+            configured_stage=role,
+        ),
         agent=role,
     )
-    if _semantic_payload(repaired) == _semantic_payload(bundle):
-        raise PipelineOutputError("Repair changed links only.")
+    repaired = _canonicalize_grounded(repaired, chunks)
     _validate_repair_scope(bundle, repaired, target_ids)
+    _validate_repair_citations(bundle, repaired)
     context.record_stage(
         "repair", 0,
         [finding.finding_id for finding in report.findings] + sorted(target_ids),
