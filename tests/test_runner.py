@@ -11,6 +11,8 @@ from brd_srs_testgen import runner
 from brd_srs_testgen.documents import DocumentError
 from brd_srs_testgen.models import (
     ArtifactBundle,
+    CandidateRequirement,
+    CandidateRequirementBatch,
     CoverageAssignment,
     CoverageCatalog,
     CoverageCatalogStatus,
@@ -145,13 +147,26 @@ class CentralProvider:
     def generate(self, messages, schema, *, max_output_tokens):
         content = messages[-1]["content"]
         with self.lock:
-            if issubclass(schema, RequirementBatch):
-                value = RequirementBatch(
-                    requirements=(
-                        self.artifacts.requirements
-                        if "p0001-c001" in content or "CANDIDATES" in content
-                        else []
-                    )
+            if schema is CandidateRequirementBatch:
+                worker = next(
+                    index for index in range(3) if f"SCOUT {index + 1}/" in content
+                )
+                requirement = self.artifacts.requirements[0]
+                value = CandidateRequirementBatch(
+                    candidates=[
+                        CandidateRequirement(
+                            candidate_id=f"CAND-{worker + 1:03d}-001",
+                            title=requirement.title,
+                            description=requirement.description,
+                            requirement_type=requirement.requirement_type,
+                            module=requirement.module,
+                            priority=requirement.priority,
+                            ambiguities=requirement.ambiguities,
+                            source_references=requirement.source_references,
+                        )
+                    ]
+                    if "p0001-c001" in content
+                    else []
                 )
             elif issubclass(schema, GeneratedCases):
                 assigned = '"requirements":[]' not in content.replace(" ", "")
@@ -215,14 +230,14 @@ class InvalidCentralProvider(CentralProvider):
     def generate(self, messages, schema, *, max_output_tokens):
         result = super().generate(messages, schema, max_output_tokens=max_output_tokens)
         if (
-            issubclass(schema, RequirementBatch)
-            and "WORKER REQUIREMENT EXTRACTION 1/" in messages[-1]["content"]
-            and result.value.requirements
+            schema is CandidateRequirementBatch
+            and "SCOUT 1/" in messages[-1]["content"]
+            and result.value.candidates
         ):
-            invalid = result.value.requirements[0].model_copy(
-                update={"requirement_id": "REQ-1001"}
+            invalid = result.value.candidates[0].model_copy(
+                update={"candidate_id": "CAND-002-001"}
             )
-            return _result(RequirementBatch(requirements=[invalid]))
+            return _result(CandidateRequirementBatch(candidates=[invalid]))
         return result
 
 
@@ -1259,7 +1274,7 @@ def test_invalid_central_worker_output_is_semantic_failure(monkeypatch) -> None:
     )
 
     assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
-    assert "outside worker 1 range" in result.manifest.failure_message
+    assert "outside Scout 1 namespace" in result.manifest.failure_message
 
 
 def test_centralized_builds_generation_agents_and_a_separate_fixed_judge(

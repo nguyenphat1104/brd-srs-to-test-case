@@ -778,6 +778,7 @@ def test_scout_validator_rejects_invalid_candidate_batches() -> None:
     for batch in [
         CandidateRequirementBatch(candidates=[candidate(), candidate()]),
         CandidateRequirementBatch(candidates=[candidate(candidate_id="CAND-002-001")]),
+        CandidateRequirementBatch(candidates=[candidate(candidate_id="CAND-001-000")]),
         CandidateRequirementBatch(candidates=[candidate(chunk_id="unassigned")]),
         CandidateRequirementBatch(candidates=[candidate(excerpt="1 2 3 4 5 invented")]),
         CandidateRequirementBatch(candidates=[candidate(excerpt="1 2 3 4")]),

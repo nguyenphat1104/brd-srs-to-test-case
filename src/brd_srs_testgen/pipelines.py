@@ -516,7 +516,10 @@ def _validate_scout_candidates(
     seen: set[str] = set()
     chunk_ids = {chunk.chunk_id for chunk in group}
     for candidate in batch.candidates:
-        if not candidate.candidate_id.startswith(prefix):
+        if (
+            not candidate.candidate_id.startswith(prefix)
+            or int(candidate.candidate_id.removeprefix(prefix)) < 1
+        ):
             raise PipelineOutputError(
                 f"Candidate ID {candidate.candidate_id} is outside Scout "
                 f"{worker_index + 1} namespace {prefix}001 upward."
