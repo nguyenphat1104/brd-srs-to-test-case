@@ -25,7 +25,6 @@ from brd_srs_testgen.models import (
     CoverageUnit,
     CoverageUnitBatch,
     FailureCategory,
-    GeneratedCases,
     RequirementBatch,
     ReviewResult,
     RunStatus,
@@ -167,12 +166,6 @@ class CentralProvider:
                     ]
                     if "p0001-c001" in content
                     else []
-                )
-            elif issubclass(schema, GeneratedCases):
-                assigned = '"requirements":[]' not in content.replace(" ", "")
-                value = GeneratedCases(
-                    scenarios=self.artifacts.scenarios if assigned else [],
-                    test_cases=self.artifacts.test_cases if assigned else [],
                 )
             elif schema is ReviewResult:
                 value = ReviewResult(accepted=True)

@@ -237,7 +237,7 @@ def test_writer_prompt(
 
 TEST WRITER {worker}/{worker_count}
 
-Write executable manual test cases only for the assigned canonical scenarios. You must not create, rename, or modify scenarios. Cover every assigned scenario with at least one test case. Each test case must reference an assigned scenario ID, and its requirement_ids must be a subset of that scenario's requirement_ids. Test-case IDs must use the inclusive worker namespace TC-{lower:03d} through TC-{upper:03d}. Return one TestCaseBatch.
+Write executable manual test cases only for the assigned canonical scenarios. You must not create, rename, or modify scenarios. Cover every assigned scenario with at least one test case, and collectively cover every requirement ID referenced by the assigned scenarios. Each test case must reference an assigned scenario ID, and its requirement_ids must be a subset of that scenario's requirement_ids. Test-case IDs must use the inclusive worker namespace TC-{lower:03d} through TC-{upper:03d}. Return one TestCaseBatch.
 
 {_agent_setup_block(setup)}
 
@@ -248,42 +248,6 @@ Referenced canonical requirements JSON:
 {_data_block("REFERENCED REQUIREMENTS JSON", requirement_json)}
 
 Dependency context JSON (read only; do not add dependency-only requirement IDs to test cases):
-{_data_block("DEPENDENCY CONTEXT JSON", dependency_json)}
-
-{_evidence(chunks)}"""
-
-
-def worker_cases_prompt(
-    worker_index: int,
-    requirements: list[Requirement],
-    chunks: Iterable[DocumentChunk],
-    *,
-    dependency_context: Iterable[Requirement] = (),
-    setup: AgentSetup | None = None,
-    worker_count: int = WORKER_COUNT,
-) -> str:
-    requirement_batch = RequirementBatch(requirements=requirements)
-    dependency_json = json.dumps(
-        [item.model_dump(mode="json") for item in dependency_context],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    lower = worker_index * 1000 + 1
-    upper = (worker_index + 1) * 1000
-    return f"""{RULES}
-
-WORKER CASE GENERATION {worker_index + 1}/{worker_count}
-
-Generate scenarios and executable manual test cases only for the assigned requirements, grounded only in the assigned evidence. Scenario IDs must use the inclusive range SCN-{lower:03d} through SCN-{upper:03d}; test-case IDs must use the inclusive range TC-{lower:03d} through TC-{upper:03d}; you must not emit IDs outside these ranges. Include positive, negative, boundary, edge, and state-transition coverage wherever supported. Return one GeneratedCases. If the assignment is empty, return empty scenarios and test_cases lists.
-Cover every assigned requirement with at least one scenario and test case, and cover every generated scenario with at least one test case.
-Requirement IDs are opaque labels: copy them only from the supplied JSON; never infer a new ID from its numeric pattern.
-
-{_agent_setup_block(setup)}
-
-Assigned requirements JSON:
-{_data_block("ASSIGNED REQUIREMENTS JSON", requirement_batch.model_dump_json())}
-
-Dependency context JSON (read only; do not generate scenarios or test cases for these requirements):
 {_data_block("DEPENDENCY CONTEXT JSON", dependency_json)}
 
 {_evidence(chunks)}"""

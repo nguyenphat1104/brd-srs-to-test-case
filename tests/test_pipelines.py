@@ -17,7 +17,6 @@ from brd_srs_testgen.models import (
     CriticFinding,
     CriticReport,
     CriticSeverity,
-    GeneratedCases,
     RequirementDecision,
     RequirementDecisionAction,
     RequirementBatch,
@@ -38,7 +37,6 @@ from brd_srs_testgen.pipelines import (
     scout_prompt,
     scenarios_prompt,
     single_prompt,
-    worker_cases_prompt,
 )
 from brd_srs_testgen.providers import (
     BudgetLedger,
@@ -46,7 +44,11 @@ from brd_srs_testgen.providers import (
     ProviderError,
     StructuredOutputError,
 )
-from brd_srs_testgen.prompts import RUN_PROMPT_DEFAULTS, curator_prompt
+from brd_srs_testgen.prompts import (
+    RUN_PROMPT_DEFAULTS,
+    curator_prompt,
+    test_writer_prompt as build_test_writer_prompt,
+)
 from tests.factories import bundle, chunk, source_reference
 
 
@@ -569,6 +571,23 @@ def test_architect_and_writer_reject_invalid_handoffs() -> None:
             0, ModelTestCaseBatch(test_cases=[invalid_case]), scenarios[:1]
         )
 
+    cross_requirement_scenario = scenarios[0].model_copy(
+        update={"requirement_ids": [item.requirement_id for item in requirements]}
+    )
+    incomplete_case = bundle().test_cases[0].model_copy(
+        update={
+            "scenario_id": cross_requirement_scenario.scenario_id,
+            "requirement_ids": [requirements[0].requirement_id],
+            "source_references": cross_requirement_scenario.source_references,
+        }
+    )
+    with pytest.raises(PipelineOutputError, match="cover every assigned requirement"):
+        pipeline_module._validate_writer_cases(
+            0,
+            ModelTestCaseBatch(test_cases=[incomplete_case]),
+            [cross_requirement_scenario],
+        )
+
 
 class CentralProvider:
     model = "test-model"
@@ -620,12 +639,6 @@ class CentralProvider:
             value = ModelTestCaseBatch(test_cases=self.artifacts.test_cases)
         elif issubclass(schema, RequirementBatch):
             value = RequirementBatch(requirements=self.artifacts.requirements)
-        elif issubclass(schema, GeneratedCases):
-            assigned = '"requirements":[]' not in content.replace(" ", "")
-            value = GeneratedCases(
-                scenarios=self.artifacts.scenarios if assigned else [],
-                test_cases=self.artifacts.test_cases if assigned else [],
-            )
         elif schema is ReviewResult:
             value = ReviewResult(accepted=True)
         else:
@@ -809,16 +822,21 @@ def test_worker_prompts_use_disjoint_inclusive_id_ranges(
     worker_index: int, lower: int, upper: int
 ) -> None:
     requirements = scout_prompt(worker_index, [chunk()])
-    cases = worker_cases_prompt(worker_index, bundle().requirements, [chunk()])
+    cases = build_test_writer_prompt(
+        worker_index,
+        bundle().scenarios,
+        bundle().requirements,
+        [chunk()],
+    )
     canonical_rule = (
         "Use unique canonical IDs in increasing order: REQ-001, SCN-001, and TC-001."
     )
 
     assert f"CAND-{worker_index + 1:03d}-001 upward" in requirements
-    assert f"SCN-{lower:03d} through SCN-{upper:03d}" in cases
     assert f"TC-{lower:03d} through TC-{upper:03d}" in cases
     assert "Do not deduplicate across Scouts" in requirements
-    assert "must not emit IDs outside these ranges" in cases
+    assert "must not create" in cases.lower()
+    assert "collectively cover every requirement ID" in cases
     assert canonical_rule not in requirements
     assert canonical_rule not in cases
     assert canonical_rule in single_prompt([chunk()])
@@ -913,97 +931,6 @@ def test_centralized_rejects_bad_scenario_parent() -> None:
         run_centralized_multi_agent(
             PipelineContext(provider=InvalidWorkerProvider("parent")), [chunk()]
         )
-
-
-def generated_with_requirement_ids(
-    scenario_requirement_ids: list[str], test_case_requirement_ids: list[str]
-) -> GeneratedCases:
-    artifacts = bundle()
-    return GeneratedCases(
-        scenarios=[
-            artifacts.scenarios[0].model_copy(
-                update={"requirement_ids": scenario_requirement_ids}
-            )
-        ],
-        test_cases=[
-            artifacts.test_cases[0].model_copy(
-                update={"requirement_ids": test_case_requirement_ids}
-            )
-        ],
-    )
-
-
-@pytest.mark.parametrize("target", ["scenario", "test_case"])
-def test_worker_cases_allow_dependency_only_artifacts(target: str) -> None:
-    assigned = ["REQ-001"]
-    dependency = ["REQ-002"]
-    batch = generated_with_requirement_ids(
-        dependency if target == "scenario" else assigned,
-        dependency if target == "test_case" else assigned,
-    )
-
-    pipeline_module._validate_worker_cases(0, batch, [*assigned, *dependency])
-
-
-@pytest.mark.parametrize("target", ["scenario", "test_case"])
-def test_worker_cases_reject_unknown_canonical_requirement_links(target: str) -> None:
-    assigned = ["REQ-001"]
-    batch = generated_with_requirement_ids(
-        ["REQ-001", "REQ-003"] if target == "scenario" else assigned,
-        ["REQ-001", "REQ-003"] if target == "test_case" else assigned,
-    )
-
-    with pytest.raises(
-        PipelineOutputError,
-        match="outside the canonical requirement catalog",
-    ):
-        pipeline_module._validate_worker_cases(0, batch, [*assigned, "REQ-002"])
-
-
-def test_worker_cases_allow_canonical_links_from_another_worker() -> None:
-    batch = generated_with_requirement_ids(
-        ["REQ-001", "REQ-003"], ["REQ-001", "REQ-003"]
-    )
-
-    pipeline_module._validate_worker_cases(0, batch, ["REQ-001", "REQ-002", "REQ-003"])
-
-
-def test_worker_cases_schema_rejects_invented_requirement_ids() -> None:
-    artifacts = bundle()
-    invalid_scenario = artifacts.scenarios[0].model_copy(
-        update={"scenario_id": "SCN-1006", "requirement_ids": ["REQ-009"]}
-    )
-    invalid_case = artifacts.test_cases[0].model_copy(
-        update={
-            "test_case_id": "TC-1006",
-            "scenario_id": "SCN-1006",
-            "requirement_ids": ["REQ-009"],
-        }
-    )
-
-    schema = pipeline_module._scoped_worker_cases_schema(["REQ-001"])
-
-    with pytest.raises(ValidationError):
-        schema.model_validate(
-            GeneratedCases(
-            scenarios=[artifacts.scenarios[0], invalid_scenario],
-            test_cases=[artifacts.test_cases[0], invalid_case],
-            ).model_dump(mode="json")
-        )
-
-
-def test_worker_cases_namespace_local_ids_for_each_worker() -> None:
-    artifacts = bundle()
-    batch = GeneratedCases(
-        scenarios=[artifacts.scenarios[0]], test_cases=[artifacts.test_cases[0]]
-    )
-
-    namespaced = pipeline_module._namespace_worker_case_ids(1, batch)
-
-    assert [item.scenario_id for item in namespaced.scenarios] == ["SCN-1001"]
-    assert [item.test_case_id for item in namespaced.test_cases] == ["TC-1001"]
-    assert [item.scenario_id for item in namespaced.test_cases] == ["SCN-1001"]
-    pipeline_module._validate_worker_cases(1, namespaced, ["REQ-001"])
 
 
 class CancellationAwareContext(PipelineContext):
@@ -1119,16 +1046,23 @@ def test_dependency_context_is_transitive_stable_and_read_only() -> None:
     evidence = pipeline_module._relevant_chunks(
         [requirements[0], *dependencies], chunks
     )
-    prompt = worker_cases_prompt(
+    scenario = bundle().scenarios[0].model_copy(
+        update={
+            "requirement_ids": [requirements[0].requirement_id],
+            "source_references": requirements[0].source_references,
+        }
+    )
+    prompt = build_test_writer_prompt(
         0,
+        [scenario],
         [requirements[0]],
         evidence,
         dependency_context=dependencies,
     )
 
     assert [item.requirement_id for item in dependencies] == ["REQ-002", "REQ-003"]
-    assigned = prompt.split("<<<BEGIN ASSIGNED REQUIREMENTS JSON DATA>>>")[1].split(
-        "<<<END ASSIGNED REQUIREMENTS JSON DATA>>>"
+    assigned = prompt.split("<<<BEGIN REFERENCED REQUIREMENTS JSON DATA>>>")[1].split(
+        "<<<END REFERENCED REQUIREMENTS JSON DATA>>>"
     )[0]
     dependency_data = prompt.split("<<<BEGIN DEPENDENCY CONTEXT JSON DATA>>>")[1].split(
         "<<<END DEPENDENCY CONTEXT JSON DATA>>>"
@@ -1381,13 +1315,6 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces(
                     output_tokens=1,
                     latency_seconds=0.01,
                 )
-            if issubclass(schema, GeneratedCases):
-                return GenerationResult(
-                    value=schema(scenarios=[], test_cases=[]),
-                    input_tokens=1,
-                    output_tokens=1,
-                    latency_seconds=0.01,
-                )
             return super().generate(messages, schema, max_output_tokens=max_output_tokens)
 
     class ScoutContext(PipelineContext):
@@ -1508,8 +1435,6 @@ class ManyRequirementsProvider(CentralProvider):
                     )
                 ]
             )
-        elif issubclass(schema, GeneratedCases):
-            value = GeneratedCases(scenarios=[], test_cases=[])
         else:
             return super().generate(
                 messages, schema, max_output_tokens=max_output_tokens
@@ -1530,43 +1455,6 @@ def test_centralized_pipeline_preserves_all_distinct_worker_requirements() -> No
     assert [item.requirement_id for item in result.requirements] == [
         f"REQ-{index:03d}" for index in range(1, 26)
     ]
-
-
-def test_worker_bundle_normalization_aligns_links_and_discards_orphans() -> None:
-    artifacts = bundle()
-    second_requirement = artifacts.requirements[0].model_copy(
-        update={"requirement_id": "REQ-002", "title": "Second requirement"}
-    )
-    orphan = artifacts.scenarios[0].model_copy(update={"scenario_id": "SCN-002"})
-    test_case = artifacts.test_cases[0].model_copy(
-        update={"requirement_ids": ["REQ-001", "REQ-002"]}
-    )
-
-    normalized = pipeline_module._normalize_worker_bundle(
-        artifacts.model_copy(
-            update={
-                "requirements": [artifacts.requirements[0], second_requirement],
-                "scenarios": [artifacts.scenarios[0], orphan],
-                "test_cases": [test_case],
-            }
-        )
-    )
-
-    assert [item.scenario_id for item in normalized.scenarios] == ["SCN-001"]
-    assert normalized.scenarios[0].requirement_ids == ["REQ-001", "REQ-002"]
-    assert normalized.scenarios[0].source_references == [
-        artifacts.requirements[0].source_references[0]
-    ]
-    assert normalized.test_cases[0].source_references == [
-        artifacts.requirements[0].source_references[0]
-    ]
-
-
-def test_balance_is_deterministic_and_preserves_every_item_once() -> None:
-    groups = pipeline_module._balance([6, 5, 4, 3, 2, 1], lambda item: item)
-
-    assert groups == [[6, 1], [5, 2], [4, 3]]
-    assert sorted(item for group in groups for item in group) == list(range(1, 7))
 
 
 class MergeProvider:
@@ -1652,32 +1540,6 @@ class MergeProvider:
                     for offset, scenario_id in enumerate(scenario_ids, 1)
                 ]
             )
-        elif issubclass(schema, GeneratedCases):
-            worker = next(
-                index
-                for index in range(3)
-                if f"WORKER CASE GENERATION {index + 1}/3" in content
-            )
-            requirement = self.requirements[worker].model_copy(
-                update={"requirement_id": f"REQ-{worker + 1:03d}"}
-            )
-            scenario_id = f"SCN-{worker * 1000 + 1:03d}"
-            scenario = self.artifacts.scenarios[0].model_copy(
-                update={
-                    "scenario_id": scenario_id,
-                    "requirement_ids": [requirement.requirement_id],
-                    "source_references": requirement.source_references,
-                }
-            )
-            test_case = self.artifacts.test_cases[0].model_copy(
-                update={
-                    "test_case_id": f"TC-{worker * 1000 + 1:03d}",
-                    "scenario_id": scenario_id,
-                    "requirement_ids": [requirement.requirement_id],
-                    "source_references": requirement.source_references,
-                }
-            )
-            value = GeneratedCases(scenarios=[scenario], test_cases=[test_case])
         else:
             value = ReviewResult(accepted=True)
         return GenerationResult(

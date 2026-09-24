@@ -6,9 +6,9 @@ import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
-from typing import Literal, TypeVar
+from typing import TypeVar
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel
 
 from .documents import DocumentError, canonicalize_source_references
 from .models import (
@@ -18,14 +18,12 @@ from .models import (
     CandidateRequirement,
     CandidateRequirementBatch,
     DocumentChunk,
-    GeneratedCases,
     Requirement,
     RequirementBatch,
     RequirementSynthesis,
     ReviewResult,
     Scenario,
     ScenarioBatch,
-    TestCase,
     TestCaseBatch,
     default_agent_setups,
 )
@@ -52,7 +50,6 @@ from .prompts import (
     single_prompt,
     test_writer_prompt,
     test_cases_prompt,
-    worker_cases_prompt,
 )
 
 
@@ -63,7 +60,6 @@ Messages = list[dict[str, str]]
 PROMPT_VERSION = "research-core-v4"
 MIN_OUTPUT_TOKENS = 1_024
 LOCAL_EVIDENCE_CHARS_PER_TASK = 6_000
-LOCAL_REQUIREMENTS_PER_TASK = 3
 STAGED_OUTPUT_TOKEN_DEFAULTS = {
     "requirements": 16_000,
     "scenarios": 24_000,
@@ -73,36 +69,6 @@ STAGED_OUTPUT_TOKEN_DEFAULTS = {
 
 class PipelineOutputError(ValueError):
     pass
-
-
-class BoundedGeneratedCases(GeneratedCases):
-    scenarios: list[Scenario] = Field(max_length=8)
-    test_cases: list[TestCase] = Field(max_length=8)
-
-
-def _scoped_worker_cases_schema(
-    requirement_ids: Iterable[str],
-) -> type[BoundedGeneratedCases]:
-    allowed_ids = tuple(sorted(set(requirement_ids)))
-    if not allowed_ids:
-        return BoundedGeneratedCases
-    requirement_id = Literal.__getitem__(allowed_ids)
-    scoped_scenario = create_model(
-        "ScopedWorkerScenario",
-        __base__=Scenario,
-        requirement_ids=(list[requirement_id], Field(min_length=1)),
-    )
-    scoped_test_case = create_model(
-        "ScopedWorkerTestCase",
-        __base__=TestCase,
-        requirement_ids=(list[requirement_id], Field(min_length=1)),
-    )
-    return create_model(
-        "ScopedWorkerCases",
-        __base__=BoundedGeneratedCases,
-        scenarios=(list[scoped_scenario], Field(max_length=8)),
-        test_cases=(list[scoped_test_case], Field(max_length=8)),
-    )
 
 
 @dataclass
@@ -364,20 +330,6 @@ def run_staged_single_agent(
         scenarios=scenarios.scenarios,
         test_cases=test_cases.test_cases,
     )
-
-
-def _balance(
-    items: list[I], weight: Callable[[I], int], group_count: int = WORKER_COUNT
-) -> list[list[I]]:
-    if group_count < 1:
-        raise ValueError("group_count must be positive")
-    groups: list[list[I]] = [[] for _ in range(group_count)]
-    totals = [0] * group_count
-    for item in sorted(items, key=weight, reverse=True):
-        worker_index = min(range(group_count), key=totals.__getitem__)
-        groups[worker_index].append(item)
-        totals[worker_index] += weight(item)
-    return groups
 
 
 def _bounded_groups(
@@ -665,6 +617,7 @@ def _validate_writer_cases(
         scenario.scenario_id: scenario for scenario in assigned_scenarios
     }
     covered_ids: set[str] = set()
+    covered_requirement_ids: set[str] = set()
     for test_case in batch.test_cases:
         scenario = scenarios_by_id.get(test_case.scenario_id)
         if scenario is None:
@@ -678,89 +631,20 @@ def _validate_writer_cases(
                 "outside its assigned scenario."
             )
         covered_ids.add(test_case.scenario_id)
+        covered_requirement_ids.update(test_case.requirement_ids)
     if covered_ids != set(scenarios_by_id):
         raise PipelineOutputError(
             f"Test Writer {worker_index + 1} must cover every assigned scenario."
         )
-
-
-def _validate_worker_cases(
-    worker_index: int,
-    batch: GeneratedCases,
-    canonical_requirement_ids: Iterable[str],
-) -> None:
-    _validate_worker_ids(
-        worker_index,
-        "scenario",
-        "SCN",
-        (scenario.scenario_id for scenario in batch.scenarios),
-    )
-    _validate_worker_ids(
-        worker_index,
-        "test case",
-        "TC",
-        (test_case.test_case_id for test_case in batch.test_cases),
-    )
-    scenario_ids = {scenario.scenario_id for scenario in batch.scenarios}
-    for test_case in batch.test_cases:
-        if test_case.scenario_id not in scenario_ids:
-            raise PipelineOutputError(
-                f"Test case {test_case.test_case_id} references unknown worker "
-                f"scenario {test_case.scenario_id}."
-            )
-    allowed_ids = set(canonical_requirement_ids)
-    artifacts = [
-        ("Scenario", scenario.scenario_id, scenario.requirement_ids)
-        for scenario in batch.scenarios
-    ] + [
-        ("Test case", test_case.test_case_id, test_case.requirement_ids)
-        for test_case in batch.test_cases
-    ]
-    for label, artifact_id, requirement_ids in artifacts:
-        unknown_ids = set(requirement_ids) - allowed_ids
-        if unknown_ids:
-            raise PipelineOutputError(
-                f"{label} {artifact_id} references requirement IDs "
-                f"{sorted(unknown_ids)} outside the canonical requirement catalog."
-            )
-
-
-def _namespace_worker_case_ids(
-    worker_index: int, batch: GeneratedCases
-) -> GeneratedCases:
-    """Turn a worker's local SCN/TC numbering into its reserved ID range."""
-    offset = worker_index * 1000
-
-    def namespaced(prefix: str, item_id: str) -> str:
-        number = int(item_id.removeprefix(f"{prefix}-"))
-        if 1 <= number <= 1000:
-            return f"{prefix}-{number + offset:03d}"
-        return item_id
-
-    scenario_ids = {
-        scenario.scenario_id: namespaced("SCN", scenario.scenario_id)
-        for scenario in batch.scenarios
+    assigned_requirement_ids = {
+        requirement_id
+        for scenario in assigned_scenarios
+        for requirement_id in scenario.requirement_ids
     }
-    return GeneratedCases(
-        scenarios=[
-            scenario.model_copy(
-                update={"scenario_id": scenario_ids[scenario.scenario_id]}
-            )
-            for scenario in batch.scenarios
-        ],
-        test_cases=[
-            test_case.model_copy(
-                update={
-                    "test_case_id": namespaced("TC", test_case.test_case_id),
-                    "scenario_id": scenario_ids.get(
-                        test_case.scenario_id,
-                        namespaced("SCN", test_case.scenario_id),
-                    ),
-                }
-            )
-            for test_case in batch.test_cases
-        ],
-    )
+    if covered_requirement_ids != assigned_requirement_ids:
+        raise PipelineOutputError(
+            f"Test Writer {worker_index + 1} must cover every assigned requirement."
+        )
 
 
 def _dependency_context(
@@ -799,71 +683,6 @@ def _relevant_chunks(
         for reference in artifact.source_references
     }
     return [chunk for chunk in chunks if chunk.chunk_id in chunk_ids]
-
-
-def _normalize_worker_bundle(bundle: ArtifactBundle) -> ArtifactBundle:
-    """Make derived trace links and citations consistent without a model call."""
-    requirements_by_id = {
-        item.requirement_id: item for item in bundle.requirements
-    }
-    requirement_ids = set(requirements_by_id)
-
-    def sources(linked_ids: Iterable[str]):
-        references = []
-        seen = set()
-        for requirement_id in linked_ids:
-            requirement = requirements_by_id.get(requirement_id)
-            if requirement is None:
-                continue
-            for reference in requirement.source_references:
-                key = (
-                    reference.chunk_id,
-                    reference.page_number,
-                    reference.section,
-                    reference.excerpt,
-                )
-                if key not in seen:
-                    seen.add(key)
-                    references.append(reference)
-        return references
-
-    cases_by_scenario: dict[str, list[TestCase]] = {}
-    for test_case in bundle.test_cases:
-        cases_by_scenario.setdefault(test_case.scenario_id, []).append(test_case)
-
-    scenarios = []
-    for scenario in bundle.scenarios:
-        test_cases = cases_by_scenario.get(scenario.scenario_id, [])
-        if not test_cases:
-            continue
-        linked_ids = list(scenario.requirement_ids)
-        for test_case in test_cases:
-            for requirement_id in test_case.requirement_ids:
-                if requirement_id in requirement_ids and requirement_id not in linked_ids:
-                    linked_ids.append(requirement_id)
-        scenarios.append(
-            scenario.model_copy(
-                update={
-                    "requirement_ids": linked_ids,
-                    "source_references": sources(linked_ids),
-                }
-            )
-        )
-    scenario_ids = {scenario.scenario_id for scenario in scenarios}
-    return bundle.model_copy(
-        update={
-            "scenarios": scenarios,
-            "test_cases": [
-                test_case.model_copy(
-                    update={
-                        "source_references": sources(test_case.requirement_ids)
-                    }
-                )
-                for test_case in bundle.test_cases
-                if test_case.scenario_id in scenario_ids
-            ],
-        }
-    )
 
 
 def run_centralized_multi_agent(

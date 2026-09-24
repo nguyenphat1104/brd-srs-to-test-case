@@ -9,9 +9,9 @@ from urllib.error import HTTPError, URLError
 
 import httpx
 import pytest
+from pydantic import BaseModel, Field
 
 from brd_srs_testgen.models import RequirementBatch
-from brd_srs_testgen.pipelines import BoundedGeneratedCases
 from brd_srs_testgen.providers import (
     BudgetExceeded,
     BudgetLedger,
@@ -232,6 +232,10 @@ def test_gemini_uses_structured_output_and_records_usage() -> None:
 
 
 def test_gemini_omits_unsupported_max_items_from_response_schema() -> None:
+    class BoundedLists(BaseModel):
+        scenarios: list[dict] = Field(max_length=8)
+        test_cases: list[dict] = Field(max_length=8)
+
     interactions = FakeInteractions('{"scenarios": [], "test_cases": []}')
     provider = GeminiProvider(
         SimpleNamespace(models=FakeModels(), interactions=interactions),
@@ -241,7 +245,7 @@ def test_gemini_omits_unsupported_max_items_from_response_schema() -> None:
 
     provider.generate(
         [{"role": "user", "content": "Generate test cases"}],
-        BoundedGeneratedCases,
+        BoundedLists,
         max_output_tokens=40,
     )
 
