@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from .documents import render_chunks
 from .models import (
     AgentSetup,
+    CandidateRequirement,
     DocumentChunk,
     Requirement,
     RequirementBatch,
@@ -161,6 +162,31 @@ SCOUT {worker}/{worker_count}
 Extract atomic candidate requirements only from the assigned ordered evidence. Keep separate rules separate and preserve ambiguity. Every candidate must cite one contiguous verbatim 5-to-25-word excerpt. Candidate IDs must use CAND-{worker:03d}-001 upward. Do not deduplicate across Scouts; the Curator owns cross-worker reconciliation. Return one CandidateRequirementBatch. Boundary duplicates are intentional. Non-empty assignments may return {{"candidates":[]}}.
 
 {_agent_setup_block(setup)}
+
+{_evidence(chunks)}"""
+
+
+def curator_prompt(
+    candidates: Iterable[CandidateRequirement],
+    chunks: Iterable[DocumentChunk],
+    *,
+    setup: AgentSetup | None = None,
+) -> str:
+    candidate_json = json.dumps(
+        [candidate.model_dump(mode="json") for candidate in candidates],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"""{RULES}
+
+CURATOR RECONCILIATION
+
+Reconcile every Scout candidate against the complete ordered evidence. Return one RequirementSynthesis containing canonical requirements and exactly one decision per candidate. Retain or merge decisions must target existing canonical requirement IDs; rejected candidates must have an explicit evidence-based reason and no canonical ID. Canonical IDs must be globally unique, begin REQ-001, and increase by one without gaps. Preserve supported ambiguities and dependencies in canonical requirements. Canonical citations must come only from the candidates retained or merged into that requirement. Wording similarity is insufficient when triggers, actors, limits, or outcomes differ.
+
+{_agent_setup_block(setup)}
+
+Scout candidates JSON:
+{_data_block("SCOUT CANDIDATES JSON", candidate_json)}
 
 {_evidence(chunks)}"""
 

@@ -15,11 +15,13 @@ from .models import (
     AgentSetup,
     ActivityEvent,
     ArtifactBundle,
+    CandidateRequirement,
     CandidateRequirementBatch,
     DocumentChunk,
     GeneratedCases,
     Requirement,
     RequirementBatch,
+    RequirementSynthesis,
     ReviewResult,
     Scenario,
     ScenarioBatch,
@@ -44,6 +46,7 @@ from .prompts import (
     review_prompt,
     revision_prompt,
     scenarios_prompt,
+    curator_prompt,
     scout_prompt,
     single_prompt,
     test_cases_prompt,
@@ -552,26 +555,66 @@ def _canonicalize_scout_candidates(
         raise PipelineOutputError(str(error)) from error
 
 
-def _legacy_requirements_from_candidates(
-    batches: Iterable[CandidateRequirementBatch],
-) -> RequirementBatch:
-    # Temporary compatibility boundary: Task 4 Curator replaces this direct mapping.
-    candidates = [candidate for batch in batches for candidate in batch.candidates]
-    return RequirementBatch(
-        requirements=[
-            Requirement(
-                requirement_id=f"REQ-{index:03d}",
-                title=candidate.title,
-                description=candidate.description,
-                requirement_type=candidate.requirement_type,
-                module=candidate.module,
-                priority=candidate.priority,
-                ambiguities=candidate.ambiguities,
-                source_references=candidate.source_references,
+def _validate_synthesis(
+    candidates: Iterable[CandidateRequirement], synthesis: RequirementSynthesis
+) -> None:
+    candidates = list(candidates)
+    candidate_ids = {item.candidate_id for item in candidates}
+    decision_ids = [item.candidate_id for item in synthesis.decisions]
+    if len(decision_ids) != len(set(decision_ids)) or set(decision_ids) != candidate_ids:
+        raise PipelineOutputError("Curator must decide every candidate exactly once.")
+
+    requirements_by_id = {
+        requirement.requirement_id: requirement for requirement in synthesis.requirements
+    }
+    canonical_ids = [requirement.requirement_id for requirement in synthesis.requirements]
+    if len(canonical_ids) != len(requirements_by_id):
+        raise PipelineOutputError("Curator returned duplicate canonical requirement IDs.")
+    expected_ids = [f"REQ-{index:03d}" for index in range(1, len(canonical_ids) + 1)]
+    if canonical_ids != expected_ids:
+        raise PipelineOutputError(
+            "Curator canonical requirement IDs must begin REQ-001 and increase by one."
+        )
+
+    candidates_by_id = {candidate.candidate_id: candidate for candidate in candidates}
+    sources_by_requirement: dict[str, set[tuple[str, int, str, str]]] = {}
+    for decision in synthesis.decisions:
+        if decision.canonical_requirement_id is None:
+            continue
+        requirement_id = decision.canonical_requirement_id
+        if requirement_id not in requirements_by_id:
+            raise PipelineOutputError(
+                f"Curator decision targets unknown canonical requirement {requirement_id}."
             )
-            for index, candidate in enumerate(candidates, 1)
-        ]
-    )
+        sources_by_requirement.setdefault(requirement_id, set()).update(
+            (
+                reference.chunk_id,
+                reference.page_number,
+                reference.section,
+                reference.excerpt,
+            )
+            for reference in candidates_by_id[decision.candidate_id].source_references
+        )
+    if set(sources_by_requirement) != set(canonical_ids):
+        raise PipelineOutputError(
+            "Every canonical requirement must have a retained or merged candidate."
+        )
+    for requirement_id, requirement in requirements_by_id.items():
+        allowed_sources = sources_by_requirement[requirement_id]
+        if any(
+            (
+                reference.chunk_id,
+                reference.page_number,
+                reference.section,
+                reference.excerpt,
+            )
+            not in allowed_sources
+            for reference in requirement.source_references
+        ):
+            raise PipelineOutputError(
+                f"Canonical requirement {requirement_id} has citations not sourced "
+                "from retained or merged candidates."
+            )
 
 
 def _validate_worker_cases(
@@ -825,7 +868,28 @@ def run_centralized_multi_agent(
         ),
     )
 
-    requirements = _legacy_requirements_from_candidates(worker_candidates)
+    candidates = [
+        candidate for batch in worker_candidates for candidate in batch.candidates
+    ]
+    synthesis = canonicalize_source_references(
+        context.generate(
+            [
+                _user(
+                    curator_prompt(
+                        candidates,
+                        chunks,
+                        setup=context.agent_setup("curator"),
+                    )
+                )
+            ],
+            RequirementSynthesis,
+            8_000,
+            agent="curator",
+        ),
+        chunks,
+    )
+    _validate_synthesis(candidates, synthesis)
+    requirements = RequirementBatch(requirements=synthesis.requirements)
     context.notify(
         f"Orchestrator: reconciled {len(requirements.requirements)} canonical requirements.",
         agent="Orchestrator",

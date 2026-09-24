@@ -31,6 +31,7 @@ from brd_srs_testgen.pipelines import (
     PipelineOutputError,
     RULES,
     PipelineContext,
+    _validate_synthesis,
     run_centralized_multi_agent,
     run_single_prompt,
     run_staged_single_agent,
@@ -45,7 +46,7 @@ from brd_srs_testgen.providers import (
     ProviderError,
     StructuredOutputError,
 )
-from brd_srs_testgen.prompts import RUN_PROMPT_DEFAULTS
+from brd_srs_testgen.prompts import RUN_PROMPT_DEFAULTS, curator_prompt
 from tests.factories import bundle, chunk, source_reference
 
 
@@ -90,6 +91,132 @@ def test_hierarchical_handoff_contracts_construct_valid_artifacts() -> None:
     assert scenarios.scenarios == bundle().scenarios
     assert CriticReport(accepted=False, findings=[finding]).findings == [finding]
     assert snapshot.output == {"decision_count": 1}
+
+
+def test_curator_prompt_includes_all_candidates_and_ordered_evidence() -> None:
+    candidate = CandidateRequirement(
+        candidate_id="CAND-001-001",
+        title="Authenticate users",
+        description="Registered users can sign in.",
+        requirement_type="functional",
+        module="Authentication",
+        priority="high",
+        source_references=[source_reference()],
+    )
+    second = chunk().model_copy(
+        update={"chunk_id": "p0002-c001-example", "page_number": 2, "content_hash": "b" * 64}
+    )
+
+    prompt = curator_prompt([candidate], [chunk(), second])
+
+    assert candidate.model_dump_json() in prompt
+    assert prompt.index(chunk().chunk_id) < prompt.index(second.chunk_id)
+    assert "exactly one decision per candidate" in prompt
+    assert "wording similarity is insufficient" in prompt.lower()
+
+
+def test_validate_synthesis_accepts_semantic_merge_of_adjacent_candidates() -> None:
+    first = CandidateRequirement(
+        candidate_id="CAND-001-001",
+        title="Authenticate users",
+        description="Registered users must sign in before accessing the dashboard.",
+        requirement_type="functional",
+        module="Authentication",
+        priority="high",
+        source_references=[source_reference()],
+    )
+    second = first.model_copy(
+        update={
+            "candidate_id": "CAND-001-002",
+            "title": "Require login before dashboard access",
+            "description": "The dashboard is available only after a registered user signs in.",
+        }
+    )
+    synthesis = RequirementSynthesis(
+        decisions=[
+            RequirementDecision(candidate_id=first.candidate_id, action="retain", canonical_requirement_id="REQ-001", reason="Canonical access rule."),
+            RequirementDecision(candidate_id=second.candidate_id, action="merge", canonical_requirement_id="REQ-001", reason="Same sign-in access rule."),
+        ],
+        requirements=[
+            bundle().requirements[0].model_copy(
+                update={"description": "Registered users must sign in before accessing the dashboard."}
+            )
+        ],
+    )
+
+    _validate_synthesis([first, second], synthesis)
+
+
+@pytest.mark.parametrize(
+    ("decisions", "requirements", "message"),
+    [
+        (
+            [RequirementDecision(candidate_id="CAND-001-001", action="retain", canonical_requirement_id="REQ-001", reason="Keep it.")],
+            [bundle().requirements[0]],
+            "decide every candidate exactly once",
+        ),
+        (
+            [
+                RequirementDecision(candidate_id="CAND-001-001", action="retain", canonical_requirement_id="REQ-001", reason="Keep it."),
+                RequirementDecision(candidate_id="CAND-001-001", action="merge", canonical_requirement_id="REQ-001", reason="Duplicate decision."),
+            ],
+            [bundle().requirements[0]],
+            "decide every candidate exactly once",
+        ),
+        (
+            [
+                RequirementDecision(candidate_id="CAND-001-001", action="retain", canonical_requirement_id="REQ-002", reason="Keep it."),
+                RequirementDecision(candidate_id="CAND-001-002", action="reject", reason="Not supported."),
+            ],
+            [bundle().requirements[0]],
+            "unknown canonical requirement",
+        ),
+        (
+            [
+                RequirementDecision(candidate_id="CAND-001-001", action="retain", canonical_requirement_id="REQ-001", reason="Keep it."),
+                RequirementDecision(candidate_id="CAND-001-002", action="retain", canonical_requirement_id="REQ-001", reason="Keep it too."),
+            ],
+            [bundle().requirements[0], bundle().requirements[0]],
+            "duplicate canonical requirement ID",
+        ),
+        (
+            [
+                RequirementDecision(candidate_id="CAND-001-001", action="retain", canonical_requirement_id="REQ-001", reason="Keep it."),
+                RequirementDecision(candidate_id="CAND-001-002", action="reject", reason="Not supported."),
+            ],
+            [bundle().requirements[0].model_copy(update={"source_references": [source_reference().model_copy(update={"chunk_id": "other", "page_number": 2})]})],
+            "not sourced from retained or merged candidates",
+        ),
+    ],
+)
+def test_validate_synthesis_rejects_invalid_curator_contracts(
+    decisions, requirements, message
+) -> None:
+    candidates = [
+        CandidateRequirement(
+            candidate_id=f"CAND-001-00{index}",
+            title=f"Candidate {index}",
+            description="Registered users can sign in.",
+            requirement_type="functional",
+            module="Authentication",
+            priority="high",
+            source_references=[source_reference()],
+        )
+        for index in (1, 2)
+    ]
+
+    with pytest.raises(PipelineOutputError, match=message):
+        _validate_synthesis(candidates, RequirementSynthesis(decisions=decisions, requirements=requirements))
+
+
+def test_rejected_candidate_cannot_target_a_canonical_requirement() -> None:
+    with pytest.raises(ValidationError, match="rejected candidates"):
+        RequirementDecision(
+            candidate_id="CAND-001-001",
+            action="reject",
+            canonical_requirement_id="REQ-001",
+            reason="Not supported.",
+        )
 
 
 @pytest.mark.parametrize(
@@ -179,6 +306,18 @@ class CentralProvider:
                 if "p0001-c001" in content
                 else []
             )
+        elif schema is RequirementSynthesis:
+            value = RequirementSynthesis(
+                decisions=[
+                    RequirementDecision(
+                        candidate_id="CAND-001-001",
+                        action="retain",
+                        canonical_requirement_id="REQ-001",
+                        reason="Supported canonical requirement.",
+                    )
+                ],
+                requirements=self.artifacts.requirements,
+            )
         elif issubclass(schema, RequirementBatch):
             value = RequirementBatch(requirements=self.artifacts.requirements)
         elif issubclass(schema, GeneratedCases):
@@ -207,7 +346,7 @@ def test_centralized_workers_receive_isolated_assignments() -> None:
 
     assert result == bundle()
     worker_calls = [
-        call for call in provider.calls if "SCOUT" in call[0][0]["content"]
+        call for call in provider.calls if call[1] is CandidateRequirementBatch
     ]
     assert len(worker_calls) == 3
     assert all(len(call[0]) == 1 for call in worker_calls)
@@ -256,7 +395,7 @@ def test_local_centralized_run_uses_bounded_serial_tasks() -> None:
     extraction_calls = [
         call
         for call in provider.calls
-        if "SCOUT" in call[0][0]["content"]
+        if call[1] is CandidateRequirementBatch
     ]
     assert len(extraction_calls) == 2
     assert all("/2" in call[0][0]["content"] for call in extraction_calls)
@@ -274,8 +413,10 @@ def test_local_centralized_run_uses_bounded_serial_tasks() -> None:
 
 def test_centralized_routes_each_agent_role_to_its_provider() -> None:
     scout = CentralProvider()
+    curator = CentralProvider()
     generator = CentralProvider()
     scout.model = "scout-model"
+    curator.model = "curator-model"
     generator.model = "generator-model"
     activity = []
 
@@ -284,6 +425,7 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
             provider=CentralProvider(),
             providers={
                 "scout": scout,
+                "curator": curator,
                 "test_generator": generator,
             },
             progress=activity.append,
@@ -299,6 +441,8 @@ def test_centralized_routes_each_agent_role_to_its_provider() -> None:
     )
     assert len(generator.calls) == 1
     assert all(issubclass(call[1], GeneratedCases) for call in generator.calls)
+    assert len(curator.calls) == 1
+    assert curator.calls[0][1] is RequirementSynthesis
     assert {
         event.model
         for event in activity
@@ -885,6 +1029,29 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces(
                 finally:
                     with self.lock:
                         self.active -= 1
+            if schema is RequirementSynthesis:
+                first = responses[0].candidates[0]
+                return GenerationResult(
+                    value=RequirementSynthesis(
+                        decisions=[
+                            RequirementDecision(
+                                candidate_id=f"CAND-{index:03d}-001",
+                                action="retain" if index == 1 else "merge",
+                                canonical_requirement_id="REQ-001",
+                                reason="Same supported access rule.",
+                            )
+                            for index in range(1, len(expected_groups) + 1)
+                        ],
+                        requirements=[
+                            self.artifacts.requirements[0].model_copy(
+                                update={"source_references": first.source_references}
+                            )
+                        ],
+                    ),
+                    input_tokens=1,
+                    output_tokens=1,
+                    latency_seconds=0.01,
+                )
             if issubclass(schema, GeneratedCases):
                 return GenerationResult(
                     value=schema(scenarios=[], test_cases=[]),
@@ -941,7 +1108,29 @@ def test_scouts_receive_ordered_overlapping_evidence_with_worker_namespaces(
 class ManyRequirementsProvider(CentralProvider):
     def generate(self, messages, schema, *, max_output_tokens):
         content = messages[-1]["content"]
-        if "SCOUT 1/3" in content:
+        if schema is RequirementSynthesis:
+            value = RequirementSynthesis(
+                decisions=[
+                    RequirementDecision(
+                        candidate_id=f"CAND-001-{index:03d}",
+                        action="retain",
+                        canonical_requirement_id=f"REQ-{index:03d}",
+                        reason="Distinct supported requirement.",
+                    )
+                    for index in range(1, 26)
+                ],
+                requirements=[
+                    self.artifacts.requirements[0].model_copy(
+                        update={
+                            "requirement_id": f"REQ-{index:03d}",
+                            "title": f"Requirement {index}",
+                            "description": f"Distinct requirement {index}.",
+                        }
+                    )
+                    for index in range(1, 26)
+                ],
+            )
+        elif "SCOUT 1/3" in content:
             requirement = self.artifacts.requirements[0]
             value = CandidateRequirementBatch(
                 candidates=[
@@ -1034,7 +1223,25 @@ class MergeProvider:
         content = messages[-1]["content"]
         with self.lock:
             self.calls.append((messages, schema, max_output_tokens))
-        if schema is CandidateRequirementBatch:
+        if schema is RequirementSynthesis:
+            value = RequirementSynthesis(
+                decisions=[
+                    RequirementDecision(
+                        candidate_id=f"CAND-001-{index:03d}",
+                        action="retain",
+                        canonical_requirement_id=f"REQ-{index:03d}",
+                        reason="Distinct supported requirement.",
+                    )
+                    for index in range(1, len(self.requirements) + 1)
+                ],
+                requirements=[
+                    requirement.model_copy(
+                        update={"requirement_id": f"REQ-{index:03d}"}
+                    )
+                    for index, requirement in enumerate(self.requirements, 1)
+                ],
+            )
+        elif schema is CandidateRequirementBatch:
             value = CandidateRequirementBatch(
                 candidates=[
                     CandidateRequirement(
