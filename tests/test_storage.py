@@ -7,6 +7,7 @@ import psycopg
 import pytest
 
 from brd_srs_testgen.models import (
+    AgentStageOutput,
     AgentSetup,
     ArtifactBundle,
     CoverageCatalog,
@@ -1453,3 +1454,81 @@ def test_agent_setups_round_trip_as_shared_configuration(
     repository.initialize()
 
     assert repository.load_agent_setups() == setups
+
+
+@pytest.mark.parametrize("with_repair", [False, True])
+def test_blackboard_round_trips_all_ordered_handoffs(repository, with_repair) -> None:
+    from brd_srs_testgen.pipelines import PipelineContext, run_centralized_multi_agent
+    from tests.test_pipelines import HierarchicalProvider
+
+    provider = HierarchicalProvider()
+    context = PipelineContext(provider=provider)
+    artifacts = run_centralized_multi_agent(context, provider.chunks)
+    rows = context.stage_outputs
+    if with_repair:
+        rows.append(AgentStageOutput(
+            stage="repair", task_index=0, role="test_writer",
+            input_ids=["FIND-001", "TC-001"],
+            output=artifacts.model_dump(mode="json"), created_at=datetime.now(UTC),
+        ))
+    result = completed_run("blackboard", RunType.CENTRALIZED_MULTI_AGENT).model_copy(
+        update={
+            "bundle": artifacts,
+            "validation": validate_bundle(artifacts, provider.chunks),
+            "rtm": build_rtm(artifacts),
+            "metrics": None,
+            "stage_outputs": list(reversed(rows)),
+        }
+    )
+    start_run(repository, result)
+    repository.finalize(result)
+
+    loaded = repository.load_run(result.manifest.run_id)
+    assert loaded.stage_outputs == rows
+    assert [(row.stage, row.task_index) for row in loaded.stage_outputs] == [
+        ("scout", 0), ("scout", 1), ("scout", 2), ("curator", 0),
+        ("scenario_architect", 0), ("test_writer", 0), ("test_writer", 1),
+        ("critic", 0),
+    ] + ([("repair", 0)] if with_repair else [])
+    changed = result.model_copy(update={"stage_outputs": [
+        rows[0].model_copy(update={"output": {"overwritten": True}})
+    ]})
+    with pytest.raises(ImmutableRunError, match="Terminal runs are immutable"):
+        repository.finalize(changed)
+    assert repository.load_run(result.manifest.run_id).stage_outputs == rows
+
+
+def test_duplicate_blackboard_rows_roll_back_finalization(repository) -> None:
+    row = AgentStageOutput(
+        stage="scout", task_index=0, role="scout", input_ids=[factory_chunk().chunk_id],
+        output={"candidates": []}, created_at=datetime.now(UTC),
+    )
+    result = completed_run("blackboard-rollback").model_copy(
+        update={"stage_outputs": [row, row]}
+    )
+    start_run(repository, result)
+    with pytest.raises(StorageError) as raised:
+        repository.finalize(result)
+    assert isinstance(raised.value.__cause__, psycopg.errors.UniqueViolation)
+    loaded = repository.load_run(result.manifest.run_id)
+    assert loaded.manifest.status is RunStatus.RUNNING
+    assert loaded.stage_outputs == []
+    assert loaded.bundle is loaded.metrics is None
+    assert repository.load_events(result.manifest.run_id) == []
+
+
+def test_failed_run_round_trips_partial_blackboard(repository) -> None:
+    row = AgentStageOutput(
+        stage="scout", task_index=0, role="scout",
+        output={"candidates": []}, created_at=datetime.now(UTC),
+    )
+    result = completed_run("partial-blackboard")
+    failed = RunResult(
+        manifest=result.manifest.model_copy(update={
+            "status": RunStatus.FAILED,
+            "failure_category": FailureCategory.PROVIDER_REJECTION,
+        }), stage_outputs=[row],
+    )
+    start_run(repository, failed)
+    repository.finalize(failed)
+    assert repository.load_run(failed.manifest.run_id) == failed

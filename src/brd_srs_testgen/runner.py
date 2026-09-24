@@ -18,6 +18,7 @@ from .documents import DocumentError, canonicalize_source_references, parse_pdf
 from .coverage import evaluate_against_catalog, extract_coverage_catalog
 from .models import (
     AgentSetup,
+    AgentStageOutput,
     ArtifactBundle,
     CoverageEvaluation,
     CoverageEvaluationStatus,
@@ -113,6 +114,7 @@ class ProviderSettings:
     thinking_level: str | None = None
     agent_thinking_levels: dict[str, str] = field(default_factory=dict)
     agent_max_output_tokens: dict[str, int] = field(default_factory=dict)
+    critic_enabled: bool = True
     provider_api_keys: dict[str, str] = field(default_factory=dict, repr=False)
     provider_base_urls: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -177,6 +179,7 @@ class ProviderSettings:
         return {
             "agents": agents,
             "token_ceiling": self.token_ceiling,
+            "critic_enabled": self.critic_enabled,
         }
 
     def with_model(self, model: str) -> ProviderSettings:
@@ -188,6 +191,8 @@ class ProviderSettings:
         return replace(self, agent_setups=agent_setups)
 
     def validate(self) -> None:
+        if not isinstance(self.critic_enabled, bool):
+            raise ValueError("Critic enabled must be a boolean.")
         if (
             not isinstance(self.token_ceiling, int)
             or isinstance(self.token_ceiling, bool)
@@ -659,6 +664,8 @@ def run_generation(
         local_provider = bool(configured_providers & LOCAL_PROVIDERS)
         context = PipelineContext(
             provider=provider,
+            token_ceiling=settings.token_ceiling,
+            critic_enabled=settings.critic_enabled,
             providers=providers,
             agent_setups=settings.agent_setups,
             agent_prompts=settings.agent_prompts,
@@ -747,6 +754,7 @@ def run_generation(
                     )
                 judge_context = PipelineContext(
                     provider=judge_provider,
+                    token_ceiling=JUDGE_TOKEN_CEILING,
                     agent_setups={
                         "coverage_analyzer": AgentSetup(
                             agent="coverage_analyzer",
@@ -874,6 +882,10 @@ def run_generation(
 
     result = RunResult(
         manifest=manifest,
+        stage_outputs=(
+            sorted(context.stage_outputs, key=AgentStageOutput.order_key)
+            if context else []
+        ),
         bundle=bundle,
         validation=validation,
         rtm=rtm,

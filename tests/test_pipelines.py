@@ -41,6 +41,7 @@ from brd_srs_testgen.pipelines import (
     single_prompt,
 )
 from brd_srs_testgen.providers import (
+    BudgetExceeded,
     BudgetLedger,
     GenerationResult,
     ProviderError,
@@ -2278,3 +2279,203 @@ def test_failed_attempt_records_wall_latency_and_exposes_charged_tokens(
 
     assert context.latency_seconds == 0.25
     assert context.charged_tokens == 37
+
+
+def test_multi_agent_budget_shares_and_task_allocations() -> None:
+    assert pipeline_module.MULTI_AGENT_BUDGET_SHARES == {
+        "scout": 0.25,
+        "curator": 0.15,
+        "scenario_architect": 0.15,
+        "test_writer": 0.30,
+        "critic": 0.10,
+        "repair": 0.05,
+    }
+    context = PipelineContext(provider=CentralProvider())
+    for stage, expected in (
+        ("scout", 25_000), ("curator", 15_000),
+        ("scenario_architect", 15_000), ("test_writer", 30_000),
+        ("critic", 10_000), ("repair", 5_000),
+    ):
+        assert pipeline_module.stage_output_tokens(
+            context, stage, token_ceiling=100_000
+        ) == expected
+    assert pipeline_module.stage_output_tokens(
+        context, "scout", token_ceiling=100_000, task_count=4
+    ) == 6_250
+    assert pipeline_module.stage_output_tokens(
+        context, "test_writer", token_ceiling=100_000, task_count=3
+    ) == 10_000
+    context.agent_max_output_tokens = {"scout": 2_000, "critic": 99_000}
+    assert pipeline_module.stage_output_tokens(
+        context, "scout", token_ceiling=100_000
+    ) == 2_000
+    assert pipeline_module.stage_output_tokens(
+        context, "critic", token_ceiling=100_000
+    ) == 10_000
+    assert pipeline_module.stage_output_tokens(
+        context, "repair", token_ceiling=100
+    ) == pipeline_module.MIN_OUTPUT_TOKENS
+
+
+@pytest.mark.parametrize("configured", [None, 99_000, 2_000])
+def test_every_hierarchical_call_obeys_stage_allocation(configured) -> None:
+    provider = HierarchicalProvider()
+    caps = {} if configured is None else {
+        stage: configured for stage in pipeline_module.MULTI_AGENT_BUDGET_SHARES
+    }
+    context = PipelineContext(
+        provider=provider, token_ceiling=60_000, agent_max_output_tokens=caps
+    )
+    run_centralized_multi_agent(context, provider.chunks)
+    expected = {
+        CandidateRequirementBatch: 5_000,
+        RequirementSynthesis: 9_000,
+        ScenarioBatch: 9_000,
+        ModelTestCaseBatch: 9_000,
+        CriticReport: 6_000,
+    }
+    assert all(
+        limit == min(configured or expected[schema], expected[schema])
+        for _messages, schema, limit in provider.calls
+    )
+
+
+def test_parallel_handoffs_are_recorded_immediately_in_stage_task_order() -> None:
+    scout_done = threading.Event()
+    writer_done = threading.Event()
+    completions = []
+
+    class ReorderedProvider(HierarchicalProvider):
+        def generate(self, messages, schema, *, max_output_tokens):
+            content = messages[-1]["content"]
+            if schema is CandidateRequirementBatch and "SCOUT 1/" in content:
+                assert scout_done.wait(2)
+            if schema is ModelTestCaseBatch and "TEST WRITER 1/" in content:
+                assert writer_done.wait(2)
+            return super().generate(messages, schema, max_output_tokens=max_output_tokens)
+
+    def progress(event):
+        if event.artifact_label not in {"Candidate requirements", "Test cases"}:
+            return
+        stage = "scout" if event.artifact_label == "Candidate requirements" else "test_writer"
+        index = int(event.agent.rsplit(" ", 1)[1]) - 1
+        assert any(row.stage == stage and row.task_index == index for row in context.stage_outputs)
+        completions.append((stage, index))
+        if (stage, index) == ("scout", 2):
+            scout_done.set()
+        if (stage, index) == ("test_writer", 1):
+            writer_done.set()
+
+    provider = ReorderedProvider()
+    context = PipelineContext(provider=provider, progress=progress)
+    run_centralized_multi_agent(context, provider.chunks)
+
+    assert completions.index(("scout", 2)) < completions.index(("scout", 0))
+    assert completions.index(("test_writer", 1)) < completions.index(("test_writer", 0))
+    rows = context.stage_outputs
+    assert [(row.stage, row.task_index) for row in rows] == [
+        ("scout", 0), ("scout", 1), ("scout", 2), ("curator", 0),
+        ("scenario_architect", 0), ("test_writer", 0), ("test_writer", 1),
+        ("critic", 0),
+    ]
+    schemas = [CandidateRequirementBatch] * 3 + [
+        RequirementSynthesis, ScenarioBatch, ModelTestCaseBatch,
+        ModelTestCaseBatch, CriticReport,
+    ]
+    for row, schema in zip(rows, schemas):
+        assert schema.model_validate(row.output).model_dump(mode="json") == row.output
+        assert row.role == row.stage
+        assert row.created_at.tzinfo is not None
+    assert rows[0].input_ids == [item.chunk_id for item in provider.chunks]
+    assert rows[3].input_ids == [f"CAND-001-{index:03d}" for index in range(1, 5)]
+    assert rows[4].input_ids == [item.requirement_id for item in provider.requirements]
+    assert {"SCN-004", "REQ-004"} <= set(rows[6].input_ids)
+    assert "TC-004" in rows[-1].input_ids
+
+
+def test_failed_handoff_preserves_only_validated_stage_outputs() -> None:
+    context = PipelineContext(provider=InvalidWorkerProvider("duplicate"), worker_limit=1)
+    with pytest.raises(PipelineOutputError, match="duplicate canonical scenario"):
+        run_centralized_multi_agent(context, [chunk()])
+    assert [(row.stage, row.task_index) for row in context.stage_outputs] == [
+        ("scout", 0), ("scout", 1), ("scout", 2), ("curator", 0),
+    ]
+
+
+@pytest.mark.parametrize("role", ["curator", "scenario_architect", "test_writer"])
+@pytest.mark.parametrize("repair_cap", [2_000, 99_000])
+def test_repair_budget_and_blackboard_use_actual_responsible_role(role, repair_cap) -> None:
+    artifacts = bundle()
+    field, artifact_id = {
+        "curator": ("requirements", "REQ-001"),
+        "scenario_architect": ("scenarios", "SCN-001"),
+        "test_writer": ("test_cases", "TC-001"),
+    }[role]
+    repaired = artifacts.model_copy(update={
+        field: [getattr(artifacts, field)[0].model_copy(update={"title": "Repaired title"})]
+    })
+    report = CriticReport(accepted=False, findings=[critic_finding(
+        responsible_role=role, artifact_ids=[artifact_id]
+    )])
+    provider = CritiqueProvider([report, repaired])
+    context = PipelineContext(
+        provider=provider, token_ceiling=60_000,
+        agent_max_output_tokens={role: 99_000, "repair": repair_cap},
+    )
+    assert _critique_bundle(context, artifacts, [chunk()]) == repaired
+    assert [call[2] for call in provider.calls] == [6_000, min(repair_cap, 3_000)]
+    assert [(row.stage, row.role) for row in context.stage_outputs] == [
+        ("critic", "critic"), ("repair", role),
+    ]
+    assert context.stage_outputs[-1].output == repaired.model_dump(mode="json")
+    assert {"FIND-001", artifact_id} <= set(context.stage_outputs[-1].input_ids)
+
+
+def test_invalid_critic_and_repair_outputs_are_not_recorded() -> None:
+    artifacts = bundle()
+    context = PipelineContext(provider=CritiqueProvider([
+        CriticReport(accepted=False, findings=[critic_finding(artifact_ids=["TC-999"])])
+    ]))
+    with pytest.raises(PipelineOutputError, match="unknown artifact ID"):
+        _critique_bundle(context, artifacts, [chunk()])
+    assert context.stage_outputs == []
+    context = PipelineContext(provider=CritiqueProvider([
+        CriticReport(accepted=False, findings=[critic_finding()]), artifacts
+    ]))
+    with pytest.raises(PipelineOutputError, match="changed links only"):
+        _critique_bundle(context, artifacts, [chunk()])
+    assert [row.stage for row in context.stage_outputs] == ["critic"]
+
+
+def test_shared_ledger_still_stops_hierarchical_generation() -> None:
+    class ReservingProvider(CentralProvider):
+        def generate(self, messages, schema, *, max_output_tokens):
+            reservation = self.ledger.reserve(max_output_tokens + 2_000)
+            result = super().generate(messages, schema, max_output_tokens=max_output_tokens)
+            self.ledger.settle(reservation, max_output_tokens + 2_000)
+            return result
+
+    provider = ReservingProvider()
+    provider.ledger = BudgetLedger(10_000)
+    context = PipelineContext(provider=provider, token_ceiling=10_000, worker_limit=1)
+    with pytest.raises(BudgetExceeded):
+        run_centralized_multi_agent(context, [chunk()])
+    assert provider.ledger.used <= 10_000
+    assert [row.stage for row in context.stage_outputs] == ["scout"] * 3
+
+
+def test_empty_writer_handoff_is_recorded_without_a_provider_call() -> None:
+    provider = ScriptedProvider([
+        CandidateRequirementBatch(candidates=[]),
+        RequirementSynthesis(decisions=[], requirements=[]),
+        ScenarioBatch(scenarios=[]),
+        CriticReport(accepted=True),
+    ])
+    context = PipelineContext(provider=provider, bounded_tasks=True)
+    run_centralized_multi_agent(context, [chunk()])
+    assert [row.stage for row in context.stage_outputs] == [
+        "scout", "curator", "scenario_architect", "test_writer", "critic"
+    ]
+    assert context.stage_outputs[3].output == {"test_cases": []}
+    assert context.stage_outputs[3].input_ids == []
+    assert all(schema is not ModelTestCaseBatch for _, schema, _ in provider.calls)

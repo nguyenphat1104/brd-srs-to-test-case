@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 from .evaluation import COVERAGE_RATING_RUBRIC_VERSION, coverage_rating
 from .models import (
     AgentSetup,
+    AgentStageOutput,
     ArtifactBundle,
     CoverageCatalog,
     CoverageCatalogStatus,
@@ -455,6 +456,21 @@ class RunRepository:
                     self._insert_coverage_evaluation(connection, evaluation)
                 if result.coverage is not None:
                     self._insert_coverage(connection, manifest.run_id, result.coverage)
+                with connection.cursor() as cursor:
+                    cursor.executemany(
+                        "INSERT INTO agent_stage_outputs "
+                        "(run_id, stage, task_index, role, input_ids, output, created_at) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (
+                            (
+                                manifest.run_id, row.stage, row.task_index, row.role,
+                                Jsonb(row.input_ids), Jsonb(row.output), row.created_at,
+                            )
+                            for row in sorted(
+                                result.stage_outputs, key=AgentStageOutput.order_key
+                            )
+                        ),
+                    )
                 self._append_event(
                     connection, manifest.run_id, "finished", manifest.completed_at
                 )
@@ -1007,6 +1023,17 @@ class RunRepository:
                 if row is None:
                     raise StorageError("Run does not exist.")
                 manifest = _manifest(row)
+                stage_outputs = [
+                    AgentStageOutput.model_validate(item)
+                    for item in connection.execute(
+                        "SELECT stage, task_index, role, input_ids, output, created_at "
+                        "FROM agent_stage_outputs WHERE run_id = %s "
+                        "ORDER BY CASE stage WHEN 'scout' THEN 0 WHEN 'curator' THEN 1 "
+                        "WHEN 'scenario_architect' THEN 2 WHEN 'test_writer' THEN 3 "
+                        "WHEN 'critic' THEN 4 WHEN 'repair' THEN 5 END, task_index",
+                        (run_id,),
+                    ).fetchall()
+                ]
                 bundle = self._load_bundle(connection, run_id)
                 validation = self._load_validation(connection, run_id)
                 metrics = self._load_metrics(connection, run_id)
@@ -1020,6 +1047,7 @@ class RunRepository:
                 )
                 return RunResult(
                     manifest=manifest,
+                    stage_outputs=stage_outputs,
                     bundle=bundle,
                     validation=validation,
                     rtm=build_rtm(bundle) if bundle is not None else [],

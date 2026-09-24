@@ -316,6 +316,12 @@ class AgentStageOutput(StrictModel):
     output: dict[str, JsonValue]
     created_at: AwareDatetime
 
+    def order_key(self) -> tuple[int, int]:
+        stages = (
+            "scout", "curator", "scenario_architect", "test_writer", "critic", "repair"
+        )
+        return stages.index(self.stage), self.task_index
+
 
 class ValidationIssue(StrictModel):
     code: str
@@ -404,6 +410,7 @@ class RunManifest(StrictModel):
 
 class RunResult(StrictModel):
     manifest: RunManifest
+    stage_outputs: list[AgentStageOutput] = Field(default_factory=list)
     bundle: ArtifactBundle | None = None
     validation: ValidationReport | None = None
     rtm: list[RTMRow] = Field(default_factory=list)

@@ -31,6 +31,17 @@ ALTER TABLE runs
 
 CREATE INDEX IF NOT EXISTS runs_started_at_idx ON runs (started_at DESC);
 
+CREATE TABLE IF NOT EXISTS agent_stage_outputs (
+    run_id text NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    stage text NOT NULL CHECK (stage IN ('scout','curator','scenario_architect','test_writer','critic','repair')),
+    task_index integer NOT NULL CHECK (task_index >= 0),
+    role text NOT NULL CHECK (role <> ''),
+    input_ids jsonb NOT NULL CHECK (jsonb_typeof(input_ids) = 'array'),
+    output jsonb NOT NULL CHECK (jsonb_typeof(output) = 'object'),
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (run_id, stage, task_index)
+);
+
 CREATE TABLE IF NOT EXISTS agent_setups (
     agent text PRIMARY KEY CHECK (agent IN ('analyst', 'test_generator', 'reviewer', 'coverage_analyzer')),
     role text NOT NULL CHECK (role <> ''),

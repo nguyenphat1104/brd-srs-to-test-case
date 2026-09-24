@@ -10,6 +10,7 @@ import brd_srs_testgen.providers as providers_module
 from brd_srs_testgen import runner
 from brd_srs_testgen.documents import DocumentError
 from brd_srs_testgen.models import (
+    AgentStageOutput,
     ArtifactBundle,
     CandidateRequirement,
     CandidateRequirementBatch,
@@ -30,6 +31,7 @@ from brd_srs_testgen.models import (
     RequirementBatch,
     ReviewResult,
     RunStatus,
+    RunResult,
     RunType,
     ValidationReport,
 )
@@ -1653,6 +1655,7 @@ def test_credential_bearing_urls_fail_before_persistence(base_url) -> None:
         {"provider": "gemini", "api_key": 1},
         {"thinking_level": "maximum"},
         {"agent_max_output_tokens": {"requirements": True}},
+        {"critic_enabled": "false"},
     ],
 )
 def test_provider_settings_reject_wrong_types(overrides) -> None:
@@ -1703,3 +1706,49 @@ def test_rerunning_the_same_document_creates_a_new_run_id(monkeypatch) -> None:
 
     assert first.manifest.run_id != second.manifest.run_id
     assert len(repository.created) == 2
+
+
+@pytest.mark.parametrize("fail", [False, True])
+@pytest.mark.parametrize("critic_enabled", [False, True])
+def test_runner_carries_budget_critic_setting_and_validated_blackboard(
+    monkeypatch, fail, critic_enabled
+) -> None:
+    row = AgentStageOutput(
+        stage="scout", task_index=0, role="scout",
+        input_ids=[chunk().chunk_id], output={"candidates": []},
+        created_at=datetime.now(UTC),
+    )
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+
+    def generate(context, _chunks):
+        assert context.token_ceiling == 42_000
+        assert context.critic_enabled is critic_enabled
+        assert context.agent_max_output_tokens == {"scout": 2_000}
+        context.stage_outputs.append(row)
+        if fail:
+            raise PipelineOutputError("Later handoff failed.")
+        return bundle()
+
+    monkeypatch.setitem(runner.PIPELINES, RunType.CENTRALIZED_MULTI_AGENT, generate)
+    result = run_generation(
+        b"pdf", "sample.pdf", RunType.CENTRALIZED_MULTI_AGENT,
+        settings(token_ceiling=42_000, critic_enabled=critic_enabled,
+                 agent_max_output_tokens={"scout": 2_000}),
+        repository=repository,
+        provider_factory=lambda _run_type, ledger: ScriptedProvider(ledger, []),
+    )
+    assert result.manifest.status is (RunStatus.FAILED if fail else RunStatus.COMPLETED)
+    assert result.manifest.configuration["critic_enabled"] is critic_enabled
+    assert result.stage_outputs == [row]
+    assert repository.finalized[0].stage_outputs == [row]
+    assert RunResult.model_validate_json(result.model_dump_json()) == result
+
+
+def test_normal_run_enables_critic_and_historical_result_defaults_to_empty_trace() -> None:
+    assert settings().snapshot(RunType.CENTRALIZED_MULTI_AGENT)["critic_enabled"] is True
+    from tests.factories import completed_run
+
+    historical = completed_run().model_dump(mode="json")
+    historical.pop("stage_outputs", None)
+    assert RunResult.model_validate(historical).stage_outputs == []

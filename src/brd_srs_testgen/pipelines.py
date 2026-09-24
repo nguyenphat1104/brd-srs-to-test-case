@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 from .documents import DocumentError, canonicalize_source_references
 from .models import (
     AgentSetup,
+    AgentStageOutput,
     ActivityEvent,
     ArtifactBundle,
     CandidateRequirement,
@@ -65,6 +67,14 @@ R = TypeVar("R")
 Messages = list[dict[str, str]]
 PROMPT_VERSION = "research-core-v4"
 MIN_OUTPUT_TOKENS = 1_024
+MULTI_AGENT_BUDGET_SHARES = {
+    "scout": 0.25,
+    "curator": 0.15,
+    "scenario_architect": 0.15,
+    "test_writer": 0.30,
+    "critic": 0.10,
+    "repair": 0.05,
+}
 LOCAL_EVIDENCE_CHARS_PER_TASK = 6_000
 STAGED_OUTPUT_TOKEN_DEFAULTS = {
     "requirements": 16_000,
@@ -80,6 +90,7 @@ class PipelineOutputError(ValueError):
 @dataclass
 class PipelineContext:
     provider: StructuredProvider
+    token_ceiling: int = 100_000
     providers: dict[str, StructuredProvider] = field(default_factory=dict)
     agent_setups: dict[str, AgentSetup] = field(default_factory=default_agent_setups)
     agent_prompts: dict[str, str] = field(default_factory=dict)
@@ -96,6 +107,7 @@ class PipelineContext:
     worker_limit: int = WORKER_COUNT
     bounded_tasks: bool = False
     critic_enabled: bool = True
+    stage_outputs: list[AgentStageOutput] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     @property
@@ -123,6 +135,27 @@ class PipelineContext:
     def _record_latency(self, latency_seconds: float) -> None:
         with self._lock:
             self.latency_seconds += latency_seconds
+
+    def record_stage(
+        self,
+        stage: str,
+        task_index: int,
+        input_ids: list[str],
+        output: BaseModel,
+        *,
+        role: str | None = None,
+    ) -> None:
+        row = AgentStageOutput(
+            stage=stage,
+            task_index=task_index,
+            role=role or stage,
+            input_ids=input_ids,
+            output=output.model_dump(mode="json"),
+            created_at=datetime.now(UTC),
+        )
+        with self._lock:
+            self.stage_outputs.append(row)
+            self.stage_outputs.sort(key=AgentStageOutput.order_key)
 
     def _output_budget(self, messages: Messages, schema: type[BaseModel], requested: int) -> int:
         if self.max_request_tokens is None:
@@ -199,7 +232,10 @@ class PipelineContext:
             output_budget = self._output_budget(
                 current_messages,
                 schema,
-                self.agent_max_output_tokens.get(agent, max_output_tokens),
+                # Hierarchical calls already apply configured caps to their allocation.
+                max_output_tokens
+                if agent in MULTI_AGENT_BUDGET_SHARES
+                else self.agent_max_output_tokens.get(agent, max_output_tokens),
             )
             started = time.perf_counter()
             try:
@@ -280,6 +316,14 @@ class PipelineContext:
         if use_history:
             messages.extend((prompt, _assistant(revised)))
         return revised
+
+
+def stage_output_tokens(
+    context: PipelineContext, stage: str, *, token_ceiling: int, task_count: int = 1
+) -> int:
+    allocation = int(token_ceiling * MULTI_AGENT_BUDGET_SHARES[stage] / task_count)
+    configured = context.agent_max_output_tokens.get(stage, allocation)
+    return max(MIN_OUTPUT_TOKENS, min(configured, allocation))
 
 
 def run_single_prompt(
@@ -807,14 +851,15 @@ def _critique_bundle(
                 )
             ],
             CriticReport,
-            8_000,
+            stage_output_tokens(context, "critic", token_ceiling=context.token_ceiling),
             agent="critic",
         ),
         chunks,
     )
+    target_ids = _validate_critic_scope(report, bundle)
+    context.record_stage("critic", 0, list(_artifacts_by_id(bundle)), report)
     if report.accepted:
         return bundle
-    target_ids = _validate_critic_scope(report, bundle)
     role = _repair_role(report.findings)
     repaired = context.generate(
         [
@@ -828,12 +873,17 @@ def _critique_bundle(
             )
         ],
         ArtifactBundle,
-        16_000,
+        stage_output_tokens(context, "repair", token_ceiling=context.token_ceiling),
         agent=role,
     )
     if _semantic_payload(repaired) == _semantic_payload(bundle):
         raise PipelineOutputError("Repair changed links only.")
     _validate_repair_scope(bundle, repaired, target_ids)
+    context.record_stage(
+        "repair", 0,
+        [finding.finding_id for finding in report.findings] + sorted(target_ids),
+        repaired, role=role,
+    )
     with context._lock:
         context.semantic_revisions += 1
     return repaired
@@ -874,11 +924,18 @@ def run_centralized_multi_agent(
                 )
             ],
             CandidateRequirementBatch,
-            8_000,
+            stage_output_tokens(
+                context, "scout", token_ceiling=context.token_ceiling,
+                task_count=len(chunk_groups),
+            ),
             cancellation_event=cancellation_event,
             agent="scout",
         )
-        return _canonicalize_scout_candidates(worker_index, batch, group)
+        batch = _canonicalize_scout_candidates(worker_index, batch, group)
+        context.record_stage(
+            "scout", worker_index, [item.chunk_id for item in group], batch
+        )
+        return batch
 
     worker_candidates = _run_parallel_workers(
         chunk_groups,
@@ -923,12 +980,15 @@ def run_centralized_multi_agent(
                 )
             ],
             RequirementSynthesis,
-            8_000,
+            stage_output_tokens(context, "curator", token_ceiling=context.token_ceiling),
             agent="curator",
         ),
         chunks,
     )
     _validate_synthesis(candidates, synthesis)
+    context.record_stage(
+        "curator", 0, [item.candidate_id for item in candidates], synthesis
+    )
     requirements = RequirementBatch(requirements=synthesis.requirements)
     context.notify(
         f"Orchestrator: reconciled {len(requirements.requirements)} canonical requirements.",
@@ -951,12 +1011,18 @@ def run_centralized_multi_agent(
                 )
             ],
             ScenarioBatch,
-            16_000,
+            stage_output_tokens(
+                context, "scenario_architect", token_ceiling=context.token_ceiling
+            ),
             agent="scenario_architect",
         ),
         chunks,
     )
     _validate_scenario_batch(scenario_batch, requirements.requirements)
+    context.record_stage(
+        "scenario_architect", 0,
+        [item.requirement_id for item in requirements.requirements], scenario_batch,
+    )
     context.notify(
         f"Scenario Architect: planned {len(scenario_batch.scenarios)} canonical scenarios.",
         agent="Scenario Architect",
@@ -986,7 +1052,9 @@ def run_centralized_multi_agent(
         cancellation_event: threading.Event,
     ) -> TestCaseBatch:
         if not group:
-            return TestCaseBatch(test_cases=[])
+            batch = TestCaseBatch(test_cases=[])
+            context.record_stage("test_writer", worker_index, [], batch)
+            return batch
         assigned_ids = {
             requirement_id
             for scenario in group
@@ -1019,13 +1087,23 @@ def run_centralized_multi_agent(
                     )
                 ],
                 TestCaseBatch,
-                8_000,
+                stage_output_tokens(
+                    context, "test_writer", token_ceiling=context.token_ceiling,
+                    task_count=len(scenario_groups),
+                ),
                 cancellation_event=cancellation_event,
                 agent="test_writer",
             ),
             relevant_chunks,
         )
         _validate_writer_cases(worker_index, batch, group)
+        context.record_stage(
+            "test_writer", worker_index,
+            [item.scenario_id for item in group] + [
+                item.requirement_id for item in [*assigned_requirements, *dependencies]
+            ],
+            batch,
+        )
         return batch
 
     worker_cases = _run_parallel_workers(
