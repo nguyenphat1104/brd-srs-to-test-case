@@ -10,6 +10,7 @@ from brd_srs_testgen.evaluation import (
     coverage_rating,
 )
 from brd_srs_testgen.models import (
+    AgentStageOutput,
     AgentSetup,
     ActivityEvent,
     CoverageCatalog,
@@ -1127,6 +1128,116 @@ def test_quality_chart_surfaces_the_lowest_coverage_gap() -> None:
     assert "quality-chart__bar--critical" in text
     assert "quality-chart__bar--partial" in text
     assert "quality-chart__bar--complete" in text
+
+
+def test_multi_agent_detail_renders_ordered_blackboard_with_raw_outputs() -> None:
+    result = _detailed_run()
+    created_at = datetime(2026, 9, 24, tzinfo=UTC)
+    rows = [
+        AgentStageOutput(
+            stage=stage,
+            task_index=task_index,
+            role=role,
+            input_ids=input_ids,
+            output=output,
+            created_at=created_at,
+        )
+        for stage, task_index, role, input_ids, output in (
+            ("test_writer", 1, "test_writer", ["SCN-002"], {}),
+            ("repair", 0, "test_writer", ["FIND-001"], {"test_cases": []}),
+            (
+                "curator",
+                0,
+                "curator",
+                ["CAND-001-001"],
+                {"decisions": [{"action": "retain"}], "requirements": [{}]},
+            ),
+            (
+                "scout",
+                1,
+                "Historical evidence scout",
+                ["chunk-b"],
+                {"candidates": []},
+            ),
+            (
+                "critic",
+                0,
+                "critic",
+                ["TC-001"],
+                {
+                    "accepted": False,
+                    "findings": [{"finding_id": "FIND-001", "note": "<script>"}],
+                },
+            ),
+            (
+                "scenario_architect",
+                0,
+                "scenario_architect",
+                ["REQ-001"],
+                {"scenarios": [{}]},
+            ),
+            ("scout", 0, "scout", ["chunk-a"], {"candidates": [{}]}),
+            ("test_writer", 0, "test_writer", ["SCN-001"], {"test_cases": [{}]}),
+        )
+    ]
+    agents = {
+        role: {"model": f"saved-{role}"}
+        for role in ("scout", "curator", "scenario_architect", "test_writer", "critic")
+    }
+    agents["critic"] = {"legacy_model": "historical-critic"}
+    result = result.model_copy(
+        update={
+            "manifest": result.manifest.model_copy(
+                update={
+                    "run_type": RunType.CENTRALIZED_MULTI_AGENT,
+                    "configuration": {"agents": agents},
+                }
+            ),
+            "stage_outputs": rows,
+        }
+    )
+    at = _app_test()
+    _show_detail(at, result)
+
+    at.run()
+
+    assert not at.exception
+    assert [
+        item.label for item in at.expander if item.label.startswith("Raw output ·")
+    ] == [
+        "Raw output · Scout task 1",
+        "Raw output · Scout task 2",
+        "Raw output · Curator",
+        "Raw output · Scenario architect",
+        "Raw output · Test writer task 1",
+        "Raw output · Test writer task 2",
+        "Raw output · Critic",
+        "Raw output · Repair",
+    ]
+    text = _rendered_text(at)
+    assert "Agent blackboard" in text
+    assert "Scout task 1" in text
+    assert "Historical evidence scout" in text
+    assert "Model: saved-scout" in text
+    assert "Scope: chunk-a" in text
+    assert "1 candidate requirement" in text
+    assert "1 decision · 1 canonical requirement" in text
+    assert "1 canonical scenario" in text
+    assert "Changes requested · 1 finding" in text
+    assert "Repair occurred · routed to Test writer" in text
+    assert any('"note": "<script>"' in item.value for item in at.code)
+
+
+def test_legacy_run_without_blackboard_still_renders() -> None:
+    result = _detailed_run()
+    at = _app_test()
+    _show_detail(at, result)
+
+    at.run()
+
+    assert not at.exception
+    assert _element(at.button, "Open test case TC-001 detail")
+    assert "Agent blackboard" not in _rendered_text(at)
 
 
 def test_failed_result_without_metrics_has_an_actionable_summary() -> None:

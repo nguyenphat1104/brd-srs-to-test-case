@@ -16,6 +16,7 @@ from brd_srs_testgen.evaluation import (
     summarize_human_agreement,
 )
 from brd_srs_testgen.models import (
+    AgentStageOutput,
     AgentSetup,
     ActivityEvent,
     ArtifactBundle,
@@ -1161,6 +1162,95 @@ def _render_activity(activity, event: str) -> None:
                 st.caption(f"Published to Artifacts · {event.artifact_label}")
 
 
+def _stage_output_summary(row: AgentStageOutput) -> str:
+    def count(key: str) -> int:
+        value = row.output.get(key)
+        return len(value) if isinstance(value, list) else 0
+
+    if row.stage == "scout":
+        total = count("candidates")
+        return f"{total} candidate requirement{'s' if total != 1 else ''}"
+    if row.stage == "curator":
+        decisions, requirements = count("decisions"), count("requirements")
+        return (
+            f"{decisions} decision{'s' if decisions != 1 else ''} · "
+            f"{requirements} canonical requirement{'s' if requirements != 1 else ''}"
+        )
+    if row.stage == "scenario_architect":
+        total = count("scenarios")
+        return f"{total} canonical scenario{'s' if total != 1 else ''}"
+    if row.stage == "test_writer":
+        total = count("test_cases")
+        return f"{total} test case{'s' if total != 1 else ''}"
+    if row.stage == "critic":
+        total = count("findings")
+        decision = (
+            "Accepted"
+            if row.output.get("accepted") is True
+            else "Changes requested"
+            if row.output.get("accepted") is False
+            else "Review recorded"
+        )
+        return f"{decision} · {total} finding{'s' if total != 1 else ''}"
+    return "Repaired artifact bundle persisted"
+
+
+def _render_agent_blackboard(result: RunResult) -> None:
+    if not result.stage_outputs:
+        return
+
+    st.markdown("### Agent blackboard")
+    st.caption("Persisted typed handoffs in deterministic pipeline order.")
+    agents = result.manifest.configuration.get("agents")
+    agents = agents if isinstance(agents, dict) else {}
+    rows = sorted(result.stage_outputs, key=AgentStageOutput.order_key)
+    for row in rows:
+        label = RUN_AGENT_LABELS.get(row.stage, row.stage.replace("_", " ").title())
+        if row.stage in {"scout", "test_writer"}:
+            label = f"{label} task {row.task_index + 1}"
+        role = RUN_AGENT_LABELS.get(row.role, row.role)
+        configuration_key = row.role if row.stage == "repair" else row.stage
+        raw_configuration = agents.get(configuration_key)
+        raw_model = (
+            raw_configuration.get("model")
+            if isinstance(raw_configuration, dict)
+            else None
+        )
+        model = raw_model if isinstance(raw_model, str) else ""
+        _render_activity(
+            st.container(),
+            ActivityEvent(
+                f"{label} completed and saved its typed output.",
+                agent=label,
+                role=role,
+                model=model,
+                state="complete",
+                task=_stage_output_summary(row),
+                scope=", ".join(row.input_ids) or "No recorded input IDs",
+                deliverable="Persisted blackboard record",
+            ),
+        )
+        with st.expander(
+            f"Raw output · {label}",
+            key=(
+                f"blackboard-{result.manifest.run_id}-{row.stage}-{row.task_index}"
+            ),
+        ):
+            st.code(_json(row.output), language="json")
+
+    repair = next((row for row in rows if row.stage == "repair"), None)
+    critic = next((row for row in rows if row.stage == "critic"), None)
+    if repair is not None:
+        role = RUN_AGENT_LABELS.get(repair.role, repair.role)
+        st.caption(f"Repair occurred · routed to {role}")
+    elif critic is None:
+        st.caption("Repair not reached in this trace.")
+    elif critic.output.get("accepted") is True:
+        st.caption("Repair not required · Critic accepted the bundle.")
+    else:
+        st.caption("Repair not recorded · the trace ended after Critic findings.")
+
+
 def _scroll_live_feed() -> None:
     components.html(
         """
@@ -2095,6 +2185,8 @@ def _render_result(
                 f"{manifest.run_id}-bundle.json",
                 f"{key_prefix}-{manifest.run_id}-bundle",
             )
+
+    _render_agent_blackboard(result)
 
     st.markdown("### Quality and traceability")
     if manifest.status is RunStatus.COMPLETED and result.bundle is not None:
