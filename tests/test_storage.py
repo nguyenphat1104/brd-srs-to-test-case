@@ -1553,7 +1553,7 @@ def test_duplicate_blackboard_rows_roll_back_finalization(repository) -> None:
     start_run(repository, result)
     with pytest.raises(StorageError) as raised:
         repository.finalize(result)
-    assert isinstance(raised.value.__cause__, psycopg.errors.UniqueViolation)
+    assert "Duplicate stage outputs" in str(raised.value)
     loaded = repository.load_run(result.manifest.run_id)
     assert loaded.manifest.status is RunStatus.RUNNING
     assert loaded.stage_outputs == []

@@ -1,0 +1,176 @@
+document	page	type	title	description	anchor
+D001	5	functional	Standalone operation	The Model Manager can run without knowledge of a MetVault.	it can also run as a stand-alone application
+D001	5	functional	MetVault integration	The Model Manager can run in conjunction with the MetVault.	The MM can run in conjunction with the MetVault
+D001	5	functional	Web interface	The Model Manager is accessible through a web-based GUI.	accessible from a web-based GUI and a command line tool
+D001	5	functional	Command-line interface	The Model Manager is accessible through a command-line tool.	accessible from a web-based GUI and a command line tool
+D001	6	functional	Automatic cluster allocation	The Model Manager chooses the cluster or clusters on which a submitted job runs.	the MM will make the decision on what cluster(s)
+D001	6	functional	Explicit cluster selection	The user can specify the cluster for a customized job.	the option to specify what cluster
+D001	6	functional	Multi-cluster ensembles	RTFDDA and climoFDDA ensembles can run across several clusters.	allow RTFDDA and climoFDDA ensembles
+D001	6	functional	Submission routes	After choosing to submit a new job the user can choose model setup, post-processing setup, by-hand submission or a configuration file.	the following options to choose from
+D001	6	functional	Model job categories	Model-job setup offers Weather FDDA and Climo choices.	presented with two more options
+D001	6	functional	Editable GMOD defaults	The Model Manager provides a default GMOD configuration that the user can change; exact defaults are not specified.	provide a default GMOD job configuration
+D001	6	functional	Custom GMOD setup	The setup module accepts custom input data, pre-processors and executables for GMOD jobs.	the user may choose to supply his/her own input data
+D001	7	constraint	Custom resource placement	Users are responsible for placing custom scripts and executables on the clusters where the job will run.	it is the user's responsibility
+D001	6	constraint	RTFDDA ensemble submission	RTFDDA ensemble jobs are submitted as by-hand jobs or through a configuration file in the described scope.	RTFDDA ensemble jobs will be submitted
+D001	7	functional	Weather model choice	The user selects MM5 or WRF for a Weather FDDA job.	User decides what model should be used
+D001	7	functional	Weather job identifier	The user defines a JOBID for a Weather FDDA job.	User defines a JOBID
+D001	7	functional	Weather scheduling	The user specifies when a Weather FDDA job runs and/or its cycle.	User defines when a job is to be run
+D001	7	business_rule	Past-cycle classification	A cycle in the past prompts the user to identify the job as a case study or re-run.	If the cycle time is in the past
+D001	7	functional	Weather job parameters	The user supplies job-specific information including cycle interval and forecast length.	User supplies other job specific information
+D001	7	functional	Sigma configuration	The user can choose a predefined sigma-level configuration or supply a custom one.	User can choose between predefined sigma-level configurations
+D001	7	functional	Weather node count	The user can specify the number of nodes for a Weather FDDA job.	the option to specify the number of nodes
+D001	7	functional	Weather notifications	The user can choose email notification at job start, end and termination.	receive email notification upon start
+D001	7	functional	IC/BC source selection	The user can select standard or custom IC/BC data sources; the source lists ETA, AVNFTP (GFS) and GFS004 examples.	User chooses between standard or custom IC/BC data sources
+D001	7	functional	Off-line IC/BC input	For off-line jobs the user must specify the IC/BC data location and time period.	For off-line jobs, the user must specify the data source
+D001	7	business_rule	Historical IC/BC data	For a re-run using MetVault, retrieve the data available and used in the original cycle.	MetVault returns the data that was available and used in that cycle
+D001	7	functional	IC/BC processor selection	The user can choose standard IC/BC processing or provide a custom pre-processing script.	user can provide custom IC/BC pre-processor
+D001	8	functional	Additional IC/BC processing	The user can run additional IC/BC pre-processing, supply a custom processor or skip it.	the option to run additional pre-processors
+D001	8	functional	Observation input configuration	The user can select standard and/or custom observation data sources with their associated processing.	User chooses between standard and/or custom obs data sources and processing
+D001	8	functional	Off-line observation input	For off-line jobs the observation data source location and time period must be specified.	For off-line jobs, the user must specify the data source
+D001	8	business_rule	Historical observation data	Observation data for a MetVault re-run is the data available and used in that cycle.	MetVault returns the data that was available and used in that cycle
+D001	8	functional	MM5 executable selection	MM5 executable choices depend on the selected domain size and node count.	Based on both choices, the user is presented
+D001	8	functional	MM5 compile information	The Model Manager can retrieve executable compile information such as domain size, node count and sigma levels.	retrieve the compile info about the executables
+D001	8	functional	Custom MM5 executable	The user can supply a custom executable by its cluster location.	the user can also supply own executable
+D001	8	functional	Weather output storage	The user can save model output to MetVault and must specify the output file to send.	User can choose to save the model output in MetVault
+D001	8	business_rule	Weather immediate submission	Immediate submission runs IC/BC processing, observation processing and the model without post-processing.	Submitting now, would run IC/BC-data and obs processing
+D001	8	functional	Weather optional post-processing	The user chooses whether to run post-processing for a Weather FDDA job.	User chooses whether or not to run post-processing
+D001	8	functional	Weather configuration saving	The user can save the Weather FDDA job configuration, including saving it to a file.	User can save the above job configuration
+D001	9	constraint	ClimoFDDA scope	The described Climo setup supports ClimoFDDA; CAM configuration is not specified.	At this point, the MM only supports
+D001	9	functional	Climo job identifier	The user defines a JOBID for a ClimoFDDA job.	User defines a JOBID
+D001	9	functional	Climo domain	The user determines the domain location for a ClimoFDDA job.	User determines the domain location
+D001	9	functional	Climo MM5 setup	The user selects a pre-configured MM5 setup for a ClimoFDDA job.	User picks a pre-configured MM5 setup
+D001	9	functional	Climo time range	The user supplies ClimoFDDA start time, end time and years.	User sets the time line for the job
+D001	9	functional	Climo ensemble options	The user can configure listed ensemble options including hourly output, minimum, maximum, mean, standard deviation, diurnal cycle and typical moment; unspecified alternatives remain unresolved.	User sets the ensemble options
+D001	9	functional	Climo node request	The user can request the number of nodes for a ClimoFDDA job.	User can request the number of nodes
+D001	9	functional	Climo output storage	The user can save ClimoFDDA output in MetVault and specifies which member and/or ensemble output is sent.	User can choose to save the model output in MetVault
+D001	9	business_rule	Climo immediate submission	Immediate ClimoFDDA submission runs members, ensemble and possible model-output processing without post-processing.	Submitting now, would run the member models
+D001	9	functional	Ensemble post-processing	The user can choose whether to post-process ensemble output and select supported output products.	User chooses whether or not to run post-processing on the ensemble output
+D001	9	functional	Ensemble product destination	Each selected ensemble output product requires a destination host and location.	For each output product, the user is prompted
+D001	10	functional	Member post-processing	The user can choose which member years to post-process, the post-processors and output destinations.	S/he can specify which year-output
+D001	10	functional	Climo configuration saving	The user can save a ClimoFDDA configuration, including to a file, before submitting it.	User can save the above job configuration
+D001	10	functional	Post-processing existing output	A standalone post-processing job can use an existing model output file.	If the model output file already exists
+D001	10	functional	Post-processing future output	If output will come from a running or scheduled FDDA job, the user identifies it by JOBID and cycle time.	If the model output file will be produced
+D001	10	functional	Post-processing product selection	The user chooses a post-processing type from the supplied options; the MEDOC range is marked uncertain in the source.	User chooses the type of post-processing
+D001	10	functional	Post-processing configuration	For a selected post-processing option the user can provide a custom configuration when applicable or use the default.	the user can supply a custom configuration file
+D001	10	functional	Post-processing destination	The user must supply the destination location for post-processing output products.	User must supply destination location
+D001	10	functional	Post-processing configuration saving	The user can save post-processing settings, including to a file.	User can save this job's setting
+D001	11	functional	By-hand registration	The user registers a job already set up on the selected cluster with the Model Manager.	then register the job with the MM
+D001	11	constraint	By-hand job ID	By-hand registration requires a job ID.	job id (GMUAE, GWDPG,...)
+D001	11	constraint	By-hand script location	By-hand registration requires the script host and full path.	location of the script
+D001	11	constraint	By-hand start time	By-hand registration requires the time when the script should run.	time when to run the script
+D001	11	constraint	By-hand duration estimate	By-hand registration requires an estimated script duration.	estimated time of how long the script will run
+D001	11	constraint	By-hand executable names	By-hand registration requires executable names.	name(s) of executable(s)
+D001	11	constraint	By-hand executable runtime	By-hand registration requires the maximum runtime for the executables.	max. runtime for the executable(s)
+D001	11	constraint	By-hand output location	By-hand registration requires the location of output products.	location of output products
+D001	11	functional	By-hand optional metadata	By-hand job frequency, job type and additional information are optional.	frequency of how often the script should run
+D001	11	functional	By-hand configuration saving	The user can save by-hand job settings, including to a file.	User can save the job's settings
+D001	11	functional	By-hand queue visibility	A submitted by-hand job is visible in the user's job queue.	User can view his/her job in the job queue
+D001	11	functional	By-hand notifications	The user can receive email when a by-hand job starts, finishes or is killed.	User can receive an email notification
+D001	11	business_rule	Custom completion notification	A custom job must notify the Model Manager when it is done.	'custom' job will need to notify the MM when done
+D001	11	functional	Load configuration file	The Model Manager can load a job configuration supplied in a file.	load a job configuration into MM from a file
+D001	12	functional	Edit loaded configuration	The user can change a configuration loaded from a file.	User can make changes to the configuration
+D001	12	functional	Save loaded configuration	The user can save changes made to a configuration loaded from a file.	User can save the changed configuration
+D001	12	functional	Submit loaded configuration	The user can submit the job after loading and optionally changing its configuration.	5. User submits the job
+D001	12	functional	Authenticated access	The user logs in using a user ID and password to retrieve configurations or view jobs.	User logs on with user id/password
+D001	12	functional	Retrieve own saved configurations	The user can view previously saved job configurations and select one.	User chooses to look at his/her previously saved job configurations
+D001	12	functional	Change or delete saved configuration	The user can change or delete a selected saved job configuration.	User can change or delete this job configuration
+D001	12	functional	Save and resubmit configuration	The user can save a changed saved-job configuration and submit the job again.	User can save the changed job configuration
+D001	12	functional	Job view filters	The user can view running, scheduled, past or all jobs.	User chooses to look at all running jobs
+D001	13	functional	Job details	The user can select a job for more detailed information; exact fields remain TBD.	User can select a job and receive more detailed information
+D001	13	functional	Job logs	The user can view a job's log files.	User can look at a jobs log files
+D001	13	functional	Delete own queued jobs	An ordinary user can delete their own jobs from the queue.	User can delete his/her jobs from the job queue
+D001	13	functional	Delete any queued job	A super user can delete any job from the queue.	A “super user” can delete any job
+D001	13	functional	Stop own running job	An ordinary user can stop their own running job.	User can stop his/her running job
+D001	13	functional	Stop any running job	A super user can stop any running job.	A “super user” can stop any running job
+D001	13	functional	Restart own job	An ordinary user can restart their own job.	User can re-start his/her job
+D001	13	functional	Restart any job	A super user can restart any job.	A “super user” can re-start any job
+D001	13	functional	Resume own stopped job	An ordinary user can resume their own stopped job.	User can resume his/her stopped job
+D001	13	functional	Resume any stopped job	A super user can resume any stopped job.	A “super user” can resume any stopped job
+D002	5	functional	General user control	A general user can monitor and control their home's environment.	3.2.1.1
+D002	5	functional	Master user configuration	A master user can change configuration, including accounts and default settings, and has technician rights.	A Master user will be designated
+D002	6	functional	Technician configuration	A technician can set system parameters and establish accounts.	capable of setting up and making changes
+D002	6	functional	Technician operation control	A technician can start and stop the DigitalHome system.	starting and stopping operation
+D002	6	constraint	Prototype schedule	The prototype must be completed within twelve months of inception; verify by project inspection.	must be completed within twelve months
+D002	6	constraint	Development team size	The source specifies five engineers for the development team; verify as a process constraint.	development team will consist of five
+D002	6	constraint	Development process	The team uses the company-specified development process; the supplied PDF does not define its detailed steps.	use the development process specified
+D002	6	constraint	Established technologies	Where possible the project uses widely used, accepted and available technologies and standards.	Where possible
+D002	6	business_rule	Cost comparison report	The final report describes cost-minimization efforts including comparisons with competing components.	describe their efforts to minimize costs
+D002	6	constraint	Realistic simulation	Home, sensors and controllers are simulated and must adhere to realistic physical properties and constraints.	the simulated environment will be realistic
+D002	6	business_rule	Requirement change approval	Major requirements changes require approval from the division director.	Major changes to this document
+D002	7	constraint	Internet service	The home system requires a widely available broadband ISP.	The home system shall require
+D002	7	functional	Home server provisioning	The system can establish an individual home web server on a home computer.	es tablish an individual home web server
+D002	7	functional	Home server device control	The home web server supports interaction with and control of DigitalHome elements.	Interaction with and control of the DH elements
+D002	7	functional	Plan and data storage	The home web server stores DigitalHome plans and data.	Storage of DH plans and data
+D002	7	functional	User account management	The home web server can establish and maintain user accounts.	Ability to establish and maintain DH User
+D002	7	functional	Home server backup	The home web server backs up account information, user plans and the home database.	Provide backup service for user account
+D002	7	functional	Gateway connectivity	The gateway connects to broadband Internet and communicates with all DigitalHome devices.	provide communi cation with all
+D002	7	functional	Wireless RF communication	The gateway's RF module sends and receives wireless communications with sensors and controllers.	The Gateway shall contain an RF Module
+D002	7	functional	Thermostat reading	A thermostat provides the current temperature at its location.	provide a reading of the cu rrent temperature
+D002	7	functional	Thermostat regulation	The thermostat controls heating or cooling to achieve its set point.	by switching heating or cooling devices
+D002	7	constraint	Sensor temperature range	The thermostat sensor's sensitivity range is 14–104°F, equivalent to −10–40°C.	sensitiv ity range
+D002	7	functional	Humidistat reading	A humidistat provides the current humidity at its location.	provide a reading of the cu rrent humidity
+D002	8	functional	Humidistat regulation	The humidistat uses a set point to control humidifiers and dehumidifiers.	control humidifiers and dehumidifiers
+D002	8	functional	Active contact monitoring	Active magnetic contact switches monitor entry through doors or windows.	monitor entry through a door or window
+D002	8	functional	Alarm hardware	The system includes sound and light alarms activated for the specified magnetic-contact breach.	security sound and light alarms
+D002	8	functional	Remote web control	Users can control temperature, humidity, lighting, security and appliances using a web-ready computer, phone or PDA.	allow a web-read y computer
+D002	8	functional	Wireless sensor persistence	Sensor readings obtained wirelessly can be saved in the home database.	sensor values c an be read and saved
+D002	8	functional	Controller commands	The system sends controller values to change the home environment.	Controller values can be sent
+D002	9	constraint	Temperature setting range	User thermostat set points are 60–80°F inclusive.	between 60 ° F and 80 ° F
+D002	9	constraint	Temperature increments	User thermostat set points use one-degree increments.	inclusive, at one degree increments
+D002	9	constraint	Thermostat capacity	The system supports up to eight thermostats.	Up to eight thermostats
+D002	9	functional	Individual and collective temperature control	Thermostats can be controlled individually or collectively.	controlled individua lly or collectively
+D002	9	constraint	Thermostat placement	A single thermostat is placed in each enclosed space whose temperature is controlled.	A single thermostat shall be placed
+D002	9	functional	Thermostat weekly schedule	Each thermostat supports up to 24 one-hour settings per day for every day of the week.	up to twenty-four one hour settings per day
+D002	9	business_rule	Thermostat override expiry	A manual thermostat setting, when supported, lasts until the current planned/default period ends, then the next period's setting applies.	the setting shall remain in effect until
+D002	9	functional	Temperature units	The system supports Fahrenheit and Celsius temperature values.	support Fahrenheit and Celsi us temperature
+D002	9	constraint	HVAC compatibility	The system is compatible with centralized HVAC powered by gas, oil, electricity, solar or combinations.	gas, oil, electricity, solar
+D002	9	constraint	ASHRAE adherence	The system must adhere to the referenced ASHRAE standards, policies and procedures; detailed external rules are not supplied.	adhere to the standards, policies and procedures
+D002	9	constraint	Humidity setting range	User humidity set points are 30–60% inclusive.	from 30% to 60%
+D002	9	constraint	Humidity increments	User humidity set points use 1% increments.	inclusive a 1% increments
+D002	9	constraint	Humidistat capacity	The system supports up to eight humidistats.	Up to eight humidistats
+D002	9	constraint	Humidistat placement	A single humidistat is placed in each enclosed space whose humidity is controlled.	A single humidistat shall be placed
+D002	10	functional	Humidistat weekly schedule	Each humidistat supports up to 24 one-hour settings per day for every day of the week.	For each humidistat
+D002	10	functional	Wireless humidistat communication	The system communicates wirelessly with humidistats through the master control unit.	use wireless signa ls to communicate
+D002	10	constraint	Contact sensor capacity	The system manages up to 50 door and window contact sensors.	up to fifty door and window contact sensors
+D002	10	constraint	Alarm subsystem configuration	The system supports one sound alarm subsystem and one light alarm subsystem with multiple lights.	one sound alarm and one light alarm subsystem
+D002	10	business_rule	Security alarm trigger	A security breach with the contact sensor set OPEN activates the alarm system.	When a security breach occurs
+D002	10	constraint	Power switch capacity	The appliance manager supports up to 100 power switches.	up to one hundred
+D002	10	constraint	Power switch rating	The supported power switches are rated 115 volts and 10 amps.	115 volt, 10 amp power switches
+D002	10	functional	Appliance state reading	The system reports power-switch ON/OFF state and the connected appliance state.	provide informat ion about the state of a power switch
+D002	10	functional	Appliance state changes	The system changes switches from OFF to ON and ON to OFF.	change the state of a power switch
+D002	10	business_rule	Appliance override expiry	A manual power-switch change lasts until the current planned/default period ends, then the next period's setting applies.	If a user changes the state of power switch
+D002	10	functional	Parameter planning	The planner schedules temperature, humidity, security contacts and appliance/light states for specified time periods.	set various preset home parameters
+D002	11	functional	Monthly plan editing	For a selected month/year a user can create or modify the daily parameter plan with up to four time periods per day.	modify a month plan that specifies
+D002	11	functional	Planned-value override	A user can override planned parameters on the website or using manual device switches when available.	A user shall be able to override
+D002	11	constraint	Report history	Monthly management/control reports are available for a selected month/year within the past two years.	in the past two y ears
+D002	11	functional	Environmental report statistics	Monthly reports show daily averages and timed maxima/minima for temperature and humidity by device.	daily averag e, maximum
+D002	11	functional	Security event report	Monthly reports include the day and time of security alarm activations.	provide the day and time
+D002	11	functional	Downtime report	Monthly reports include periods when the system was not operating.	periods of time when the DH System was not
+D002	11	non_functional	Display update rate	Environmental displays update at least every two seconds.	updated at least every two seconds
+D002	11	non_functional	Sensor acquisition rate	Sensors have a minimum data acquisition rate of 10 Hz.	minimum data acquisition rate of 10 Hz
+D002	11	constraint	Communication range	An environmental sensor/controller must be within 1,000 feet of the master control device to communicate.	1000 feet of the master control device
+D002	11	non_functional	Reliability limit	The system has no more than one failure per 10,000 operating hours.	no more than 1 failure per 10,000 hours
+D002	11	functional	Daily backup	The system backs up configuration, defaults, plans and usage data daily.	backup all system data
+D002	11	functional	Backup time configuration	The technician sets backup time during system setup.	the backup time set by the DH Technician
+D002	11	functional	Latest-backup recovery	After the specified power, Internet, software or hardware failures, recover system data from the most recent backup.	the system recovery mechanism shall restore
+D002	12	functional	Descriptive error response	All operations handle exceptions and show a clear descriptive message for errors or exceptional conditions.	clear, descriptive message when
+D002	12	functional	Installation account	A DigitalHome user account is established upon installation.	Upon installation
+D002	12	non_functional	Authentication protection	The web system provides authentication using recognized reliable security technology.	provide for authentication and information encryption
+D002	12	non_functional	Information encryption	The web system encrypts information using recognized reliable security technology such as TLS.	information encryption through a recognized
+D002	12	functional	Login credentials	Account login requires an account name and password.	a n account name and a password
+D002	12	constraint	Development documentation	Maintenance support includes documentation of requirements, design and code.	Documentation of requirements, design, and code
+D002	12	constraint	Maintainable design	Maintenance support includes abstraction, information hiding and module independence.	Use of abstraction, information hiding
+D002	12	constraint	Development standards	Development uses the listed IEEE standards and HomeOwner coding standard; their detailed contents are outside the supplied PDF.	Use of IEEE standards
+D002	12	constraint	Reusable prototype components	Prototype modules/components are designed and implemented for incorporation into a fully specified commercial version.	may be incorporated in a fully specified commercial version
+D002	12	business_rule	Final document currency	At project completion, system documents are up to date.	shall be up-to-date
+D002	12	business_rule	Final document format	System documents use the HomeOwner document format at project completion.	use the Homeowner document format
+D002	12	business_rule	Final document archive	System documents reside in the HomeOwner document archive at project completion.	reside in the HomeOwner Document Archive
+D002	12	business_rule	Development-method exceptions	Object-oriented development with UML 2.0 is preferred; exceptions require CIO approval.	Exceptions to this rule must be approved
+D002	13	functional	Online user documentation	The system provides online documentation for the installation in the user's home.	online documentation about the DigitalHome system
+D002	13	functional	FAQ help	User documentation includes an FAQ about system use and maintenance.	An FAQ section
+D002	13	functional	Parameter and sensor help	User documentation explains parameter settings, sensor readings and their limits/accuracy.	information on limitations and constraints
+D002	13	functional	Planner help	User documentation explains how to use the DigitalHome planner.	A section that describes how to use the DH Planner
+D001	8	functional	Submit configured Weather job	The user can submit a configured Weather FDDA job after the selected setup steps.	User submits the job.
+D001	10	functional	Submit configured Climo job	The user can submit a configured ClimoFDDA job after the selected setup steps.	User submits the job.
+D001	11	functional	Submit post-processing job	The user can submit a configured standalone post-processing job.	8. User submits job.
+D001	11	functional	Submit by-hand job	The user can submit a registered by-hand job.	4. User submits job.

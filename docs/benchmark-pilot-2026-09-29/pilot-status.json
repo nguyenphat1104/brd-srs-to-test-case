@@ -1,0 +1,39 @@
+{
+  "updated_at": "2026-09-30T04:46:17.635130+00:00",
+  "state": "comparisons_verified_human_ratings_pending",
+  "total_authorized_tokens": 1600000,
+  "catalog_preparation_accounted_tokens": 23613,
+  "remaining_trial_budget_tokens": 1576387,
+  "benchmark_trials_executed": 8,
+  "human_catalogs_approved": 2,
+  "human_ratings_collected": 0,
+  "catalogs": {
+    "D001": {
+      "file": "D001-catalog.draft.json",
+      "sha256": "8706c9c3f067e3a22795fdbd2e39185716103d6c8712de3ec0d513229bd93ef0",
+      "units": 91
+    },
+    "D002": {
+      "file": "D002-catalog.draft.json",
+      "sha256": "dd98d7d42e85e52bf2ca602c1a5e87f5439dc0cc717fcc8cb5d8bedad12c6675",
+      "units": 84
+    }
+  },
+  "preparation_method": "One failed bounded Gemini catalog attempt, followed by assistant-authored source-only drafts. No additional Gemini requests after the failure.",
+  "manifest_sha256": "104a5ec1aadb19ca5a91ae8f7dfc8135501ba75f5d9a2d02b250ba5bf112f99d",
+  "validation": "All eight trial records reconcile with their per-call costs; source and catalog hashes match. Quality preservation is not established; two independent human ratings remain pending.",
+  "comparison_accounted_tokens": 498715,
+  "total_accounted_tokens": 522328,
+  "remaining_authorized_tokens": 1077672,
+  "completed_generation_runs": 4,
+  "failed_generation_runs": 4,
+  "automated_evaluations_available": 4,
+  "comparison_paid_call_attempts": 56,
+  "comparison_blocked_call_attempts": 1,
+  "review_package": "results/blind/START-HERE.md",
+  "report": "cost-and-quality-report.md",
+  "catalog_preparation_paid_call_attempts": 3,
+  "catalog_preparation_completed_calls": 1,
+  "catalog_preparation_failed_calls": 2,
+  "verification": "verification.json"
+}

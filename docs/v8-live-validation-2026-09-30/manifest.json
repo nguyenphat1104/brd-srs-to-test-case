@@ -1,0 +1,73 @@
+{
+  "protocol": "v8-gated-development-regression-v1",
+  "held_out_approved": false,
+  "documents": [
+    {
+      "document_id": "D001",
+      "path": "/Users/jun/projects/citd-final/req/2009 - model manager.pdf",
+      "sha256": "228f8d258152182bdf94bfcd0f7ac22db55ac076137430a1227eec76c26d3cea"
+    },
+    {
+      "document_id": "D002",
+      "path": "/Users/jun/projects/citd-final/req/2010 - home 1.3.pdf",
+      "sha256": "32ec89e47ed200cb34e619a806265a12f49b6e4fa45af2844f12f883cefb254c"
+    }
+  ],
+  "source_catalog_drafts": {
+    "D001": {
+      "file": "D001-catalog.draft.json",
+      "sha256": "8706c9c3f067e3a22795fdbd2e39185716103d6c8712de3ec0d513229bd93ef0",
+      "units": 91
+    },
+    "D002": {
+      "file": "D002-catalog.draft.json",
+      "sha256": "dd98d7d42e85e52bf2ca602c1a5e87f5439dc0cc717fcc8cb5d8bedad12c6675",
+      "units": 84
+    }
+  },
+  "conditions": [
+    "multi_efficient"
+  ],
+  "repeats": 1,
+  "seed": 20260930,
+  "model": "gemini-3.6-flash",
+  "thinking_level": "minimal",
+  "run_token_ceiling": 200000,
+  "max_total_budget_tokens": 600000,
+  "total_user_authorized_budget_tokens": 1600000,
+  "previously_accounted_tokens": 732219,
+  "f1_tolerance": null,
+  "implementation": {
+    "source_sha256": {
+      "runner.py": "c98f652639b72126ce3d1b476e90a1a9cc40ae3619183ec2ca73991404ba4f03",
+      "pipelines.py": "3ad88abe00d8569f4e3b8d26020b87ad3120489d17b29f81cd6e0e7781090755",
+      "prompts.py": "42151de48de07ee9bda420903f122ceac45623c5991e27565c63e69cf467ecdf",
+      "providers.py": "c53ebf1b627eb98aae79788bb96fef765f784447ee889f5a9133a7eb31d67e33",
+      "documents.py": "a1d9aca9e59d19f0dc4d14235f975dad83766952c5bba04612fe52685f4b6aaf",
+      "models.py": "4e4db7f8c7b29b1263b547cd90e7278e9973d5fe08a62279faa86a7f4b752c72",
+      "coverage.py": "d276d797971929cb589dad89f02379e7ee7b78742c9cf2edd47e979c55580dd1",
+      "validation.py": "20f414af71541e189fcd69d8974d2adaced1b5bb91a9964e1b2553b6f4ed0a59",
+      "evidence.py": "ba12b58e657c813a2c8f0121d3c0ee1621127804c3c10504860943cafc1e021b",
+      "efficient.py": "545296a3992b181c248dd54c4dc37150d7069c82c85abccdf5a06c0c6c67c2a9",
+      "evaluation.py": "d1ff55c7a0c8ed39034520d847e32c0825aa4a8f4cc164703123e04faafc80da",
+      "benchmark.py": "76b0be1b05bf09cc5ee817cd30a7f9b78626fccae1a1a3edbd6cb02a34fbd70b",
+      "storage.py": "3dbb38e46c5df5c138325b2dfaa08618278a86bf39767da27a74517f569e21ad",
+      "schema.sql": "88932b3571aeab596fcc203ca9bbdeb0e7351d6bf3d2f4154ba45dd169d3168b"
+    },
+    "dependencies": {
+      "google-genai": "2.19.0",
+      "pydantic": "2.13.4",
+      "pypdf": "6.16.2",
+      "psycopg": "3.3.4"
+    }
+  },
+  "evaluator_version": "coverage-v6:coverage-catalog-v1:gemini:gemini-3.6-flash:medium",
+  "gate": "Stop before the second document unless the first completes generation and evaluation; no automatic recovery purchases.",
+  "authorization": "User continued implementation and validation; same PDFs and derived content already approved for Gemini, within the original total budget.",
+  "comparability_limits": [
+    "Previously inspected development documents, not held out.",
+    "Joint test design and short evidence labels change together; this is not an isolated ablation.",
+    "Generation ceiling and evaluator match v7 but differ from the original eight-run v6 pilot."
+  ],
+  "manifest_sha256": "e56d644f0d75b3746bb6f7687bdffeaa3b0ea3778f5cb31a31fdebb2adf43018"
+}

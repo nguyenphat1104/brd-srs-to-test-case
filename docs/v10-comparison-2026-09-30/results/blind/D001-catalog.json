@@ -1,0 +1,1278 @@
+{
+  "units": [
+    {
+      "unit_id": "CU-001",
+      "title": "Standalone operation",
+      "description": "The Model Manager can run without knowledge of a MetVault.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0005-c001-d314fb36988e",
+          "page_number": 5,
+          "section": "2.2 Product Features",
+          "excerpt": "it can also run as a stand-alone application with no knowledge about a MetVault. The MM will be accessible from a web-based GUI and a"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-002",
+      "title": "MetVault integration",
+      "description": "The Model Manager can run in conjunction with the MetVault.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0005-c001-d314fb36988e",
+          "page_number": 5,
+          "section": "2.2 Product Features",
+          "excerpt": "The MM can run in conjunction with the MetVault, and it can also run as a stand-alone application with no knowledge about a MetVault. The"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-003",
+      "title": "Web interface",
+      "description": "The Model Manager is accessible through a web-based GUI.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0005-c001-d314fb36988e",
+          "page_number": 5,
+          "section": "2.2 Product Features",
+          "excerpt": "accessible from a web-based GUI and a command line tool. 2.2 Product Features The main functions of the system are described in the diagram below."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-004",
+      "title": "Command-line interface",
+      "description": "The Model Manager is accessible through a command-line tool.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0005-c001-d314fb36988e",
+          "page_number": 5,
+          "section": "2.2 Product Features",
+          "excerpt": "accessible from a web-based GUI and a command line tool. 2.2 Product Features The main functions of the system are described in the diagram below."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-005",
+      "title": "Automatic cluster allocation",
+      "description": "The Model Manager chooses the cluster or clusters on which a submitted job runs.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-bb7294b4b8e0",
+          "page_number": 6,
+          "section": "3.1 Set up and submit a model job",
+          "excerpt": "the MM will make the decision on what cluster(s) the job will be running. On the other hand, a user might need to submit customized"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-006",
+      "title": "Explicit cluster selection",
+      "description": "The user can specify the cluster for a customized job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-bb7294b4b8e0",
+          "page_number": 6,
+          "section": "3.1 Set up and submit a model job",
+          "excerpt": "the option to specify what cluster his/her job should run on. Managing more than one cluster, will also allow RTFDDA and climoFDDA ensembles to run"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-007",
+      "title": "Multi-cluster ensembles",
+      "description": "RTFDDA and climoFDDA ensembles can run across several clusters.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-bb7294b4b8e0",
+          "page_number": 6,
+          "section": "3.1 Set up and submit a model job",
+          "excerpt": "allow RTFDDA and climoFDDA ensembles to run across several clusters. Once a user is logged in into the system, s/he will be presented with the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-008",
+      "title": "Submission routes",
+      "description": "After choosing to submit a new job the user can choose model setup, post-processing setup, by-hand submission or a configuration file.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-bb7294b4b8e0",
+          "page_number": 6,
+          "section": "3.1 Set up and submit a model job",
+          "excerpt": "the following options to choose from: • “Setup a new model job” • “Setup a new 'post-processing' job” • “Submit a 'by-hand' job” • ”Submit"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-009",
+      "title": "Model job categories",
+      "description": "Model-job setup offers Weather FDDA and Climo choices.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-bb7294b4b8e0",
+          "page_number": 6,
+          "section": "3.1 Set up and submit a model job",
+          "excerpt": "presented with two more options: “ Weather FDDA” and “Climo”. Use Case “WeatherFDDA”: Setting up a real time or off-line FDDA job The objective of"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-010",
+      "title": "Editable GMOD defaults",
+      "description": "The Model Manager provides a default GMOD configuration that the user can change; exact defaults are not specified.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-bb7294b4b8e0",
+          "page_number": 6,
+          "section": "3.1 Set up and submit a model job",
+          "excerpt": "provide a default GMOD job configuration, which can be changed by the user (TBD: Define the defaults for a GMOD job). It is important to"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-011",
+      "title": "Custom GMOD setup",
+      "description": "The setup module accepts custom input data, pre-processors and executables for GMOD jobs.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-bb7294b4b8e0",
+          "page_number": 6,
+          "section": "3.1 Set up and submit a model job",
+          "excerpt": "the user may choose to supply his/her own input data, own pre-processors or a customized version of a MM5 executable."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-012",
+      "title": "Custom resource placement",
+      "description": "Users are responsible for placing custom scripts and executables on the clusters where the job will run.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "it is the user's responsibility to make sure that these scripts, executables, etc. reside on the cluster or clusters where the job will be running"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-013",
+      "title": "RTFDDA ensemble submission",
+      "description": "RTFDDA ensemble jobs are submitted as by-hand jobs or through a configuration file in the described scope.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-bb7294b4b8e0",
+          "page_number": 6,
+          "section": "3.1 Set up and submit a model job",
+          "excerpt": "RTFDDA ensemble jobs will be submitted to the MM as 'by hand' jobs or through a job configuration file. The MM will provide a default"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-014",
+      "title": "Weather model choice",
+      "description": "The user selects MM5 or WRF for a Weather FDDA job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "User decides what model should be used: MM5 or WRF. 4. User defines a JOBID. 5. User determines domains (TBD): • creates own domains (Note:"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-015",
+      "title": "Weather job identifier",
+      "description": "The user defines a JOBID for a Weather FDDA job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "User defines a JOBID. 5. User determines domains (TBD): • creates own domains (Note: This may only apply to MM5 jobs. From earlier discussions: creating"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-016",
+      "title": "Weather scheduling",
+      "description": "The user specifies when a Weather FDDA job runs and/or its cycle.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "User defines when a job is to be run and/or what cycle to run. If the cycle time is in the past, then the user"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-017",
+      "title": "Past-cycle classification",
+      "description": "A cycle in the past prompts the user to identify the job as a case study or re-run.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "If the cycle time is in the past, then the user is prompted to specify whether the job is a “case study” or “re-run”. 7."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-018",
+      "title": "Weather job parameters",
+      "description": "The user supplies job-specific information including cycle interval and forecast length.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "User supplies other job specific information, such as, cycle interval, forecast length and other applicable information. 8. User can specify whether to write restart files"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-019",
+      "title": "Sigma configuration",
+      "description": "The user can choose a predefined sigma-level configuration or supply a custom one.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "User can choose between predefined sigma-level configurations or supply own sigma- level configuration 10.User has the option to specify the number of nodes to use."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-020",
+      "title": "Weather node count",
+      "description": "The user can specify the number of nodes for a Weather FDDA job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "the option to specify the number of nodes to use. 11.User can choose to receive email notification upon start, end and termination of the job."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-021",
+      "title": "Weather notifications",
+      "description": "The user can choose email notification at job start, end and termination.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "receive email notification upon start, end and termination of the job. 12.User chooses between standard or custom IC/BC data sources: • standard: ETA, AVNFTP (GFS),"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-022",
+      "title": "IC/BC source selection",
+      "description": "The user can select standard or custom IC/BC data sources; the source lists ETA, AVNFTP (GFS) and GFS004 examples.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "User chooses between standard or custom IC/BC data sources: • standard: ETA, AVNFTP (GFS), GFS004 or • custom: provide data source (e.g., host:Full_Path_to_Dir) or •"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-023",
+      "title": "Off-line IC/BC input",
+      "description": "For off-line jobs the user must specify the IC/BC data location and time period.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "For off-line jobs, the user must specify the data source, i.e., location (MetVault or a directory) and time period. Important note for re-runs, if the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-024",
+      "title": "Historical IC/BC data",
+      "description": "For a re-run using MetVault, retrieve the data available and used in the original cycle.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "MetVault returns the data that was available and used in that cycle. • TBD: Determine standard IC/BC data source and standard pre-processors. 11.Depending on the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-025",
+      "title": "IC/BC processor selection",
+      "description": "The user can choose standard IC/BC processing or provide a custom pre-processing script.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-29cf8dd2e122",
+          "page_number": 7,
+          "section": "",
+          "excerpt": "user can provide custom IC/BC pre-processor or choose the standard: • standard processing or • provide own pre-processing script"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-026",
+      "title": "Additional IC/BC processing",
+      "description": "The user can run additional IC/BC pre-processing, supply a custom processor or skip it.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "the option to run additional pre-processors for the IC/BC data, such as, LDAS or supply own custom pre-processor or skip this option. 13.User chooses between"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-027",
+      "title": "Observation input configuration",
+      "description": "The user can select standard and/or custom observation data sources with their associated processing.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "User chooses between standard and/or custom obs data sources and processing: • Standard: WMO, SAMS, MADIS, GTS, RAWS, okmeso, SatWinds, ACARS, etc. and/or • provide"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-028",
+      "title": "Off-line observation input",
+      "description": "For off-line jobs the observation data source location and time period must be specified.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "For off-line jobs, the user must specify the data source, i.e., location (MetVault or a directory) and time period. Important note for re-runs, if the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-029",
+      "title": "Historical observation data",
+      "description": "Observation data for a MetVault re-run is the data available and used in that cycle.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "MetVault returns the data that was available and used in that cycle. • TBD: Define all standard observational data sources and identify their processing scripts."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-030",
+      "title": "MM5 executable selection",
+      "description": "MM5 executable choices depend on the selected domain size and node count.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "Based on both choices, the user is presented with different MM5-executables to choose from. These executables have been compiled in advanced. The MM will be"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-031",
+      "title": "MM5 compile information",
+      "description": "The Model Manager can retrieve executable compile information such as domain size, node count and sigma levels.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "retrieve the compile info about the executables, e.g., domain size, number of nodes, number of sigma levels, etc. These few executables are standard executables (TBD:"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-032",
+      "title": "Custom MM5 executable",
+      "description": "The user can supply a custom executable by its cluster location.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "the user can also supply own executable, e.g., its location on the cluster • WRF: User defines model options (TBD: determine possible model options) 15.User"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-033",
+      "title": "Weather output storage",
+      "description": "The user can save model output to MetVault and must specify the output file to send.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "User can choose to save the model output in MetVault. If 'yes', user must specify what output file is to be sent to the MetVault."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-034",
+      "title": "Weather immediate submission",
+      "description": "Immediate submission runs IC/BC processing, observation processing and the model without post-processing.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "Submitting now, would run IC/BC-data and obs processing and the model, no post-processing. 20.User chooses whether or not to run post-processing. If ‘yes', then s/he"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-035",
+      "title": "Weather optional post-processing",
+      "description": "The user chooses whether to run post-processing for a Weather FDDA job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "User chooses whether or not to run post-processing. If ‘yes', then s/he will go through the action sequence in 3.4. (TBD: How customizable should post-processing"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-036",
+      "title": "Weather configuration saving",
+      "description": "The user can save the Weather FDDA job configuration, including saving it to a file.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "User can save the above job configuration. Job configurations can be saved to a file. 22.User submits the job. Use Case “ClimoFDDA”: Setting up a"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-037",
+      "title": "ClimoFDDA scope",
+      "description": "The described Climo setup supports ClimoFDDA; CAM configuration is not specified.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "At this point, the MM only supports “ClimoFDDA”. Action Sequence: 1. Chooses to “Set up a Climo Job”. 2. User defines a JOBID. 3. User"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-038",
+      "title": "Climo job identifier",
+      "description": "The user defines a JOBID for a ClimoFDDA job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "User defines a JOBID. 3. User supplies other job parameters. For details, see GCAT tool 4. User determines the domain location. 5. User can specify"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-039",
+      "title": "Climo domain",
+      "description": "The user determines the domain location for a ClimoFDDA job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "User determines the domain location. 5. User can specify locations for pseudo-obs and custom cross sections. (TBD: Is this configuration information that is only used"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-040",
+      "title": "Climo MM5 setup",
+      "description": "The user selects a pre-configured MM5 setup for a ClimoFDDA job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "User picks a pre-configured MM5 setup 7. User sets the time line for the job: start time, end time and what years 8. User sets"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-041",
+      "title": "Climo time range",
+      "description": "The user supplies ClimoFDDA start time, end time and years.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "User sets the time line for the job: start time, end time and what years 8. User sets the ensemble options: • hourly (TBD: Are"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-042",
+      "title": "Climo ensemble options",
+      "description": "The user can configure listed ensemble options including hourly output, minimum, maximum, mean, standard deviation, diurnal cycle and typical moment; unspecified alternatives remain unresolved.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "User sets the ensemble options: • hourly (TBD: Are there other options? Daily?) • min, max, mean, standard deviation,.... • diurnal cycle • typical moment"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-043",
+      "title": "Climo node request",
+      "description": "The user can request the number of nodes for a ClimoFDDA job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "User can request the number of nodes this job should run on. 10.User chooses whether or not run additional processing on the model output. (TBD:"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-044",
+      "title": "Climo output storage",
+      "description": "The user can save ClimoFDDA output in MetVault and specifies which member and/or ensemble output is sent.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "User can choose to save the model output in MetVault. If 'yes', user must specify what output, e.g., member and/or ensemble output is to be"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-045",
+      "title": "Climo immediate submission",
+      "description": "Immediate ClimoFDDA submission runs members, ensemble and possible model-output processing without post-processing.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "Submitting now, would run the member models, the ensemble, and possible model output processing, no post- processing. 13.User chooses whether or not to run post-processing"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-046",
+      "title": "Ensemble post-processing",
+      "description": "The user can choose whether to post-process ensemble output and select supported output products.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "User chooses whether or not to run post-processing on the ensemble output. If “yes', then s/he will be presented with the following options: • Plots"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-047",
+      "title": "Ensemble product destination",
+      "description": "Each selected ensemble output product requires a destination host and location.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-80cd4f07468c",
+          "page_number": 9,
+          "section": "• NAPS",
+          "excerpt": "For each output product, the user is prompted to supply a destination host and location, where the output files should be copied."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-048",
+      "title": "Member post-processing",
+      "description": "The user can choose which member years to post-process, the post-processors and output destinations.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-ad258d385d69",
+          "page_number": 10,
+          "section": "TBD",
+          "excerpt": "S/he can specify which year-output to post-process and what post-processor(s) to use and where the output files should be copied. 15. The user can specify"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-049",
+      "title": "Climo configuration saving",
+      "description": "The user can save a ClimoFDDA configuration, including to a file, before submitting it.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-ad258d385d69",
+          "page_number": 10,
+          "section": "TBD",
+          "excerpt": "User can save the above job configuration. Job configurations can be saved to a file. 17.User submits the job. Use Case “CAM”: Setting up a"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-050",
+      "title": "Post-processing existing output",
+      "description": "A standalone post-processing job can use an existing model output file.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-ad258d385d69",
+          "page_number": 10,
+          "section": "TBD",
+          "excerpt": "If the model output file already exists, then the user supplies its location. 3. User chooses the type of post-processing: • Plots (NCL or RIP)"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-051",
+      "title": "Post-processing future output",
+      "description": "If output will come from a running or scheduled FDDA job, the user identifies it by JOBID and cycle time.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-ad258d385d69",
+          "page_number": 10,
+          "section": "TBD",
+          "excerpt": "If the model output file will be produced by a running or scheduled FDDA-job, then the user supplies JOBID & cycle time • If the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-052",
+      "title": "Post-processing product selection",
+      "description": "The user chooses a post-processing type from the supplied options; the MEDOC range is marked uncertain in the source.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-ad258d385d69",
+          "page_number": 10,
+          "section": "TBD",
+          "excerpt": "User chooses the type of post-processing: • Plots (NCL or RIP) • NAPS • MDV • Sites • MEDOC (1 – 4) (?) • Stereo"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-053",
+      "title": "Post-processing configuration",
+      "description": "For a selected post-processing option the user can provide a custom configuration when applicable or use the default.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-ad258d385d69",
+          "page_number": 10,
+          "section": "TBD",
+          "excerpt": "the user can supply a custom configuration file (if this is applicable) or use the default configuration file. 5. User must supply destination location for"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-054",
+      "title": "Post-processing destination",
+      "description": "The user must supply the destination location for post-processing output products.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-ad258d385d69",
+          "page_number": 10,
+          "section": "TBD",
+          "excerpt": "User must supply destination location for the output products. 6. User can specify the number of nodes this job should run on (TBD: Is this"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-055",
+      "title": "Post-processing configuration saving",
+      "description": "The user can save post-processing settings, including to a file.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-ad258d385d69",
+          "page_number": 10,
+          "section": "TBD",
+          "excerpt": "User can save this job's setting. Job configurations can be saved to a file."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-056",
+      "title": "By-hand registration",
+      "description": "The user registers a job already set up on the selected cluster with the Model Manager.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "then register the job with the MM (see Action Sequence below). It is important to note that since a 'by-hand' job wasn't set up through"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-057",
+      "title": "By-hand job ID",
+      "description": "By-hand registration requires a job ID.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "job id (GMUAE, GWDPG,...) • location of the script (host:/full_path_to_script) • time when to run the script • estimated time of how long the script"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-058",
+      "title": "By-hand script location",
+      "description": "By-hand registration requires the script host and full path.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "location of the script (host:/full_path_to_script) • time when to run the script • estimated time of how long the script will run • name(s) of"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-059",
+      "title": "By-hand start time",
+      "description": "By-hand registration requires the time when the script should run.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "time when to run the script • estimated time of how long the script will run • name(s) of executable(s) • max. runtime for the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-060",
+      "title": "By-hand duration estimate",
+      "description": "By-hand registration requires an estimated script duration.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "estimated time of how long the script will run • name(s) of executable(s) • max. runtime for the executable(s) • number of nodes (??) •"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-061",
+      "title": "By-hand executable names",
+      "description": "By-hand registration requires executable names.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "name(s) of executable(s) • max. runtime for the executable(s) • number of nodes (??) • location of output products (such as: host:/dir_path) Optional: • frequency"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-062",
+      "title": "By-hand executable runtime",
+      "description": "By-hand registration requires the maximum runtime for the executables.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "max. runtime for the executable(s) • number of nodes (??) • location of output products (such as: host:/dir_path) Optional: • frequency of how often the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-063",
+      "title": "By-hand output location",
+      "description": "By-hand registration requires the location of output products.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "location of output products (such as: host:/dir_path) Optional: • frequency of how often the script should run • job type • any additional information 3."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-064",
+      "title": "By-hand optional metadata",
+      "description": "By-hand job frequency, job type and additional information are optional.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "frequency of how often the script should run • job type • any additional information 3. User can save the job's settings. Job configurations can"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-065",
+      "title": "By-hand configuration saving",
+      "description": "The user can save by-hand job settings, including to a file.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "User can save the job's settings. Job configurations can be saved to a file. 4. User submits job. 5. User can view his/her job in"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-066",
+      "title": "By-hand queue visibility",
+      "description": "A submitted by-hand job is visible in the user's job queue.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "User can view his/her job in the job queue (see 3.1.). 6. User can receive an email notification when job is started, finished or killed."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-067",
+      "title": "By-hand notifications",
+      "description": "The user can receive email when a by-hand job starts, finishes or is killed.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "User can receive an email notification when job is started, finished or killed. (SRS Note: 'custom' job will need to notify the MM when done.)"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-068",
+      "title": "Custom completion notification",
+      "description": "A custom job must notify the Model Manager when it is done.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "'custom' job will need to notify the MM when done.) 3.4 Load a job configuration from a file and submit the job The objective of"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-069",
+      "title": "Load configuration file",
+      "description": "The Model Manager can load a job configuration supplied in a file.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "load a job configuration into MM from a file. Suppose the user is logged on to the system and has made the following choice, “Submit"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-070",
+      "title": "Edit loaded configuration",
+      "description": "The user can change a configuration loaded from a file.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-984984f2dea2",
+          "page_number": 12,
+          "section": "3.5 Retrieve and run a previously saved job configuration",
+          "excerpt": "User can make changes to the configuration. 4. User can save the changed configuration. 5. User submits the job. 3.5 Retrieve and run a previously"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-071",
+      "title": "Save loaded configuration",
+      "description": "The user can save changes made to a configuration loaded from a file.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-984984f2dea2",
+          "page_number": 12,
+          "section": "3.5 Retrieve and run a previously saved job configuration",
+          "excerpt": "User can save the changed configuration. 5. User submits the job. 3.5 Retrieve and run a previously saved job configuration The objective of this feature"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-072",
+      "title": "Submit loaded configuration",
+      "description": "The user can submit the job after loading and optionally changing its configuration.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-984984f2dea2",
+          "page_number": 12,
+          "section": "3.5 Retrieve and run a previously saved job configuration",
+          "excerpt": "5. User submits the job. 3.5 Retrieve and run a previously saved job configuration The objective of this feature is to provide the ability to"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-073",
+      "title": "Authenticated access",
+      "description": "The user logs in using a user ID and password to retrieve configurations or view jobs.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-984984f2dea2",
+          "page_number": 12,
+          "section": "3.5 Retrieve and run a previously saved job configuration",
+          "excerpt": "User logs on with user id/password. 2. User chooses to look at his/her previously saved job configurations. A table of saved jobs may include the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-074",
+      "title": "Retrieve own saved configurations",
+      "description": "The user can view previously saved job configurations and select one.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-984984f2dea2",
+          "page_number": 12,
+          "section": "3.5 Retrieve and run a previously saved job configuration",
+          "excerpt": "User chooses to look at his/her previously saved job configurations. A table of saved jobs may include the following attributes: • Job id • Job"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-075",
+      "title": "Change or delete saved configuration",
+      "description": "The user can change or delete a selected saved job configuration.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-984984f2dea2",
+          "page_number": 12,
+          "section": "3.5 Retrieve and run a previously saved job configuration",
+          "excerpt": "User can change or delete this job configuration. 4. User changes the job configuration. 5. User can save the changed job configuration. 6. User submits"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-076",
+      "title": "Save and resubmit configuration",
+      "description": "The user can save a changed saved-job configuration and submit the job again.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-984984f2dea2",
+          "page_number": 12,
+          "section": "3.5 Retrieve and run a previously saved job configuration",
+          "excerpt": "User can save the changed job configuration. 6. User submits job. 3.6 View scheduled, running and old jobs The objective of this feature is to"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-077",
+      "title": "Job view filters",
+      "description": "The user can view running, scheduled, past or all jobs.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-984984f2dea2",
+          "page_number": 12,
+          "section": "3.5 Retrieve and run a previously saved job configuration",
+          "excerpt": "User chooses to look at all running jobs, all scheduled jobs (the job queue), past jobs or all jobs (running, scheduled, old). User selects one"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-078",
+      "title": "Job details",
+      "description": "The user can select a job for more detailed information; exact fields remain TBD.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "User can select a job and receive more detailed information (TBD: What exactly are the details?) 5. User can look at a jobs log files."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-079",
+      "title": "Job logs",
+      "description": "The user can view a job's log files.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "User can look at a jobs log files. 6. User can delete his/her jobs from the job queue. A “super user” can delete any job"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-080",
+      "title": "Delete own queued jobs",
+      "description": "An ordinary user can delete their own jobs from the queue.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "User can delete his/her jobs from the job queue. A “super user” can delete any job from the job queue. 7. User can stop his/her"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-081",
+      "title": "Delete any queued job",
+      "description": "A super user can delete any job from the queue.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "A “super user” can delete any job from the job queue. 7. User can stop his/her running job. A “super user” can stop any running"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-082",
+      "title": "Stop own running job",
+      "description": "An ordinary user can stop their own running job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "User can stop his/her running job. A “super user” can stop any running job. 8. User can re-start his/her job. A “super user” can re-start"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-083",
+      "title": "Stop any running job",
+      "description": "A super user can stop any running job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "A “super user” can stop any running job. 8. User can re-start his/her job. A “super user” can re-start any job. 9. User can resume"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-084",
+      "title": "Restart own job",
+      "description": "An ordinary user can restart their own job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "User can re-start his/her job. A “super user” can re-start any job. 9. User can resume his/her stopped job. A “super user” can resume any"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-085",
+      "title": "Restart any job",
+      "description": "A super user can restart any job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "A “super user” can re-start any job. 9. User can resume his/her stopped job. A “super user” can resume any stopped job."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-086",
+      "title": "Resume own stopped job",
+      "description": "An ordinary user can resume their own stopped job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "User can resume his/her stopped job. A “super user” can resume any stopped job."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-087",
+      "title": "Resume any stopped job",
+      "description": "A super user can resume any stopped job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-139ddec67a27",
+          "page_number": 13,
+          "section": "",
+          "excerpt": "A “super user” can resume any stopped job."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-088",
+      "title": "Submit configured Weather job",
+      "description": "The user can submit a configured Weather FDDA job after the selected setup steps.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-c4f8c7dd513d",
+          "page_number": 8,
+          "section": "",
+          "excerpt": "User submits the job. Use Case “ClimoFDDA”: Setting up a ClimoFDDA job"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-089",
+      "title": "Submit configured Climo job",
+      "description": "The user can submit a configured ClimoFDDA job after the selected setup steps.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-ad258d385d69",
+          "page_number": 10,
+          "section": "TBD",
+          "excerpt": "User submits the job. Use Case “CAM”: Setting up a CAM job TBD 3.2 Set up and submit a “post-processing” job The objective of this"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-090",
+      "title": "Submit post-processing job",
+      "description": "The user can submit a configured standalone post-processing job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "8. User submits job. 3.3 Submit a 'By-hand' job The objective of this feature is to accommodate the current GMOD-framework. It will also give the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-091",
+      "title": "Submit by-hand job",
+      "description": "The user can submit a registered by-hand job.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-b1a8090b0217",
+          "page_number": 11,
+          "section": "3.3 Submit a 'By-hand' job",
+          "excerpt": "4. User submits job. 5. User can view his/her job in the job queue (see 3.1.). 6. User can receive an email notification when job"
+        }
+      ]
+    }
+  ]
+}

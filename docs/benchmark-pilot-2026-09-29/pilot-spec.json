@@ -1,0 +1,35 @@
+{
+  "held_out_approved": true,
+  "documents": [
+    "/Users/jun/projects/citd-final/req/2009 - model manager.pdf",
+    "/Users/jun/projects/citd-final/req/2010 - home 1.3.pdf"
+  ],
+  "conditions": [
+    "single",
+    "staged",
+    "multi_corrected",
+    "multi_efficient"
+  ],
+  "repeats": 1,
+  "model": "gemini-3.6-flash",
+  "thinking_level": "minimal",
+  "run_token_ceiling": 100000,
+  "max_total_budget_tokens": 1576387,
+  "total_user_authorized_budget_tokens": 1600000,
+  "catalog_preparation_accounted_tokens": 23613,
+  "f1_tolerance": null,
+  "seed": 20260929,
+  "source_catalog_drafts": {
+    "D001": {
+      "file": "D001-catalog.draft.json",
+      "sha256": "8706c9c3f067e3a22795fdbd2e39185716103d6c8712de3ec0d513229bd93ef0",
+      "units": 91
+    },
+    "D002": {
+      "file": "D002-catalog.draft.json",
+      "sha256": "dd98d7d42e85e52bf2ca602c1a5e87f5439dc0cc717fcc8cb5d8bedad12c6675",
+      "units": 84
+    }
+  },
+  "study_scope": "Two-document feasibility pilot; one repetition per condition. No quality equivalence claim."
+}

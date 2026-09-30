@@ -1,0 +1,21 @@
+{
+  "recorded_at": "2026-09-30T04:27:48.816764+00:00",
+  "reason": "Before any condition run, freeze actual deployed runtime dependencies; source code, source catalogs, settings and trial order unchanged.",
+  "old_manifest_sha256": "427fa67089938a814b1e208d311cc3103d3375875adc775dd7efae340afee69f",
+  "manifest_sha256": "104a5ec1aadb19ca5a91ae8f7dfc8135501ba75f5d9a2d02b250ba5bf112f99d",
+  "old_dependencies": {
+    "google-genai": "2.17.0",
+    "pydantic": "2.13.4",
+    "pypdf": "6.15.0",
+    "psycopg": "3.3.4"
+  },
+  "runtime_dependencies": {
+    "google-genai": "2.19.0",
+    "pydantic": "2.13.4",
+    "pypdf": "6.16.2",
+    "psycopg": "3.3.4"
+  },
+  "old_and_new_trial_ids_absent": true,
+  "exact_citation_validation": "175 units passed under runtime extraction",
+  "paid_model_calls": 0
+}

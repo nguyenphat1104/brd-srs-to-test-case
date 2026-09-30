@@ -1,0 +1,47 @@
+{
+  "verified_at": "2026-09-30T15:01:47.055602+00:00",
+  "status": "failed",
+  "run_id": "228f8d258152-09213b14a3d55011801176c96ca9ecae",
+  "failure": "Semantic verification left unresolved findings; draft retained.",
+  "provider_billing_block_cleared": true,
+  "new_calls": 5,
+  "additional_tokens": 14767,
+  "additional_estimated_tokens": 0,
+  "phases": {
+    "generation": 14767
+  },
+  "ancestry": [
+    {
+      "run_id": "228f8d258152-93f5e43fcdcc593997ed320b56ffd569",
+      "own_tokens": 12497
+    },
+    {
+      "run_id": "228f8d258152-ab53f20cf7e65c37b3abbc83c947bb90",
+      "own_tokens": 189102
+    }
+  ],
+  "inherited_accounted_tokens": 201599,
+  "raw_diagnostics_inherited_tokens": 12497,
+  "accounting_note": "The frozen runner inherited only the interrupted direct parent cost because that parent has no aggregate diagnostics. Its reporting assertion stopped after the terminal result was saved. This read-only verification traverses both ancestor records; the immutable historical run is not rewritten.",
+  "unobserved_retry_hold_tokens": 12497,
+  "cumulative_workflow_accounted_tokens": 216366,
+  "cumulative_workflow_conservative_tokens": 228863,
+  "total_accounted_tokens": 1373710,
+  "conservative_total_tokens": 1386207,
+  "remaining_authorized_tokens": 213793,
+  "reused_tasks": 31,
+  "new_saved_tasks": 5,
+  "artifact_counts": {
+    "requirements": 92,
+    "scenarios": 96,
+    "test_cases": 96
+  },
+  "deterministic_validation": true,
+  "semantic_status": "unresolved",
+  "unresolved_finding_ids": [
+    "FIND-002"
+  ],
+  "f1": null,
+  "historical_records_unchanged": 15,
+  "note": "Separate post-hoc continuation after user reported increasing the provider cap. No new recovery or Judge call purchased after semantic verification failed. No human scores supplied."
+}

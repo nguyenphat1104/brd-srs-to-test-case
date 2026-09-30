@@ -1,0 +1,27 @@
+{
+  "verified_at": "2026-09-29T14:39:53.550619+00:00",
+  "deployed_image": "2fcf413c88e0",
+  "service": "http://127.0.0.1:8501",
+  "health": "ok",
+  "prompt_version": "research-core-v6",
+  "schema_version": "research-core-v3",
+  "test_result": "564 passed, 3 collection warnings",
+  "paid_model_calls": 0,
+  "historical_telescope_tokens": 973822,
+  "historical_blackboard_rows": 56,
+  "host_matches_container": true,
+  "file_hashes": {
+    "app.py": "0880aaa470b7e4ede45c7c669fbdb04bd3225785b875fdc49eb75cdfd2ecfcc7",
+    "src/brd_srs_testgen/efficient.py": "ed20136d3d07fbdc5db3af14f6710afb8f985947d809f90c92a8803b8c916ef5",
+    "src/brd_srs_testgen/evidence.py": "93f25de9614a4effd6d12c07a1e2c2c880d5266db0ba915d9153da8f930eebf7",
+    "src/brd_srs_testgen/benchmark.py": "76b0be1b05bf09cc5ee817cd30a7f9b78626fccae1a1a3edbd6cb02a34fbd70b",
+    "src/brd_srs_testgen/pipelines.py": "1721d7920f85561216586ec2469aa399012b2ce266939a080a0182390f2105d1",
+    "src/brd_srs_testgen/runner.py": "514e0f95acdb6cc5ebbb1c28e734972d67cb26a163cb77380660e5c6bba0a965",
+    "src/brd_srs_testgen/storage.py": "3dbb38e46c5df5c138325b2dfaa08618278a86bf39767da27a74517f569e21ad",
+    "src/brd_srs_testgen/schema.sql": "88932b3571aeab596fcc203ca9bbdeb0e7351d6bf3d2f4154ba45dd169d3168b",
+    "src/brd_srs_testgen/coverage.py": "7ec85fc335baf8505ab8e68754638ca984622088003678feedbb065f089a5fc6",
+    "src/brd_srs_testgen/models.py": "4e4db7f8c7b29b1263b547cd90e7278e9973d5fe08a62279faa86a7f4b752c72"
+  },
+  "rollback_image": "citd-phase01:20260929",
+  "database_backup": "/tmp/citd-before-phase2345-20260929.dump"
+}

@@ -1,0 +1,41 @@
+{
+  "verified_at": "2026-09-30T05:56:25.963365+00:00",
+  "image_short_id": "19880ae398c6",
+  "pilot_image_preserved_as": "citd-pilot-v6:20260930",
+  "prompt_version": "research-core-v7",
+  "evaluator_version": "coverage-v6:coverage-catalog-v1:gemini:gemini-3.6-flash:medium",
+  "implementation": {
+    "source_sha256": {
+      "runner.py": "c98f652639b72126ce3d1b476e90a1a9cc40ae3619183ec2ca73991404ba4f03",
+      "pipelines.py": "f529c50dcc1263c7635ea66539a8dbdd3ff029b68e4c098cfa77f9f1d1f72e37",
+      "prompts.py": "eac3ee35b2aa0f43088c3c5d822de60a01d5a99660822a9577706c3dd1231983",
+      "providers.py": "c53ebf1b627eb98aae79788bb96fef765f784447ee889f5a9133a7eb31d67e33",
+      "documents.py": "a1d9aca9e59d19f0dc4d14235f975dad83766952c5bba04612fe52685f4b6aaf",
+      "models.py": "4e4db7f8c7b29b1263b547cd90e7278e9973d5fe08a62279faa86a7f4b752c72",
+      "coverage.py": "d276d797971929cb589dad89f02379e7ee7b78742c9cf2edd47e979c55580dd1",
+      "validation.py": "20f414af71541e189fcd69d8974d2adaced1b5bb91a9964e1b2553b6f4ed0a59",
+      "evidence.py": "1f7fcd07bf71d95cca529e502955e7aba260e0b15809f1fe14e8851730e27b51",
+      "efficient.py": "0b9ae2eb1eab85c38887371f75043d398073d7c718da8b60fb63d7ffd963c66a",
+      "evaluation.py": "d1ff55c7a0c8ed39034520d847e32c0825aa4a8f4cc164703123e04faafc80da",
+      "benchmark.py": "76b0be1b05bf09cc5ee817cd30a7f9b78626fccae1a1a3edbd6cb02a34fbd70b",
+      "storage.py": "3dbb38e46c5df5c138325b2dfaa08618278a86bf39767da27a74517f569e21ad",
+      "schema.sql": "88932b3571aeab596fcc203ca9bbdeb0e7351d6bf3d2f4154ba45dd169d3168b"
+    },
+    "dependencies": {
+      "google-genai": "2.19.0",
+      "pydantic": "2.13.4",
+      "pypdf": "6.16.2",
+      "psycopg": "3.3.4"
+    }
+  },
+  "deployed_source_files_match_workspace": 14,
+  "full_suite_passed": 570,
+  "existing_collection_warnings": 3,
+  "historical_pilot_records_unchanged": 8,
+  "approved_pilot_catalogs_unchanged": 2,
+  "frozen_pilot_source_archive_verified": true,
+  "additional_paid_model_calls": 0,
+  "total_accounted_tokens": 522328,
+  "remaining_authorized_tokens": 1077672,
+  "live_quality_preservation": "Not established; human ratings and new versioned evaluation pending."
+}

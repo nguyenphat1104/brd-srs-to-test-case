@@ -40,9 +40,12 @@ from brd_srs_testgen.models import (
     TestCaseBatch,
     default_agent_setups,
 )
+from brd_srs_testgen.documents import DocumentError, chunk_pages, extract_pages
 from brd_srs_testgen.prompts import RUN_PROMPT_DEFAULTS
 from brd_srs_testgen.pipelines import (
     MIN_OUTPUT_TOKENS,
+    LOCAL_EVIDENCE_CHARS_PER_TASK,
+    _ordered_evidence_groups,
     MULTI_AGENT_BUDGET_SHARES,
     STAGED_OUTPUT_TOKEN_DEFAULTS,
 )
@@ -1170,6 +1173,16 @@ def _stage_output_summary(row: AgentStageOutput) -> str:
     if row.stage == "scout":
         total = count("candidates")
         return f"{total} candidate requirement{'s' if total != 1 else ''}"
+    if row.stage == "generation":
+        return "Validated generation checkpoint"
+    if row.stage == "source_audit":
+        return f"Source audit · {count('missing_candidates')} missing candidates · {count('unresolved_chunk_ids')} unresolved chunks"
+    if row.stage == "catalog":
+        return f"{count('units')} independent coverage units"
+    if row.stage == "evaluation":
+        return f"{count('mappings')} test coverage mappings"
+    if row.stage == "curator" and "choices" in row.output:
+        return f"{count('choices')} candidate decisions"
     if row.stage == "curator":
         decisions, requirements = count("decisions"), count("requirements")
         return (
@@ -1181,7 +1194,11 @@ def _stage_output_summary(row: AgentStageOutput) -> str:
         return f"{total} canonical scenario{'s' if total != 1 else ''}"
     if row.stage == "test_writer":
         total = count("test_cases")
+        if "scenarios" in row.output:
+            return f"{count('scenarios')} scenarios · {total} test cases"
         return f"{total} test case{'s' if total != 1 else ''}"
+    if row.stage == "critic" and "resolved_finding_ids" in row.output:
+        return f"Repair verification · {count('resolved_finding_ids')} resolved · {count('unresolved_finding_ids')} unresolved"
     if row.stage == "critic":
         total = count("findings")
         decision = (
@@ -1192,7 +1209,7 @@ def _stage_output_summary(row: AgentStageOutput) -> str:
             else "Review recorded"
         )
         return f"{decision} · {total} finding{'s' if total != 1 else ''}"
-    return "Repaired artifact bundle persisted"
+    return "Artifact repair output persisted"
 
 
 def _render_agent_blackboard(result: RunResult) -> None:
@@ -1206,6 +1223,8 @@ def _render_agent_blackboard(result: RunResult) -> None:
     rows = sorted(result.stage_outputs, key=AgentStageOutput.order_key)
     for row in rows:
         label = RUN_AGENT_LABELS.get(row.stage, row.stage.replace("_", " ").title())
+        if row.stage == "critic" and row.task_index > 0:
+            label = "Repair verification"
         if row.stage in {"scout", "test_writer"}:
             label = f"{label} task {row.task_index + 1}"
         role = RUN_AGENT_LABELS.get(row.role, row.role)
@@ -1238,10 +1257,10 @@ def _render_agent_blackboard(result: RunResult) -> None:
         ):
             st.code(_json(row.output), language="json", height=400)
 
-    repair = next((row for row in rows if row.stage == "repair"), None)
+    repairs = [row for row in rows if row.stage == "repair"]
     critic = next((row for row in rows if row.stage == "critic"), None)
-    if repair is not None:
-        role = RUN_AGENT_LABELS.get(repair.role, repair.role)
+    if repairs:
+        role = ", ".join(dict.fromkeys(RUN_AGENT_LABELS.get(row.role, row.role) for row in repairs))
         st.caption(f"Repair occurred · routed to {role}")
     elif critic is None:
         st.caption("Repair not reached in this trace.")
@@ -2110,6 +2129,27 @@ def _render_snapshot(result: RunResult) -> None:
             )
 
 
+def _settings_for_recovery(result: RunResult) -> ProviderSettings:
+    snapshot = result.manifest.configuration
+    agents = snapshot.get("agents", {})
+    generation = {key:value for key,value in agents.items() if key != "judge"}
+    providers = {value["provider"] for value in generation.values()} | {JUDGE_PROVIDER}
+    return ProviderSettings(
+        provider=result.manifest.provider, model=result.manifest.model,
+        token_ceiling=result.manifest.token_ceiling,
+        pipeline_profile=snapshot.get("pipeline_profile", "corrected"),
+        critic_enabled=snapshot.get("critic_enabled", True),
+        agent_providers={key:value["provider"] for key,value in generation.items()},
+        agent_models={key:value["model"] for key,value in generation.items()},
+        agent_prompts={key:value.get("prompt", "") for key,value in generation.items()},
+        agent_thinking_levels={key:value["thinking_level"] for key,value in generation.items() if value.get("thinking_level")},
+        agent_max_output_tokens={key:value["max_output_tokens"] for key,value in generation.items() if value.get("max_output_tokens")},
+        agent_setups={key:AgentSetup.model_validate(value) for key,value in snapshot.get("agent_setups", {}).items()},
+        provider_api_keys={provider:_api_key(provider) for provider in providers},
+        provider_base_urls={provider:(_env({"llama_cpp":"LLAMA_CPP_BASE_URL", "lm_studio":"LM_STUDIO_BASE_URL", "ollama":"OLLAMA_BASE_URL"}[provider]) or LOCAL_BASE_URLS[provider]) for provider in providers if provider != "gemini"},
+    )
+
+
 def _render_result(
     result: RunResult,
     repository: RunRepository,
@@ -2143,7 +2183,7 @@ def _render_result(
                 f"{key_prefix}-{manifest.run_id}-diagnostics",
             )
     elif manifest.status is RunStatus.COMPLETED:
-        st.success("Your test suite is ready and passed validation.")
+        st.success("Generation completed and passed deterministic validation.")
     else:
         st.warning("Generation was interrupted. Review diagnostics before retrying.")
         with st.expander(
@@ -2158,16 +2198,74 @@ def _render_result(
                 f"{key_prefix}-{manifest.run_id}-diagnostics",
             )
 
+    checkpoints = [row for row in result.stage_outputs if row.fingerprint]
+    if checkpoints and (manifest.status is not RunStatus.COMPLETED or (result.diagnostics and result.diagnostics.evaluation_error)):
+        with st.expander("Recover saved work"):
+            st.caption(f"{len(checkpoints)} validated checkpoints are available. Matching source, settings, code and task inputs are required for reuse. Recovery creates a linked run; original results remain unchanged.")
+            if st.button("Resume unfinished work", key=f"{key_prefix}-{manifest.run_id}-resume"):
+                request_key = f"recovery-request-{manifest.run_id}"
+                request_id = st.session_state.setdefault(request_key, uuid4().hex)
+                try:
+                    settings = _settings_for_recovery(result)
+                    with st.status("Recovering saved work", expanded=True) as status:
+                        recovered = run_generation(b"", manifest.source_filename, manifest.run_type,
+                            settings, repository=repository, progress=status.write,
+                            resume_from=manifest.run_id, request_id=request_id)
+                    st.session_state["selected_run_id"] = recovered.manifest.run_id
+                    st.session_state["selected_run"] = recovered
+                    st.session_state["view"] = "detail"
+                    st.rerun()
+                except (StorageError, ValueError) as error:
+                    st.error(str(error))
+
     metrics = result.metrics
     if metrics is not None:
         charged = metrics.charged_tokens
-        token_label = "Charged tokens" if charged else "Reported tokens"
+        token_label = "Budget-accounted tokens" if charged else "Reported tokens"
         token_value = charged or metrics.input_tokens + metrics.output_tokens
         columns = st.columns(4)
         columns[0].metric("Requirements", metrics.requirement_count)
         columns[1].metric("Scenarios", metrics.scenario_count)
         columns[2].metric("Test cases", metrics.test_case_count)
         columns[3].metric(token_label, f"{token_value:,}")
+
+    if not result.call_attempts and result.metrics is not None:
+        st.caption("Legacy aggregate usage: no per-call or phase breakdown was recorded for this run.")
+    if result.diagnostics is not None:
+        st.caption(f"Semantic review: {result.diagnostics.semantic_status.replace('_', ' ')}.")
+        if result.diagnostics.recovery_parent_id:
+            st.caption(f"Recovery of {result.diagnostics.recovery_parent_id} · {result.diagnostics.reused_tasks} reused tasks · {result.diagnostics.inherited_budget_tokens:,} tokens accounted in earlier attempts. Current-run tokens exclude inherited work.")
+        if result.diagnostics.source_dispositions:
+            with st.expander("Source coverage audit"):
+                st.dataframe(result.diagnostics.source_dispositions, hide_index=True)
+        if result.diagnostics.evaluation_error:
+            st.warning(f"Independent evaluation unavailable: {result.diagnostics.evaluation_error}")
+        if result.diagnostics.unresolved_findings:
+            with st.expander("Unresolved review findings"):
+                st.json([f.model_dump(mode="json") for f in result.diagnostics.unresolved_findings])
+    if result.call_attempts:
+        with st.expander("Token usage by phase and call"):
+            st.caption("Totals are cumulative across requests, not the context size of one request. Budget accounting includes estimates for calls whose usage was unavailable. Provider totals are authoritative; reasoning and cache details remain in raw usage metadata.")
+            rows = []
+            for phase in ("generation", "catalog", "evaluation"):
+                calls = [c for c in result.call_attempts if c.phase == phase]
+                rows.append({"Phase": phase, "Calls": len(calls),
+                             "Provider reported total": sum(c.reported_total_tokens or 0 for c in calls),
+                             "Unknown totals": sum(c.reported_total_tokens is None for c in calls),
+                             "Failed/blocked calls": sum(c.status != "completed" for c in calls),
+                             "Failed call budget tokens": sum(c.budget_tokens for c in calls if c.status != "completed"),
+                             "Max observed input": max((c.input_tokens for c in calls if c.input_tokens is not None), default=None),
+                             "Budget accounted": sum(c.budget_tokens for c in calls),
+                             "Estimated": sum(c.estimated_tokens for c in calls)})
+            st.table(rows)
+            st.dataframe([{"Phase": c.phase, "Stage": c.stage, "Task": c.task_index,
+                           "Attempt": c.attempt, "Model": c.model, "Status": c.status,
+                           "Input": c.input_tokens, "Output": c.output_tokens,
+                           "Reported total": c.reported_total_tokens, "Budget accounted": c.budget_tokens,
+                           "Finish reason": c.finish_reason} for c in result.call_attempts], hide_index=True)
+    if manifest.status is not RunStatus.COMPLETED and result.bundle is not None:
+        st.warning("Draft artifacts retained. This run has not completed validation and review.")
+        _download("Download draft bundle", result.download_bundle(), f"{manifest.run_id}-draft.json", f"{key_prefix}-{manifest.run_id}-draft")
 
     if manifest.status is RunStatus.COMPLETED and result.bundle is not None:
         download_columns = st.columns(2)
@@ -2587,6 +2685,7 @@ def _render_centralized_create(
                 provider_settings,
                 repository=repository,
                 progress=progress,
+                request_id=st.session_state.setdefault("generation_request_id", uuid4().hex),
             )
     except Exception as error:
         live_stage.empty()
@@ -2834,6 +2933,7 @@ def _render_run_settings(run_type: RunType) -> None:
                     help="Applied after the core evidence, safety, and output-schema rules.",
                 )
     else:
+        st.caption("Test writer creates scenarios and executable tests together. Scenario architect settings apply to scenario gap repairs.")
         for agent in RUN_CONFIG_AGENTS[run_type]:
             with st.container(border=True):
                 st.markdown(f"#### {RUN_AGENT_LABELS[agent]}")
@@ -2991,8 +3091,20 @@ def _render_run_summary(run_type: RunType, settings: ProviderSettings) -> None:
     st.table(rows)
     st.caption(
         "The exact provider, model, thinking, token, and prompt configuration "
-        "is saved with the run."
+        "is saved with the run. The run token ceiling is cumulative across requests; "
+        "output caps apply to individual responses and differ from the model context window."
     )
+
+
+@st.cache_data(show_spinner=False)
+def _document_preflight(pdf_bytes: bytes) -> dict[str, int]:
+    from brd_srs_testgen.pipelines import _bounded_groups
+    pages = extract_pages(pdf_bytes)
+    chunks = chunk_pages(pages)
+    characters = sum(len(c.text) for c in chunks)
+    return {"pages": len(pages), "characters": characters, "chunks": len(chunks),
+            "scouts": len([group for group in _bounded_groups(chunks, lambda c: len(c.text), 6_000) if group]),
+            "estimated_tokens": (characters + 3) // 4}
 
 
 def _render_create(repository: RunRepository) -> None:
@@ -3002,6 +3114,7 @@ def _render_create(repository: RunRepository) -> None:
     _render_create_steps(active_step)
 
     if active_step == 1:
+        st.session_state.pop("generation_request_id", None)
         st.markdown("### Select a run type")
         run_type = st.radio(
             "Run type",
@@ -3070,6 +3183,14 @@ def _render_create(repository: RunRepository) -> None:
         )
     elif selected_upload is None:
         st.caption(f"Using your previously selected file: {upload.name}")
+    if upload is not None:
+        try:
+            summary = _document_preflight(upload.getvalue())
+            st.info(f"{summary['pages']} PDF pages · {summary['characters']:,} extracted characters · {summary['chunks']} evidence chunks · {summary['scouts']} non-empty Scout tasks in multi-agent mode.")
+            st.caption(f"Rough source text estimate: {summary['estimated_tokens']:,} tokens at 4 characters/token. This excludes prompts, schemas, repeated evidence, generated output and evaluation; it is not a cost or context-limit guarantee.")
+            st.caption("Multi-agent mode also audits each source group. It uses an 8,000-token maximum per bounded response (or your lower configured cap), with one split on truncation. Scenario, writer and review task counts depend on the extracted requirements.")
+        except DocumentError as error:
+            st.warning(f"Document preflight: {error}")
     generate = st.button(
         "Generate test cases",
         type="primary",
@@ -3098,6 +3219,7 @@ def _render_create(repository: RunRepository) -> None:
                 provider_settings,
                 repository=repository,
                 progress=status.write,
+                request_id=st.session_state.setdefault("generation_request_id", uuid4().hex),
             )
             label, state = _result_status(result)
             status.update(label=label, state=state, expanded=state == "error")

@@ -1,0 +1,15 @@
+{
+  "type": "posthoc-checkpoint-recovery-v1",
+  "parent_run_id": "228f8d258152-ab53f20cf7e65c37b3abbc83c947bb90",
+  "comparison_manifest_sha256": "96dd4596b64a9c42c8acb1d208474416f4e3af4f224b0eddbbd07cd2618e2968",
+  "previously_accounted_tokens": 1346446,
+  "additional_generation_limit": 100000,
+  "additional_judge_limit": 100000,
+  "maximum_additional_tokens": 200000,
+  "total_authorized_tokens": 1600000,
+  "configured_generation_limit": 200000,
+  "budget_note": "Original settings remain identical for checkpoint fingerprints. An external study limit tightens the new generation ledger to 100000. Inherited cost is reported separately and included in cumulative workflow cost.",
+  "interpretation": "Supplementary recovery after a failed matched trial; not a fresh repetition or a pass at the original cumulative 200000 ceiling.",
+  "gate": "Verify every saved task is reused before the first new repair call. No further retry if this recovery fails.",
+  "sha256": "a9f1dc4c0e46aa63c592c1ed40d5016e19d20e231c493a8e930be83d2d727cbf"
+}

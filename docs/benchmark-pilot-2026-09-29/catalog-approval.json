@@ -1,0 +1,18 @@
+{
+  "recorded_at": "2026-09-30T04:28:38.328936+00:00",
+  "user_statement": "Approve both source catalogs",
+  "manifest_sha256": "104a5ec1aadb19ca5a91ae8f7dfc8135501ba75f5d9a2d02b250ba5bf112f99d",
+  "catalogs": {
+    "D001": {
+      "file": "D001-catalog.draft.json",
+      "sha256": "8706c9c3f067e3a22795fdbd2e39185716103d6c8712de3ec0d513229bd93ef0",
+      "units": 91
+    },
+    "D002": {
+      "file": "D002-catalog.draft.json",
+      "sha256": "dd98d7d42e85e52bf2ca602c1a5e87f5439dc0cc717fcc8cb5d8bedad12c6675",
+      "units": 84
+    }
+  },
+  "scope": "Source catalog contents only; generated-suite human ratings remain pending."
+}

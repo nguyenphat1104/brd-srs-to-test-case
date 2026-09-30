@@ -1,0 +1,90 @@
+{
+  "conditions": {
+    "single": {
+      "attempts": 0,
+      "completed": 0,
+      "evaluation_unavailable": 0,
+      "budget_tokens_by_phase": {
+        "generation": 0,
+        "catalog": 0,
+        "evaluation": 0
+      },
+      "generation_tokens_per_completed_suite": null,
+      "mean_f1_when_available": null,
+      "mean_latency_seconds": null,
+      "human_approved_cost_per_suite": null
+    },
+    "staged": {
+      "attempts": 0,
+      "completed": 0,
+      "evaluation_unavailable": 0,
+      "budget_tokens_by_phase": {
+        "generation": 0,
+        "catalog": 0,
+        "evaluation": 0
+      },
+      "generation_tokens_per_completed_suite": null,
+      "mean_f1_when_available": null,
+      "mean_latency_seconds": null,
+      "human_approved_cost_per_suite": null
+    },
+    "multi_corrected": {
+      "attempts": 0,
+      "completed": 0,
+      "evaluation_unavailable": 0,
+      "budget_tokens_by_phase": {
+        "generation": 0,
+        "catalog": 0,
+        "evaluation": 0
+      },
+      "generation_tokens_per_completed_suite": null,
+      "mean_f1_when_available": null,
+      "mean_latency_seconds": null,
+      "human_approved_cost_per_suite": null
+    },
+    "multi_efficient": {
+      "attempts": 2,
+      "completed": 0,
+      "evaluation_unavailable": 2,
+      "budget_tokens_by_phase": {
+        "generation": 209891,
+        "catalog": 0,
+        "evaluation": 0
+      },
+      "generation_tokens_per_completed_suite": null,
+      "mean_f1_when_available": null,
+      "mean_latency_seconds": 421.3455818160437,
+      "human_approved_cost_per_suite": null
+    }
+  },
+  "paired_document_differences": {
+    "single": {
+      "documents": [],
+      "mean_f1_difference": null,
+      "bootstrap_95_interval": null,
+      "predeclared_f1_tolerance": null,
+      "f1_noninferiority": "inconclusive",
+      "note": "Exploratory document-level bootstrap; more repeats do not replace independent documents. Missing trials and human ratings prevent a quality-equivalence claim."
+    },
+    "staged": {
+      "documents": [],
+      "mean_f1_difference": null,
+      "bootstrap_95_interval": null,
+      "predeclared_f1_tolerance": null,
+      "f1_noninferiority": "inconclusive",
+      "note": "Exploratory document-level bootstrap; more repeats do not replace independent documents. Missing trials and human ratings prevent a quality-equivalence claim."
+    },
+    "multi_corrected": {
+      "documents": [],
+      "mean_f1_difference": null,
+      "bootstrap_95_interval": null,
+      "predeclared_f1_tolerance": null,
+      "f1_noninferiority": "inconclusive",
+      "note": "Exploratory document-level bootstrap; more repeats do not replace independent documents. Missing trials and human ratings prevent a quality-equivalence claim."
+    }
+  },
+  "quality_preservation": "Not established: requires complete evaluations and blinded human ratings, including critical-error checks.",
+  "planned_trials": 2,
+  "recorded_trials": 2,
+  "budget_accounted_tokens": 209891
+}

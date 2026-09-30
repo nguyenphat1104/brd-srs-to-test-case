@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "CoverageUnit": {
+      "additionalProperties": false,
+      "properties": {
+        "unit_id": {
+          "pattern": "^CU-\\d{3,}$",
+          "title": "Unit Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "unit_type": {
+          "minLength": 1,
+          "title": "Unit Type",
+          "type": "string"
+        },
+        "source_references": {
+          "items": {
+            "$ref": "#/$defs/SourceReference"
+          },
+          "minItems": 1,
+          "title": "Source References",
+          "type": "array"
+        }
+      },
+      "required": [
+        "unit_id",
+        "title",
+        "description",
+        "unit_type",
+        "source_references"
+      ],
+      "title": "CoverageUnit",
+      "type": "object"
+    },
+    "SourceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_id": {
+          "minLength": 1,
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "page_number": {
+          "minimum": 1,
+          "title": "Page Number",
+          "type": "integer"
+        },
+        "section": {
+          "default": "",
+          "title": "Section",
+          "type": "string"
+        },
+        "excerpt": {
+          "minLength": 1,
+          "title": "Excerpt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "chunk_id",
+        "page_number",
+        "excerpt"
+      ],
+      "title": "SourceReference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "units": {
+      "items": {
+        "$ref": "#/$defs/CoverageUnit"
+      },
+      "title": "Units",
+      "type": "array"
+    }
+  },
+  "required": [
+    "units"
+  ],
+  "title": "CoverageUnitBatch",
+  "type": "object"
+}

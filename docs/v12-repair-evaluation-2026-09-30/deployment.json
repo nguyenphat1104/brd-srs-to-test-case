@@ -1,0 +1,39 @@
+{
+  "verified_at": "2026-09-30T15:36:16.626469+00:00",
+  "prompt_version": "research-core-v12",
+  "health": "ok",
+  "implementation": {
+    "source_sha256": {
+      "runner.py": "9eaef2a3cfa9de6ae648aea15ec0abfd371b95050a98d65e073e06bafd6b89a9",
+      "pipelines.py": "88994b17481f94bebb379524f28de6c4f2869521b197c37793a74e627953f9ec",
+      "prompts.py": "28586fd37c4f734ffc7e58dd87e6aaeb2512e0a217b28bb721cb42c61b1fd380",
+      "providers.py": "915afd1e0179fb702b76dd2c3dbfd89730ff0166dc4727723219c78b1ebc878a",
+      "documents.py": "a1d9aca9e59d19f0dc4d14235f975dad83766952c5bba04612fe52685f4b6aaf",
+      "models.py": "ef4719cb7a9d397b2aa415be4b8ba65f5715829061615cbd53b8be11f0aee5c4",
+      "coverage.py": "998675c48b6ae9706a6ad38acf8dca125893ae3d70b0d58595b7a5a50900d66d",
+      "validation.py": "20f414af71541e189fcd69d8974d2adaced1b5bb91a9964e1b2553b6f4ed0a59",
+      "evidence.py": "aac1c221f4a84b91fe38ed40f5e64168768593fd75d42e1843f46ac900fb71b0",
+      "efficient.py": "ba3d8e09792ee0a87f7268d07b0e6cd8bcf6cf340ced3edacf9e1e9fa713a88f",
+      "evaluation.py": "d1ff55c7a0c8ed39034520d847e32c0825aa4a8f4cc164703123e04faafc80da",
+      "benchmark.py": "76b0be1b05bf09cc5ee817cd30a7f9b78626fccae1a1a3edbd6cb02a34fbd70b",
+      "storage.py": "3dbb38e46c5df5c138325b2dfaa08618278a86bf39767da27a74517f569e21ad",
+      "schema.sql": "88932b3571aeab596fcc203ca9bbdeb0e7351d6bf3d2f4154ba45dd169d3168b"
+    },
+    "dependencies": {
+      "google-genai": "2.19.0",
+      "pydantic": "2.13.4",
+      "pypdf": "6.16.2",
+      "psycopg": "3.3.4"
+    }
+  },
+  "image_and_health": "sha256:2b734e47e0f572ef906aab81d5a2253776352d5b3168f3f6a221eb69a5478e45 healthy",
+  "app_sha256": "c424734e741cba8b5bd0b35c324e5a8cadd554853f0f856315bbc2a754de9a1f",
+  "source_hashes_match_workspace_and_protocol": true,
+  "verification": {
+    "full_suite_passed": 587,
+    "collection_warnings": 3,
+    "targeted_suite_passed": 263
+  },
+  "rollback": "citd-before-v12:20260930",
+  "paid_runtime": "citd-v12-validation:20260930"
+}

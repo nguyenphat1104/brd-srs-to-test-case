@@ -4,7 +4,6 @@ import hashlib
 import io
 import re
 from collections.abc import Iterable
-from difflib import SequenceMatcher
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -18,6 +17,7 @@ class DocumentError(ValueError):
 
 
 T = TypeVar("T", bound=BaseModel)
+_TOC_PAGE_NUMBER = re.compile(r"\.{5,}\s*(?:[A-Z]+-)?\d+\b", re.IGNORECASE)
 
 
 def normalize_text(text: str) -> str:
@@ -25,78 +25,8 @@ def normalize_text(text: str) -> str:
 
 
 def _evidence_key(text: str) -> str:
-    return " ".join(re.findall(r"\w+", normalize_text(text).casefold()))
-
-
-def _grounded_excerpt(excerpt: str, evidence: str) -> str | None:
-    normalized = normalize_text(evidence)
-    words = _evidence_key(excerpt).split()
-    if len(words) < 5:
-        return None
-    evidence_tokens = list(re.finditer(r"\w+", normalized))
-    evidence_words = [match.group().casefold() for match in evidence_tokens]
-    if "..." in excerpt or "…" in excerpt:
-        segments = [
-            _evidence_key(segment).split()
-            for segment in re.split(r"(?:\.\.\.|…)", excerpt)
-            if _evidence_key(segment)
-        ]
-        positions: list[tuple[int, int]] = []
-        cursor = 0
-        for segment in segments:
-            position = next(
-                (
-                    index
-                    for index in range(cursor, len(evidence_words) - len(segment) + 1)
-                    if evidence_words[index : index + len(segment)] == segment
-                ),
-                None,
-            )
-            if position is None:
-                positions = []
-                break
-            positions.append((position, position + len(segment) - 1))
-            cursor = position + len(segment)
-        if positions:
-            return normalized[
-                evidence_tokens[positions[0][0]].start() : evidence_tokens[
-                    positions[-1][1]
-                ].end()
-            ]
-    candidates: list[tuple[float, int, int]] = []
-    window_size = max(len(words) * 2, len(words) + 10)
-    for start, word in enumerate(evidence_words):
-        if word != words[0]:
-            continue
-        window = evidence_words[start : start + window_size]
-        matches = [
-            match
-            for match in SequenceMatcher(
-                None, words, window, autojunk=False
-            ).get_matching_blocks()
-            if match.size
-        ]
-        coverage = sum(match.size for match in matches) / len(words)
-        if coverage >= 0.9:
-            final = matches[-1]
-            candidates.append(
-                (coverage, start + matches[0].b, start + final.b + final.size - 1)
-            )
-    if not candidates:
-        match = SequenceMatcher(
-            None, words, evidence_words, autojunk=False
-        ).find_longest_match()
-        if match.size < 8 or match.size * 5 < len(words) * 2:
-            return None
-        return normalized[
-            evidence_tokens[match.b].start() : evidence_tokens[
-                match.b + match.size - 1
-            ].end()
-        ]
-    _coverage, first, last = max(
-        candidates, key=lambda item: (item[0], -(item[2] - item[1]))
-    )
-    return normalized[evidence_tokens[first].start() : evidence_tokens[last].end()]
+    # Preserve operators, signs, decimals, units and negation in exact quotes.
+    return normalize_text(text)
 
 
 def extract_pages(pdf_bytes: bytes) -> list[tuple[int, str]]:
@@ -125,6 +55,13 @@ def _section_heading(raw_text: str) -> str:
     return ""
 
 
+def _is_table_of_contents(raw_text: str) -> bool:
+    return (
+        "table of contents" in normalize_text(raw_text).casefold()
+        or len(_TOC_PAGE_NUMBER.findall(raw_text)) >= 3
+    )
+
+
 def _pieces(text: str, max_chars: int) -> Iterable[str]:
     start = 0
     while start < len(text):
@@ -145,6 +82,8 @@ def chunk_pages(
         raise ValueError("max_chars must be positive")
     chunks: list[DocumentChunk] = []
     for page_number, raw_text in pages:
+        if _is_table_of_contents(raw_text):
+            continue
         text = normalize_text(raw_text)
         if not text:
             continue
@@ -205,7 +144,7 @@ def canonicalize_source_references(
                     if (
                         chunk is None
                         or not 5 <= len(words) <= 25
-                        or str(node["excerpt"]) not in chunk.text
+                        or " ".join(words) not in _evidence_key(chunk.text)
                     ):
                         raise DocumentError(
                             "Source references must cite an exact 5-to-25-word "
@@ -220,52 +159,16 @@ def canonicalize_source_references(
                 if matches:
                     chunk = next(
                         (item for item in matches if item.chunk_id == node["chunk_id"]),
-                        next(
-                            (
-                                item
-                                for item in matches
-                                if item.page_number == node["page_number"]
-                            ),
-                            matches[0],
-                        ),
+                        matches[0] if len(matches) == 1 else None,
                     )
-                    node.update(
-                        chunk_id=chunk.chunk_id,
-                        page_number=chunk.page_number,
-                        section=chunk.section,
-                    )
-                elif repair_excerpt:
-                    grounded = [
-                        (chunk, exact_excerpt)
-                        for chunk in chunks
-                        if (
-                            exact_excerpt := _grounded_excerpt(
-                                str(node["excerpt"]), chunk.text
-                            )
-                        )
-                    ]
-                    if grounded:
-                        chunk, exact_excerpt = next(
-                            (
-                                item
-                                for item in grounded
-                                if item[0].chunk_id == node["chunk_id"]
-                            ),
-                            next(
-                                (
-                                    item
-                                    for item in grounded
-                                    if item[0].page_number == node["page_number"]
-                                ),
-                                grounded[0],
-                            ),
-                        )
+                    if chunk is not None:
                         node.update(
                             chunk_id=chunk.chunk_id,
                             page_number=chunk.page_number,
                             section=chunk.section,
-                            excerpt=exact_excerpt,
                         )
+                # An unmatched quote stays invalid, even when repair_excerpt=True.
+                # Fuzzy rewriting can change the claim without fixing the artifact.
             for item in node.values():
                 visit(item)
 

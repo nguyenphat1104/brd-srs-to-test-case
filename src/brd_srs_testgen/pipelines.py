@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import threading
 import time
 from collections.abc import Callable, Iterable
+from contextvars import ContextVar
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -18,16 +21,21 @@ from .models import (
     AgentStageOutput,
     ActivityEvent,
     ArtifactBundle,
+    ArtifactPatch,
+    CallAttempt,
     CandidateRequirement,
     CandidateRequirementBatch,
     CriticFinding,
     CriticReport,
-    CriticSeverity,
     DocumentChunk,
     Requirement,
+    RequirementAssignmentBatch,
     RequirementBatch,
+    RequirementDecision,
     RequirementSynthesis,
     ReviewResult,
+    RepairVerification,
+    RunDiagnostics,
     Scenario,
     ScenarioBatch,
     TestCase,
@@ -40,7 +48,9 @@ from .providers import (
     ProviderError,
     StructuredOutputError,
     StructuredProvider,
+    CALL_USAGE,
 )
+from .validation import validate_bundle
 from .prompts import (
     RULES,
     WORKER_COUNT,
@@ -51,10 +61,14 @@ from .prompts import (
     requirements_prompt,
     review_prompt,
     repair_prompt,
+    repair_context,
+    repair_verification_prompt,
     revision_prompt,
     scenario_architect_prompt,
     scenarios_prompt,
     curator_prompt,
+    curator_decisions_prompt,
+    curator_requirements_prompt,
     scout_prompt,
     single_prompt,
     test_writer_prompt,
@@ -62,11 +76,13 @@ from .prompts import (
 )
 
 
+CURRENT_TASK: ContextVar[tuple[str, int] | None] = ContextVar("pipeline_task", default=None)
+
 T = TypeVar("T", bound=BaseModel)
 I = TypeVar("I")
 R = TypeVar("R")
 Messages = list[dict[str, str]]
-PROMPT_VERSION = "research-core-v4"
+PROMPT_VERSION = "research-core-v12"
 MIN_OUTPUT_TOKENS = 1_024
 MULTI_AGENT_BUDGET_SHARES = {
     "scout": 0.25,
@@ -77,6 +93,8 @@ MULTI_AGENT_BUDGET_SHARES = {
     "repair": 0.05,
 }
 LOCAL_EVIDENCE_CHARS_PER_TASK = 6_000
+CURATOR_SINGLE_PASS_MAX_CANDIDATES = 100
+CURATOR_REQUIREMENTS_PER_TASK = 24
 STAGED_OUTPUT_TOKEN_DEFAULTS = {
     "requirements": 16_000,
     "scenarios": 24_000,
@@ -108,7 +126,19 @@ class PipelineContext:
     worker_limit: int = WORKER_COUNT
     bounded_tasks: bool = False
     critic_enabled: bool = True
+    efficient: bool = False
+    recovery_signature: str = ""
+    recovery_parent: str | None = None
+    checkpoints: list[AgentStageOutput] = field(default_factory=list)
+    stage_recorder: Callable[[AgentStageOutput], None] | None = None
     stage_outputs: list[AgentStageOutput] = field(default_factory=list)
+    call_attempts: list[CallAttempt] = field(default_factory=list)
+    call_recorder: Callable[[CallAttempt], None] | None = None
+    sanitize: Callable[[str], str] = str
+    provider_names: dict[str, str] = field(default_factory=dict)
+    diagnostics: RunDiagnostics = field(default_factory=RunDiagnostics)
+    partial_bundle: ArtifactBundle | None = None
+    _tasks: dict[str, int] = field(default_factory=dict, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     @property
@@ -129,8 +159,8 @@ class PipelineContext:
 
     def _record(self, result: GenerationResult | StructuredOutputError) -> None:
         with self._lock:
-            self.input_tokens += result.input_tokens
-            self.output_tokens += result.output_tokens
+            self.input_tokens += result.input_tokens or 0
+            self.output_tokens += result.output_tokens or 0
             self.latency_seconds += result.latency_seconds
 
     def _record_latency(self, latency_seconds: float) -> None:
@@ -145,18 +175,54 @@ class PipelineContext:
         output: BaseModel,
         *,
         role: str | None = None,
+        fingerprint: str = "",
+        reused_from: str | None = None,
     ) -> None:
         row = AgentStageOutput(
             stage=stage,
             task_index=task_index,
             role=role or stage,
             input_ids=input_ids,
+            fingerprint=fingerprint,
+            reused_from=reused_from,
             output=output.model_dump(mode="json"),
             created_at=datetime.now(UTC),
         )
         with self._lock:
             self.stage_outputs.append(row)
             self.stage_outputs.sort(key=AgentStageOutput.order_key)
+        if self.stage_recorder is not None:
+            self.stage_recorder(row)
+
+    def task(self, stage, index, inputs, schema, produce, validate, *, role=None):
+        """Reuse only a validated output whose complete inputs/configuration match."""
+        fingerprint = hashlib.sha256(json.dumps({
+            "signature": self.recovery_signature, "stage": stage,
+            "inputs": inputs, "schema": schema.model_json_schema(),
+        }, sort_keys=True, default=str).encode()).hexdigest()
+        saved = next((row for row in self.checkpoints
+                      if row.stage == stage and row.task_index == index
+                      and row.fingerprint == fingerprint), None)
+        label = stage.replace("_", " ").title()
+        if saved is not None:
+            self.notify(f"{label}: reusing validated task {index + 1}.")
+            value = schema.model_validate(saved.output)
+            validate(value)
+            with self._lock:
+                self.diagnostics.reused_tasks += 1
+            self.record_stage(stage, index, [], value, role=role,
+                              fingerprint=fingerprint, reused_from=self.recovery_parent)
+            return value
+        self.notify(f"{label}: working on task {index + 1}.")
+        task_token = CURRENT_TASK.set((stage, index))
+        try:
+            value = produce()
+        finally:
+            CURRENT_TASK.reset(task_token)
+        validate(value)
+        self.record_stage(stage, index, [], value, role=role, fingerprint=fingerprint)
+        self.notify(f"{label}: saved validated task {index + 1}.")
+        return value
 
     def _output_budget(self, messages: Messages, schema: type[BaseModel], requested: int) -> int:
         if self.max_request_tokens is None:
@@ -227,6 +293,19 @@ class PipelineContext:
         transport_retries = 0
         schema_repair_count = 0
         observed_timeout: ProviderError | None = None
+        stage = {
+            "ArtifactPatch": "repair",
+            "RepairVerification": "repair_verification",
+            "CoverageUnitBatch": "catalog",
+            "CoverageMappingBatch": "evaluation",
+            "RequirementAssignmentBatch": "curator_assignment",
+        }.get(schema.__name__, agent)
+        with self._lock:
+            task_index = self._tasks.get(stage, 0)
+            self._tasks[stage] = task_index + 1
+        if current_task := CURRENT_TASK.get():
+            stage, task_index = current_task
+        attempt = 0
         while True:
             if cancellation_event is not None and cancellation_event.is_set():
                 raise CancelledError("A sibling worker failed.")
@@ -240,8 +319,10 @@ class PipelineContext:
             )
             started = time.perf_counter()
             try:
-                result = self._provider_for(agent).generate(
-                    current_messages, schema, max_output_tokens=output_budget
+                attempt += 1
+                result = self._generate_attempt(
+                    current_messages, schema, output_budget,
+                    agent=agent, stage=stage, task_index=task_index, attempt=attempt,
                 )
             except ProviderError as error:
                 self._record_latency(time.perf_counter() - started)
@@ -290,6 +371,59 @@ class PipelineContext:
             else:
                 self._record(result)
                 return result.value
+
+    def _generate_attempt(
+        self, messages: Messages, schema: type[T], output_budget: int,
+        *, agent: str, stage: str, task_index: int, attempt: int,
+    ) -> GenerationResult[T]:
+        provider = self._provider_for(agent)
+        schema_json = json.dumps(schema.model_json_schema(), sort_keys=True)
+        request_json = json.dumps({
+            "messages": messages, "schema": schema_json, "model": provider.model,
+            "max_output_tokens": output_budget,
+            "thinking_level": getattr(provider, "thinking_level", None),
+        }, sort_keys=True)
+        metadata: dict = {}
+        token = CALL_USAGE.set(metadata)
+        started_at = datetime.now(UTC)
+        started = time.perf_counter()
+        status, error_text, response_excerpt = "failed", "", ""
+        try:
+            result = provider.generate(messages, schema, max_output_tokens=output_budget)
+            metadata.setdefault("input_tokens", result.input_tokens)
+            metadata.setdefault("output_tokens", result.output_tokens)
+            metadata.setdefault("reported_total_tokens", result.billed_tokens)
+            status = "completed"
+            return result
+        except Exception as error:
+            error_text = self.sanitize(str(error))[:2000]
+            if isinstance(error, BudgetExceeded) and error.reservation_blocked:
+                status = "blocked"
+            if isinstance(error, StructuredOutputError):
+                metadata.setdefault("input_tokens", error.input_tokens)
+                metadata.setdefault("output_tokens", error.output_tokens)
+                response_excerpt = self.sanitize(error.raw_text)[:4000]
+            raise
+        finally:
+            CALL_USAGE.reset(token)
+            row = CallAttempt(
+                call_id=uuid4().hex,
+                phase=stage if stage in {"catalog", "evaluation"} else "generation",
+                stage=stage, task_index=task_index, attempt=attempt,
+                model=provider.model,
+                provider=self.provider_names.get(agent, type(provider).__name__),
+                schema_name=schema.__name__,
+                request_hash=hashlib.sha256(request_json.encode()).hexdigest(),
+                schema_hash=hashlib.sha256(schema_json.encode()).hexdigest(),
+                max_output_tokens=output_budget, status=status,
+                error=error_text, response_excerpt=response_excerpt,
+                started_at=started_at, latency_seconds=time.perf_counter() - started,
+                **metadata,
+            )
+            with self._lock:
+                self.call_attempts.append(row)
+            if self.call_recorder is not None:
+                self.call_recorder(row)
 
     def revise(
         self,
@@ -353,6 +487,24 @@ def run_staged_single_agent(
     context: PipelineContext, chunks: Iterable[DocumentChunk]
 ) -> ArtifactBundle:
     chunks = list(chunks)
+    if context.efficient:
+        def checked(value):
+            _canonicalize_grounded(value, chunks)
+            values = next(iter(value.model_dump().values()))
+            keys = [next(v[k] for k in ("requirement_id", "scenario_id", "test_case_id") if k in v) for v in values]
+            if len(keys) != len(set(keys)):
+                raise PipelineOutputError("Duplicate IDs in staged checkpoint.")
+        requirements = context.task("requirements", 0, {"prompt": requirements_prompt(chunks)}, RequirementBatch,
+            lambda: context.generate([_user(requirements_prompt(chunks))], RequirementBatch, STAGED_OUTPUT_TOKEN_DEFAULTS["requirements"], agent="requirements"), checked, role="requirements")
+        context.partial_bundle = ArtifactBundle(requirements=requirements.requirements, scenarios=[], test_cases=[])
+        scenarios = context.task("scenarios", 0, {"prompt": scenarios_prompt(requirements, chunks)}, ScenarioBatch,
+            lambda: context.generate([_user(scenarios_prompt(requirements, chunks))], ScenarioBatch, STAGED_OUTPUT_TOKEN_DEFAULTS["scenarios"], agent="scenarios"),
+            lambda value: (checked(value), _validate_scenario_batch(value, requirements.requirements)), role="scenarios")
+        context.partial_bundle = ArtifactBundle(requirements=requirements.requirements, scenarios=scenarios.scenarios, test_cases=[])
+        cases = context.task("test_cases", 0, {"prompt": test_cases_prompt(requirements, scenarios, chunks)}, TestCaseBatch,
+            lambda: context.generate([_user(test_cases_prompt(requirements, scenarios, chunks))], TestCaseBatch, STAGED_OUTPUT_TOKEN_DEFAULTS["test_cases"], agent="test_cases"),
+            lambda value: (checked(value), _validate_writer_cases(0, value, scenarios.scenarios)), role="test_cases")
+        return ArtifactBundle(requirements=requirements.requirements, scenarios=scenarios.scenarios, test_cases=cases.test_cases)
 
     prompt = _user(requirements_prompt(chunks))
     requirements = canonicalize_source_references(
@@ -572,14 +724,51 @@ def _canonicalize_grounded(value: T, chunks: list[DocumentChunk]) -> T:
         raise PipelineOutputError(str(error)) from error
 
 
-def _validate_synthesis(
-    candidates: Iterable[CandidateRequirement], synthesis: RequirementSynthesis
-) -> None:
+def _validate_curator_decisions(
+    candidates: Iterable[CandidateRequirement],
+    decisions: Iterable[RequirementDecision],
+    *,
+    expected_requirement_ids: list[str] | None = None,
+    require_contiguous_ids: bool = True,
+) -> list[str]:
     candidates = list(candidates)
     candidate_ids = {item.candidate_id for item in candidates}
-    decision_ids = [item.candidate_id for item in synthesis.decisions]
+    decisions = list(decisions)
+    decision_ids = [item.candidate_id for item in decisions]
     if len(decision_ids) != len(set(decision_ids)) or set(decision_ids) != candidate_ids:
         raise PipelineOutputError("Curator must decide every candidate exactly once.")
+
+    canonical_ids = sorted(
+        {
+            decision.canonical_requirement_id
+            for decision in decisions
+            if decision.canonical_requirement_id is not None
+        },
+        key=lambda item: int(item.removeprefix("REQ-")),
+    )
+    expected_ids = expected_requirement_ids or [
+        f"REQ-{index:03d}" for index in range(1, len(canonical_ids) + 1)
+    ]
+    if require_contiguous_ids and canonical_ids != expected_ids:
+        raise PipelineOutputError(
+            "Curator canonical requirement IDs must begin REQ-001 and increase by one."
+        )
+    return canonical_ids
+
+
+def _validate_synthesis(
+    candidates: Iterable[CandidateRequirement],
+    synthesis: RequirementSynthesis,
+    *,
+    expected_requirement_ids: list[str] | None = None,
+) -> None:
+    candidates = list(candidates)
+    _validate_curator_decisions(
+        candidates,
+        synthesis.decisions,
+        expected_requirement_ids=expected_requirement_ids,
+        require_contiguous_ids=False,
+    )
 
     requirements_by_id = {
         requirement.requirement_id: requirement for requirement in synthesis.requirements
@@ -587,7 +776,9 @@ def _validate_synthesis(
     canonical_ids = [requirement.requirement_id for requirement in synthesis.requirements]
     if len(canonical_ids) != len(requirements_by_id):
         raise PipelineOutputError("Curator returned duplicate canonical requirement IDs.")
-    expected_ids = [f"REQ-{index:03d}" for index in range(1, len(canonical_ids) + 1)]
+    expected_ids = expected_requirement_ids or [
+        f"REQ-{index:03d}" for index in range(1, len(canonical_ids) + 1)
+    ]
     if canonical_ids != expected_ids:
         raise PipelineOutputError(
             "Curator canonical requirement IDs must begin REQ-001 and increase by one."
@@ -734,7 +925,8 @@ def _dependency_context(
 
 
 def _relevant_chunks(
-    artifacts: list[Requirement | Scenario], chunks: list[DocumentChunk]
+    artifacts: list[CandidateRequirement | Requirement | Scenario],
+    chunks: list[DocumentChunk],
 ) -> list[DocumentChunk]:
     chunk_ids = {
         reference.chunk_id
@@ -742,6 +934,175 @@ def _relevant_chunks(
         for reference in artifact.source_references
     }
     return [chunk for chunk in chunks if chunk.chunk_id in chunk_ids]
+
+
+def _run_curator(
+    context: PipelineContext,
+    candidates: list[CandidateRequirement],
+    chunks: list[DocumentChunk],
+) -> RequirementSynthesis:
+    if len(candidates) <= CURATOR_SINGLE_PASS_MAX_CANDIDATES:
+        synthesis = canonicalize_source_references(
+            context.generate(
+                [
+                    _user(
+                        curator_prompt(
+                            candidates,
+                            chunks,
+                            setup=context.agent_setup("curator"),
+                        )
+                    )
+                ],
+                RequirementSynthesis,
+                stage_output_tokens(
+                    context, "curator", token_ceiling=context.token_ceiling
+                ),
+                agent="curator",
+            ),
+            chunks,
+        )
+        _validate_synthesis(candidates, synthesis)
+        return synthesis
+
+    assignment_batch = context.generate(
+        [
+            _user(
+                curator_decisions_prompt(
+                    candidates,
+                    chunks,
+                    setup=context.agent_setup("curator"),
+                )
+            )
+        ],
+        RequirementAssignmentBatch,
+        stage_output_tokens(context, "curator", token_ceiling=context.token_ceiling),
+        agent="curator",
+    )
+    seen_requirement_ids: set[str] = set()
+    rejection_reasons = {
+        "unsupported": "Not supported by the source evidence.",
+        "non_testable": "Source content is not a testable requirement.",
+    }
+    decisions = []
+    for assignment in assignment_batch.assignments:
+        requirement_id = assignment.canonical_requirement_id
+        if requirement_id is None:
+            action = "reject"
+            reason = rejection_reasons.get(
+                assignment.reason_code, "Not supported by the source evidence."
+            )
+        elif requirement_id in seen_requirement_ids:
+            action = "merge"
+            reason = "Equivalent supported rule merged into the canonical requirement."
+        else:
+            action = "retain"
+            reason = "Distinct supported rule."
+            seen_requirement_ids.add(requirement_id)
+        decisions.append(
+            RequirementDecision(
+                candidate_id=assignment.candidate_id,
+                action=action,
+                canonical_requirement_id=requirement_id,
+                reason=reason,
+            )
+        )
+    requirement_ids = _validate_curator_decisions(candidates, decisions)
+    requirement_groups = [
+        requirement_ids[index : index + CURATOR_REQUIREMENTS_PER_TASK]
+        for index in range(0, len(requirement_ids), CURATOR_REQUIREMENTS_PER_TASK)
+    ]
+    candidates_by_id = {candidate.candidate_id: candidate for candidate in candidates}
+    requirements: list[Requirement] = []
+    for task_index, group_ids in enumerate(requirement_groups):
+        group_decisions = [
+            decision
+            for decision in decisions
+            if decision.canonical_requirement_id in group_ids
+        ]
+        group_candidates = [
+            candidates_by_id[decision.candidate_id] for decision in group_decisions
+        ]
+        relevant_chunks = _relevant_chunks(group_candidates, chunks)
+        context.notify(
+            f"Curator: materializing requirement batch {task_index + 1}/"
+            f"{len(requirement_groups)}.",
+            agent="Curator",
+            role=context.agent_setup("curator").role,
+            model=context.model_for("curator"),
+            state="working",
+        )
+        batch = context.generate(
+            [
+                _user(
+                    curator_requirements_prompt(
+                        group_candidates,
+                        group_decisions,
+                        group_ids,
+                        relevant_chunks,
+                        setup=context.agent_setup("curator"),
+                    )
+                )
+            ],
+            RequirementBatch,
+            stage_output_tokens(
+                context,
+                "curator",
+                token_ceiling=context.token_ceiling,
+                task_count=len(requirement_groups),
+            ),
+            agent="curator",
+        )
+        sources_by_requirement = {
+            requirement_id: [] for requirement_id in group_ids
+        }
+        seen_sources: dict[str, set[tuple[str, int, str, str]]] = {
+            requirement_id: set() for requirement_id in group_ids
+        }
+        for decision in group_decisions:
+            requirement_id = decision.canonical_requirement_id
+            if requirement_id is None:
+                continue
+            for reference in candidates_by_id[decision.candidate_id].source_references:
+                key = (
+                    reference.chunk_id,
+                    reference.page_number,
+                    reference.section,
+                    reference.excerpt,
+                )
+                if key not in seen_sources[requirement_id]:
+                    seen_sources[requirement_id].add(key)
+                    sources_by_requirement[requirement_id].append(reference)
+        batch = _canonicalize_grounded(
+            RequirementBatch(
+                requirements=[
+                    requirement.model_copy(
+                        update={
+                            "source_references": sources_by_requirement[
+                                requirement.requirement_id
+                            ]
+                        }
+                    )
+                    for requirement in batch.requirements
+                ]
+            ),
+            relevant_chunks,
+        )
+        partial = RequirementSynthesis(
+            decisions=group_decisions, requirements=batch.requirements
+        )
+        _validate_synthesis(
+            group_candidates,
+            partial,
+            expected_requirement_ids=group_ids,
+        )
+        requirements.extend(batch.requirements)
+
+    synthesis = RequirementSynthesis(
+        decisions=decisions,
+        requirements=requirements,
+    )
+    _validate_synthesis(candidates, synthesis)
+    return synthesis
 
 
 def _semantic_payload(bundle: ArtifactBundle) -> dict[str, list[object]]:
@@ -836,7 +1197,8 @@ def _validate_critic_scope(
 
 
 def _validate_repair_scope(
-    original: ArtifactBundle, repaired: ArtifactBundle, target_ids: set[str]
+    original: ArtifactBundle, repaired: ArtifactBundle, target_ids: set[str],
+    findings: list[CriticFinding] | None = None,
 ) -> None:
     original_by_id = _artifacts_by_id(original)
     repaired_by_id = _artifacts_by_id(repaired)
@@ -852,21 +1214,46 @@ def _validate_repair_scope(
     } | added_ids
     if not changed_ids <= target_ids:
         raise PipelineOutputError("Repair changed artifacts outside the findings.")
-    if any(
-        _authored_semantic_payload(repaired_by_id[artifact_id])
-        == _authored_semantic_payload(original_by_id[artifact_id])
-        for artifact_id in changed_ids - added_ids
-    ):
-        raise PipelineOutputError("Repair changed links only.")
+    for artifact_id in target_ids:
+        before, after = original_by_id[artifact_id], repaired_by_id[artifact_id]
+        kinds = {f.repair_kind for f in findings or [] if artifact_id in f.artifact_ids}
+        if kinds == {"citation"}:
+            allowed = {"source_references"}
+        elif kinds and kinds <= {"citation", "relationship"}:
+            allowed = {"requirement_ids", "scenario_id", "dependency_ids"}
+            if "citation" in kinds:
+                allowed.add("source_references")
+        else:
+            if _authored_semantic_payload(before) == _authored_semantic_payload(after):
+                raise PipelineOutputError("Semantic repair changed links only or made no correction.")
+            continue
+        if before.model_dump(exclude=allowed) != after.model_dump(exclude=allowed):
+            raise PipelineOutputError("Repair changed fields outside the finding's repair kind.")
+
+
+def _merge_patch(bundle: ArtifactBundle, patch: ArtifactPatch, target_ids: set[str]) -> ArtifactBundle:
+    changed = _artifacts_by_id(patch)
+    count = len(patch.requirements) + len(patch.scenarios) + len(patch.test_cases)
+    if len(changed) != count or set(changed) != target_ids:
+        raise PipelineOutputError("Repair must return each requested artifact ID exactly once and no others.")
+    return ArtifactBundle(
+        requirements=[changed.get(x.requirement_id, x) for x in bundle.requirements],
+        scenarios=[changed.get(x.scenario_id, x) for x in bundle.scenarios],
+        test_cases=[changed.get(x.test_case_id, x) for x in bundle.test_cases],
+    )
 
 
 def _validate_repair_citations(
-    original: ArtifactBundle, repaired: ArtifactBundle
+    original: ArtifactBundle, repaired: ArtifactBundle,
+    findings: list[CriticFinding] | None = None,
 ) -> None:
     repaired_requirements = {
         item.requirement_id: item for item in repaired.requirements
     }
+    citation_targets = {key for f in findings or [] if f.repair_kind == "citation" for key in f.artifact_ids}
     for requirement in original.requirements:
+        if requirement.requirement_id in citation_targets:
+            continue
         repaired_requirement = repaired_requirements.get(requirement.requirement_id)
         if (
             repaired_requirement is not None
@@ -878,15 +1265,13 @@ def _validate_repair_citations(
             )
 
 
-def _repair_role(findings: list[CriticFinding]) -> str:
-    severity_order = {
-        CriticSeverity.HIGH: 0,
-        CriticSeverity.MEDIUM: 1,
-        CriticSeverity.LOW: 2,
-    }
-    return min(
-        findings, key=lambda finding: severity_order[finding.severity]
-    ).responsible_role
+def _validate_repair_verification(verification, findings):
+    ids = verification.resolved_finding_ids + verification.unresolved_finding_ids
+    expected = {f.finding_id for f in findings}
+    if len(ids) != len(set(ids)) or set(ids) != expected:
+        raise PipelineOutputError("Repair verification must partition every finding exactly once.")
+    if set(verification.reasons) != expected or any(not reason.strip() for reason in verification.reasons.values()):
+        raise PipelineOutputError("Repair verification must explain every finding exactly once.")
 
 
 def _critique_bundle(
@@ -894,6 +1279,7 @@ def _critique_bundle(
     bundle: ArtifactBundle,
     chunks: list[DocumentChunk],
 ) -> ArtifactBundle:
+    context.partial_bundle = bundle
     if not context.critic_enabled:
         return bundle
     report = _canonicalize_grounded(
@@ -916,38 +1302,45 @@ def _critique_bundle(
     target_ids = _validate_critic_scope(report, bundle)
     context.record_stage("critic", 0, list(_artifacts_by_id(bundle)), report)
     if report.accepted:
+        context.diagnostics.semantic_status = "accepted"
         return bundle
-    role = _repair_role(report.findings)
-    repaired = context.generate(
-        [
-            _user(
-                repair_prompt(
-                    bundle,
-                    report.findings,
-                    chunks,
-                    setup=context.agent_setup(role),
-                )
-            )
-        ],
-        ArtifactBundle,
-        stage_output_tokens(
-            context,
-            "repair",
-            token_ceiling=context.token_ceiling,
-            configured_stage=role,
-        ),
-        agent=role,
+    context.diagnostics.semantic_status = "unresolved"
+    context.diagnostics.unresolved_findings = report.findings
+    repaired = bundle
+    for index, role in enumerate(dict.fromkeys(f.responsible_role for f in report.findings)):
+        findings = [f for f in report.findings if f.responsible_role == role]
+        role_targets = {key for f in findings for key in f.artifact_ids}
+        _, _, evidence = repair_context(repaired, findings, chunks)
+        patch = _canonicalize_grounded(context.generate(
+            [_user(repair_prompt(repaired, findings, chunks, setup=context.agent_setup(role)))],
+            ArtifactPatch,
+            stage_output_tokens(context, "repair", token_ceiling=context.token_ceiling, configured_stage=role),
+            agent=role,
+        ), evidence)
+        merged = _merge_patch(repaired, patch, role_targets)
+        _validate_repair_scope(repaired, merged, role_targets, findings)
+        _validate_repair_citations(repaired, merged, findings)
+        context.record_stage("repair", index, [f.finding_id for f in findings] + sorted(role_targets), patch, role=role)
+        repaired = merged
+        context.partial_bundle = repaired
+        with context._lock:
+            context.semantic_revisions += 1
+    validation = validate_bundle(repaired, chunks)
+    if not validation.valid:
+        raise PipelineOutputError("Repaired draft failed deterministic validation: " + "; ".join(f"{x.artifact_id}: {x.code}" for x in validation.issues))
+    verification = context.generate(
+        [_user(repair_verification_prompt(repaired, report.findings, chunks, setup=context.agent_setup("critic")))],
+        RepairVerification,
+        stage_output_tokens(context, "critic", token_ceiling=context.token_ceiling),
+        agent="critic",
     )
-    repaired = _canonicalize_grounded(repaired, chunks)
-    _validate_repair_scope(bundle, repaired, target_ids)
-    _validate_repair_citations(bundle, repaired)
-    context.record_stage(
-        "repair", 0,
-        [finding.finding_id for finding in report.findings] + sorted(target_ids),
-        repaired, role=role,
-    )
-    with context._lock:
-        context.semantic_revisions += 1
+    _validate_repair_verification(verification, report.findings)
+    unresolved = [f for f in report.findings if f.finding_id in verification.unresolved_finding_ids]
+    context.diagnostics.unresolved_findings = unresolved
+    context.diagnostics.semantic_status = "unresolved" if unresolved else "accepted"
+    context.record_stage("critic", 1, sorted(target_ids), verification)
+    if unresolved:
+        raise PipelineOutputError("Repair verification left unresolved findings; generated artifacts are retained as a draft.")
     return repaired
 
 
@@ -955,6 +1348,9 @@ def run_centralized_multi_agent(
     context: PipelineContext, chunks: Iterable[DocumentChunk]
 ) -> ArtifactBundle:
     chunks = list(chunks)
+    if context.efficient:
+        from .efficient import run_efficient_pipeline
+        return run_efficient_pipeline(context, chunks)
     chunk_groups = _ordered_evidence_groups(
         chunks, char_limit=LOCAL_EVIDENCE_CHARS_PER_TASK
     )
@@ -974,26 +1370,115 @@ def run_centralized_multi_agent(
         group: list[DocumentChunk],
         cancellation_event: threading.Event,
     ) -> CandidateRequirementBatch:
-        batch = context.generate(
-            [
-                _user(
-                    scout_prompt(
-                        worker_index,
-                        group,
-                        setup=context.agent_setup("scout"),
-                        worker_count=len(chunk_groups),
-                    )
+        messages = [
+            _user(
+                scout_prompt(
+                    worker_index,
+                    group,
+                    setup=context.agent_setup("scout"),
+                    worker_count=len(chunk_groups),
                 )
-            ],
+            )
+        ]
+        output_tokens = stage_output_tokens(
+            context, "scout", token_ceiling=context.token_ceiling,
+            task_count=len(chunk_groups),
+        )
+        batch = context.generate(
+            messages,
             CandidateRequirementBatch,
-            stage_output_tokens(
-                context, "scout", token_ceiling=context.token_ceiling,
-                task_count=len(chunk_groups),
-            ),
+            output_tokens,
             cancellation_event=cancellation_event,
             agent="scout",
         )
-        batch = _canonicalize_scout_candidates(worker_index, batch, group)
+        try:
+            batch = _canonicalize_scout_candidates(worker_index, batch, group)
+        except PipelineOutputError as error:
+            _validate_scout_candidates(worker_index, batch, group)
+            original_candidates = {
+                candidate.candidate_id: candidate for candidate in batch.candidates
+            }
+            grounded_by_id = {}
+            invalid_candidates = []
+            for candidate in batch.candidates:
+                try:
+                    fixed = _canonicalize_grounded(
+                        CandidateRequirementBatch(candidates=[candidate]), group
+                    )
+                except PipelineOutputError:
+                    invalid_candidates.append(candidate)
+                else:
+                    grounded_by_id[candidate.candidate_id] = fixed.candidates[0]
+            invalid_ids = {candidate.candidate_id for candidate in invalid_candidates}
+            context.notify(
+                f"Scout {worker_index + 1}: correcting invalid source citations.",
+                agent=f"Scout {worker_index + 1}",
+                role=context.agent_setup("scout").role,
+                model=context.model_for("scout"),
+                state="working",
+            )
+            batch = context.generate(
+                [
+                    *messages,
+                    _user(
+                        f"SCOUT {worker_index + 1}/{len(chunk_groups)} CITATION "
+                        "CORRECTION\nThe previous batch failed validation: "
+                        f"{error} Return only these invalid candidates with corrected "
+                        "source references; preserve their IDs and all other fields:\n"
+                        f"{CandidateRequirementBatch(candidates=invalid_candidates).model_dump_json()}\n"
+                        "Replace each invalid excerpt with a contiguous 5-to-25-word "
+                        "verbatim quote contained entirely in its cited evidence block."
+                    ),
+                ],
+                CandidateRequirementBatch,
+                output_tokens,
+                cancellation_event=cancellation_event,
+                agent="scout",
+            )
+            _validate_scout_candidates(worker_index, batch, group)
+            if any(
+                candidate.candidate_id not in invalid_ids
+                for candidate in batch.candidates
+            ):
+                raise PipelineOutputError(
+                    f"Scout {worker_index + 1} citation correction returned an "
+                    "unrequested candidate ID."
+                )
+            for candidate in batch.candidates:
+                try:
+                    fixed = _canonicalize_grounded(
+                        CandidateRequirementBatch(candidates=[candidate]), group
+                    )
+                except PipelineOutputError:
+                    continue
+                grounded_by_id[candidate.candidate_id] = original_candidates[
+                    candidate.candidate_id
+                ].model_copy(
+                    update={"source_references": fixed.candidates[0].source_references}
+                )
+            repaired_candidates = [
+                grounded_by_id[candidate.candidate_id]
+                for candidate in original_candidates.values()
+                if candidate.candidate_id in grounded_by_id
+            ]
+            if original_candidates and not repaired_candidates:
+                raise PipelineOutputError(
+                    f"Scout {worker_index + 1} could not repair any source citations."
+                )
+            discarded = len(original_candidates) - len(repaired_candidates)
+            if discarded:
+                context.notify(
+                    f"Scout {worker_index + 1}: discarded "
+                    f"{discarded} ungrounded candidates "
+                    "after citation correction.",
+                    agent=f"Scout {worker_index + 1}",
+                    role=context.agent_setup("scout").role,
+                    model=context.model_for("scout"),
+                    state="working",
+                )
+            batch = CandidateRequirementBatch(candidates=repaired_candidates)
+            with context._lock:
+                context.semantic_revisions += 1
         context.record_stage(
             "scout", worker_index, [item.chunk_id for item in group], batch
         )
@@ -1030,24 +1515,7 @@ def run_centralized_multi_agent(
     candidates = [
         candidate for batch in worker_candidates for candidate in batch.candidates
     ]
-    synthesis = canonicalize_source_references(
-        context.generate(
-            [
-                _user(
-                    curator_prompt(
-                        candidates,
-                        chunks,
-                        setup=context.agent_setup("curator"),
-                    )
-                )
-            ],
-            RequirementSynthesis,
-            stage_output_tokens(context, "curator", token_ceiling=context.token_ceiling),
-            agent="curator",
-        ),
-        chunks,
-    )
-    _validate_synthesis(candidates, synthesis)
+    synthesis = _run_curator(context, candidates, chunks)
     context.record_stage(
         "curator", 0, [item.candidate_id for item in candidates], synthesis
     )

@@ -1,0 +1,32 @@
+{
+  "69fb14a6f166fff9": {
+    "run_id": "32ec89e47ed2-05fff5d1093d53dbab0c02268de9e77a",
+    "condition": "multi_efficient",
+    "repeat": 0,
+    "document_id": "D002"
+  },
+  "2785e7a84efe456a": {
+    "run_id": "228f8d258152-14b6fd590fa1502f90282bce7fff33ac",
+    "condition": "staged",
+    "repeat": 0,
+    "document_id": "D001"
+  },
+  "c52f4d10a32e6e51": {
+    "run_id": "228f8d258152-c09e8543b0345360943f9a6e16007e6a",
+    "condition": "single",
+    "repeat": 0,
+    "document_id": "D001"
+  },
+  "837f65e8db992cef": {
+    "run_id": "32ec89e47ed2-345b2dc1c0ef5b91aae2915546578472",
+    "condition": "staged",
+    "repeat": 0,
+    "document_id": "D002"
+  },
+  "19ad08269f97cd64": {
+    "run_id": "32ec89e47ed2-f1fa4254c39e56a58223dc0ac3fc0527",
+    "condition": "single",
+    "repeat": 0,
+    "document_id": "D002"
+  }
+}

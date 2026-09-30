@@ -1,0 +1,63 @@
+{
+  "verified_at": "2026-09-30T06:28:28.124687+00:00",
+  "manifest_sha256": "b65dd2388fa574a9e1ed48b73c6be26757ac8eea5ee097fad026f68e543cf7eb",
+  "checks": [
+    "Both expected trials terminal and identical to database exports.",
+    "All eight original pilot results unchanged.",
+    "Frozen source archive, source PDFs and approved catalogs match recorded hashes.",
+    "Costs reconcile from immutable call attempts and remain inside both budgets."
+  ],
+  "trials": [
+    {
+      "document_id": "D001",
+      "run_id": "228f8d258152-9b91a42b8a9c5070aadffefd721b8bf1",
+      "status": "failed",
+      "failure_category": "semantic_validation",
+      "failure_message": "Unhandled ValueError after one local correction: Unknown or out-of-scope evidence ID. Process exited; recorded from durable calls and checkpoints without retry.",
+      "budget_tokens": 18406,
+      "phases": {
+        "generation": 18406
+      },
+      "stages": {
+        "generation/scout": 15166,
+        "generation/source_audit": 3240
+      },
+      "calls": 4,
+      "estimated_tokens": 0,
+      "artifact_counts": {},
+      "f1": null
+    },
+    {
+      "document_id": "D002",
+      "run_id": "32ec89e47ed2-a9f46b0384455051a0b5b7125d3f5bd6",
+      "status": "failed",
+      "failure_category": "budget_exhaustion",
+      "failure_message": "Need 10838 tokens; 8515 remain.",
+      "budget_tokens": 191485,
+      "phases": {
+        "generation": 191485
+      },
+      "stages": {
+        "generation/scout": 29588,
+        "generation/source_audit": 24165,
+        "generation/curator": 37254,
+        "generation/scenario_architect": 74983,
+        "generation/test_writer": 25495
+      },
+      "calls": 30,
+      "estimated_tokens": 0,
+      "artifact_counts": {
+        "requirements": 104,
+        "scenarios": 141,
+        "test_cases": 40
+      },
+      "f1": null
+    }
+  ],
+  "prior_spent_tokens": 522328,
+  "validation_spent_tokens": 209891,
+  "total_spent_tokens": 732219,
+  "remaining_authorized_tokens": 867781,
+  "original_pilot_rows_with_human_scores": 0,
+  "quality_preservation": "Not established. Development documents; changed generation ceiling/evaluator; human reviews incomplete."
+}

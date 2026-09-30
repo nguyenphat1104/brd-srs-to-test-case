@@ -1,0 +1,42 @@
+[
+  {
+    "document_id": "D002",
+    "condition": "multi_efficient",
+    "repeat": 0
+  },
+  {
+    "document_id": "D001",
+    "condition": "staged",
+    "repeat": 0
+  },
+  {
+    "document_id": "D001",
+    "condition": "single",
+    "repeat": 0
+  },
+  {
+    "document_id": "D001",
+    "condition": "multi_efficient",
+    "repeat": 0
+  },
+  {
+    "document_id": "D001",
+    "condition": "multi_corrected",
+    "repeat": 0
+  },
+  {
+    "document_id": "D002",
+    "condition": "staged",
+    "repeat": 0
+  },
+  {
+    "document_id": "D002",
+    "condition": "single",
+    "repeat": 0
+  },
+  {
+    "document_id": "D002",
+    "condition": "multi_corrected",
+    "repeat": 0
+  }
+]

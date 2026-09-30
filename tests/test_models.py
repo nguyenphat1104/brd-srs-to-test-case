@@ -357,6 +357,8 @@ def test_run_result_download_bundle_handles_missing_artifacts() -> None:
         "metrics": None,
         "coverage": None,
         "coverage_evaluation": None,
+        "call_attempts": [],
+        "diagnostics": None,
     }
 
 

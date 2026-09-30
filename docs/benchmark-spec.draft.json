@@ -1,0 +1,12 @@
+{
+  "held_out_approved": false,
+  "documents": [],
+  "conditions": ["single", "staged", "multi_corrected", "multi_efficient"],
+  "repeats": 3,
+  "model": "gemini-3.6-flash",
+  "thinking_level": "minimal",
+  "run_token_ceiling": 100000,
+  "max_total_budget_tokens": 0,
+  "f1_tolerance": null,
+  "seed": 20260929
+}

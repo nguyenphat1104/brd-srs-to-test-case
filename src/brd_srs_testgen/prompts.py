@@ -14,6 +14,7 @@ from .models import (
     DocumentChunk,
     Requirement,
     RequirementBatch,
+    RequirementDecision,
     ReviewResult,
     Scenario,
     ScenarioBatch,
@@ -69,7 +70,7 @@ RUN_PROMPT_DEFAULTS = {
         "including supported positive, negative, boundary, edge, and transition behavior."
     ),
     "test_writer": (
-        "Write executable manual test cases from scenarios and source evidence with "
+        "Design executable manual test cases from assigned requirements or scenarios and source evidence with "
         "ordered actions, observable results, and traceable citations."
     ),
     "critic": (
@@ -86,6 +87,7 @@ RULES = """Rules:
 - Copy chunk IDs verbatim from evidence headers; never reconstruct or alter them.
 - Every artifact must cite a real chunk ID and copy one contiguous 5-to-25-word
   supporting excerpt verbatim.
+- Keep each excerpt inside one evidence block; never continue it across chunks or pages.
 - Every requirement must be linked by at least one scenario and one test case.
 - Every scenario must have at least one test case.
 - Prefer one concise test case per scenario with 3 to 6 steps.
@@ -184,12 +186,72 @@ def curator_prompt(
 
 CURATOR RECONCILIATION
 
-Reconcile every Scout candidate against the complete ordered evidence. Return one RequirementSynthesis containing canonical requirements and exactly one decision per candidate. Retain or merge decisions must target existing canonical requirement IDs; rejected candidates must have an explicit evidence-based reason and no canonical ID. Canonical IDs must be globally unique, begin REQ-001, and increase by one without gaps. Preserve supported ambiguities and dependencies in canonical requirements. Preserve the complete deduplicated citation union from candidates retained or merged into each canonical requirement; do not borrow or omit citations. Wording similarity is insufficient when triggers, actors, limits, or outcomes differ.
+Reconcile every Scout candidate against the complete ordered evidence. Return one RequirementSynthesis containing canonical requirements and exactly one decision per candidate. Retain or merge decisions must target existing canonical requirement IDs; rejected candidates must have an explicit evidence-based reason and no canonical ID. Canonical IDs must be globally unique, begin REQ-001, and increase by one without gaps. Preserve supported ambiguities and dependencies in canonical requirements. Preserve the complete deduplicated citation union from candidates retained or merged into each canonical requirement; do not borrow or omit citations. Wording similarity is insufficient when triggers, actors, limits, or outcomes differ. Keep the response compact: use one short sentence for each decision reason and concise titles, descriptions, and ambiguity entries; do not repeat evidence outside the required fields.
 
 {_agent_setup_block(setup)}
 
 Scout candidates JSON:
 {_data_block("SCOUT CANDIDATES JSON", candidate_json)}
+
+{_evidence(chunks)}"""
+
+
+def curator_decisions_prompt(
+    candidates: Iterable[CandidateRequirement],
+    chunks: Iterable[DocumentChunk],
+    *,
+    setup: AgentSetup | None = None,
+) -> str:
+    candidate_json = json.dumps(
+        [candidate.model_dump(mode="json") for candidate in candidates],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"""{RULES}
+
+CURATOR GLOBAL DECISIONS
+
+Reconcile every Scout candidate against the complete ordered evidence. Return exactly one compact assignment per candidate with only candidate_id, canonical_requirement_id, and reason_code. Use reason_code distinct for the first candidate assigned to a canonical requirement, duplicate for later equivalent candidates, and unsupported or non_testable with a null canonical ID for rejected candidates. Canonical IDs must begin REQ-001 and increase by one without gaps. Wording similarity is insufficient when triggers, actors, limits, or outcomes differ. Return only the assignment batch; do not write explanations or requirement records.
+
+{_agent_setup_block(setup)}
+
+Scout candidates JSON:
+{_data_block("SCOUT CANDIDATES JSON", candidate_json)}
+
+{_evidence(chunks)}"""
+
+
+def curator_requirements_prompt(
+    candidates: Iterable[CandidateRequirement],
+    decisions: Iterable[RequirementDecision],
+    requirement_ids: list[str],
+    chunks: Iterable[DocumentChunk],
+    *,
+    setup: AgentSetup | None = None,
+) -> str:
+    candidate_json = json.dumps(
+        [candidate.model_dump(mode="json") for candidate in candidates],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    decision_json = json.dumps(
+        [decision.model_dump(mode="json") for decision in decisions],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"""{RULES}
+
+CURATOR REQUIREMENT MATERIALIZATION
+
+Return one RequirementBatch containing exactly these canonical IDs in this order: {json.dumps(requirement_ids)}. Synthesize each requirement only from candidates mapped to its ID. Preserve supported ambiguities. Include at least one exact citation from the mapped candidates for schema validity; the orchestrator will attach the complete deduplicated citation union deterministically. Keep titles, descriptions, and ambiguity entries concise.
+
+{_agent_setup_block(setup)}
+
+Mapped Scout candidates JSON:
+{_data_block("MAPPED SCOUT CANDIDATES JSON", candidate_json)}
+
+Curator decisions JSON:
+{_data_block("CURATOR DECISIONS JSON", decision_json)}
 
 {_evidence(chunks)}"""
 
@@ -265,7 +327,7 @@ def critic_prompt(
 
 ARTIFACT CRITIQUE
 
-Inspect the complete ArtifactBundle against all source evidence. Check for missing source behaviors, unsupported content, weak expected results, non-executable steps, duplicates, invalid trace links, and missing boundary and negative paths. Cite source evidence for every finding. Name every affected artifact ID and assign the responsible role: curator for requirements, scenario_architect for scenarios, or test_writer for test cases. Return one CriticReport. Set accepted to true only when there are no findings.
+Inspect the complete ArtifactBundle against all source evidence. Check for missing source behaviors, unsupported content, weak expected results, non-executable steps, duplicates, invalid trace links, and missing boundary and negative paths. Cite source evidence for every finding. Name every affected artifact ID and assign the responsible role: curator for requirements, scenario_architect for scenarios, or test_writer for test cases. Classify repair_kind as citation (source references only), relationship (trace links only), or semantic (authored content). Return one CriticReport. Set accepted to true only when there are no findings.
 
 {_agent_setup_block(setup)}
 
@@ -275,6 +337,58 @@ Complete ArtifactBundle JSON:
 {_evidence(chunks)}"""
 
 
+def repair_context(bundle, findings, chunks):
+    target_ids = {key for finding in findings for key in finding.artifact_ids}
+    items = {item.requirement_id: item for item in bundle.requirements}
+    items.update({item.scenario_id: item for item in bundle.scenarios})
+    items.update({item.test_case_id: item for item in bundle.test_cases})
+    related = set(target_ids)
+    pending = list(target_ids)
+    while pending:
+        item = items.get(pending.pop())
+        links = list(getattr(item, "requirement_ids", [])) + list(getattr(item, "dependency_ids", []))
+        if hasattr(item, "test_case_id"):
+            links.append(item.scenario_id)
+        for key in links:
+            if key in items and key not in related:
+                related.add(key)
+                pending.append(key)
+    def select(ids):
+        return ArtifactBundle(
+            requirements=[x for x in bundle.requirements if x.requirement_id in ids],
+            scenarios=[x for x in bundle.scenarios if x.scenario_id in ids],
+            test_cases=[x for x in bundle.test_cases if x.test_case_id in ids],
+        )
+    evidence_ids = {ref.chunk_id for key in related for ref in items[key].source_references}
+    evidence_ids.update(ref.chunk_id for finding in findings for ref in finding.source_references)
+    return select(target_ids), select(related - target_ids), [c for c in chunks if c.chunk_id in evidence_ids]
+
+
+def repair_verification_prompt(bundle, findings, chunks, *, setup=None):
+    chunks = list(chunks)
+    targets, dependencies, evidence = repair_context(bundle, findings, chunks)
+    # Gap findings target a requirement; its implementing scenarios/tests are downstream.
+    requirement_ids = {key for f in findings for key in f.artifact_ids if key.startswith('REQ-')}
+    scenario_ids = {key for f in findings for key in f.artifact_ids if key.startswith('SCN-')}
+    scenarios = [s for s in bundle.scenarios if requirement_ids & set(s.requirement_ids)]
+    scenario_ids.update(s.scenario_id for s in scenarios)
+    tests = [t for t in bundle.test_cases if t.scenario_id in scenario_ids or requirement_ids & set(t.requirement_ids)]
+    downstream = ArtifactBundle(requirements=[], scenarios=scenarios, test_cases=tests)
+    evidence_ids = {c.chunk_id for c in evidence} | {r.chunk_id for a in [*scenarios, *tests] for r in a.source_references}
+    evidence = [c for c in chunks if c.chunk_id in evidence_ids]
+    return f"""{RULES}
+
+VERIFY REPAIRS
+Check every supplied finding against the repaired targets, read-only dependencies, downstream scenarios/tests, and source evidence. A changed field alone is not evidence of resolution. Return RepairVerification: partition every supplied finding_id exactly once into resolved_finding_ids or unresolved_finding_ids. Provide a nonempty reasons entry for every finding, identifying artifact IDs and source evidence, and the exact remaining defect when unresolved. Resolve only when the original issue is demonstrably fixed, with valid evidence and no introduced contradiction. Assess observable behavior, actor permissions, initial/final states and traceability. A scenario type label alone neither proves nor disproves behavioral coverage. Findings are review claims to check against the source, not authoritative new requirements. Do not accept a wording-only change that preserves the original defect.
+
+{_agent_setup_block(setup)}
+{_data_block("REPAIRED TARGETS JSON", targets.model_dump_json())}
+{_data_block("DEPENDENCIES JSON", dependencies.model_dump_json())}
+{_data_block("DOWNSTREAM SCENARIOS AND TESTS JSON", downstream.model_dump_json())}
+{_data_block("FINDINGS JSON", json.dumps([f.model_dump(mode="json") for f in findings]))}
+{_evidence(evidence)}"""
+
+
 def repair_prompt(
     bundle: ArtifactBundle,
     findings: Iterable[CriticFinding],
@@ -282,6 +396,8 @@ def repair_prompt(
     *,
     setup: AgentSetup | None = None,
 ) -> str:
+    findings = list(findings)
+    targets, dependencies, chunks = repair_context(bundle, findings, list(chunks))
     findings_json = json.dumps(
         [finding.model_dump(mode="json") for finding in findings],
         ensure_ascii=False,
@@ -291,12 +407,15 @@ def repair_prompt(
 
 TARGETED ARTIFACT REPAIR
 
-Apply every Critic finding in one repair. Return one complete ArtifactBundle. Change only existing artifacts named by the findings, preserve every unaffected artifact and ID exactly, keep all original IDs, do not add artifacts, and do not perform unrelated cleanup.
+Return one ArtifactPatch containing exactly the affected artifacts, with complete fields for each. Use empty arrays for unaffected artifact types. Preserve IDs; do not return or modify read-only dependencies. For citation repairs change only source_references; for relationship repairs change only requirement_ids, scenario_id, or dependency_ids; for semantic repairs correct the authored content. Do not add artifacts or perform unrelated cleanup.
 
 {_agent_setup_block(setup)}
 
-Complete ArtifactBundle JSON:
-{_data_block("ARTIFACT BUNDLE JSON", bundle.model_dump_json())}
+Affected artifacts JSON:
+{_data_block("REPAIR TARGETS JSON", targets.model_dump_json())}
+
+Read-only dependencies JSON:
+{_data_block("DEPENDENCIES JSON", dependencies.model_dump_json())}
 
 All Critic findings JSON:
 {_data_block("CRITIC FINDINGS JSON", findings_json)}

@@ -1,0 +1,37 @@
+{
+  "health": "ok",
+  "prompt_version": "research-core-v11",
+  "implementation": {
+    "source_sha256": {
+      "runner.py": "8af84790e6581bc6816ddd544d93f954202de5e83a49c998688e1bbbc9d805cf",
+      "pipelines.py": "c8aae786a2bc259eb3a5cacbcc542cbad4f47c041cd4a77e04bbf4a7a2dca1f5",
+      "prompts.py": "42151de48de07ee9bda420903f122ceac45623c5991e27565c63e69cf467ecdf",
+      "providers.py": "915afd1e0179fb702b76dd2c3dbfd89730ff0166dc4727723219c78b1ebc878a",
+      "documents.py": "a1d9aca9e59d19f0dc4d14235f975dad83766952c5bba04612fe52685f4b6aaf",
+      "models.py": "4e4db7f8c7b29b1263b547cd90e7278e9973d5fe08a62279faa86a7f4b752c72",
+      "coverage.py": "998675c48b6ae9706a6ad38acf8dca125893ae3d70b0d58595b7a5a50900d66d",
+      "validation.py": "20f414af71541e189fcd69d8974d2adaced1b5bb91a9964e1b2553b6f4ed0a59",
+      "evidence.py": "aac1c221f4a84b91fe38ed40f5e64168768593fd75d42e1843f46ac900fb71b0",
+      "efficient.py": "5547f5968970d76c3f9d4c36ba39d36458b381f8e2be5e0c50daf105eb0e9141",
+      "evaluation.py": "d1ff55c7a0c8ed39034520d847e32c0825aa4a8f4cc164703123e04faafc80da",
+      "benchmark.py": "76b0be1b05bf09cc5ee817cd30a7f9b78626fccae1a1a3edbd6cb02a34fbd70b",
+      "storage.py": "3dbb38e46c5df5c138325b2dfaa08618278a86bf39767da27a74517f569e21ad",
+      "schema.sql": "88932b3571aeab596fcc203ca9bbdeb0e7351d6bf3d2f4154ba45dd169d3168b"
+    },
+    "dependencies": {
+      "google-genai": "2.19.0",
+      "pydantic": "2.13.4",
+      "pypdf": "6.16.2",
+      "psycopg": "3.3.4"
+    }
+  },
+  "app_sha256": "c424734e741cba8b5bd0b35c324e5a8cadd554853f0f856315bbc2a754de9a1f",
+  "container_health": "healthy",
+  "image_id": "sha256:0403e593e1030ea265404e44a46c01304bc72f2e8e892fe1a97c955783cce08b",
+  "full_tests_passed": 582,
+  "existing_collection_warnings": 3,
+  "previous_image": "citd-before-v11:20260930",
+  "experiment_image": "citd-v10-validation:20260930",
+  "verified_at": "2026-09-30 08:45:38 UTC",
+  "live_validation": "Frozen v10 matched comparison retained; v11 adds a locally tested hard-spending-cap retry guard. No v11 paid run purchased."
+}

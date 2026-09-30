@@ -1,6 +1,7 @@
 import hashlib
 import threading
 from collections import deque
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from dataclasses import fields, replace
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from brd_srs_testgen.documents import DocumentError
 from brd_srs_testgen.models import (
     AgentStageOutput,
     ArtifactBundle,
+    ArtifactPatch,
     CandidateRequirement,
     CandidateRequirementBatch,
     CriticFinding,
@@ -60,10 +62,16 @@ class RecordingRepository:
         self.events = []
         self.finalized = []
         self.catalogs = {}
+        self.call_attempts = []
+        self.stage_outputs = []
 
     def _fail(self, method) -> None:
         if self.fail_at == method:
             raise RuntimeError(f"{method} failed")
+
+    @contextmanager
+    def run_lease(self, *run_ids):
+        yield
 
     def create_run(self, manifest) -> None:
         self.calls.append(("create_run", manifest))
@@ -80,6 +88,12 @@ class RecordingRepository:
         self.calls.append(("append_event", run_id, stage, occurred_at))
         self.events.append((run_id, stage, occurred_at))
         self._fail("append_event")
+
+    def append_stage_output(self, run_id, row):
+        self.stage_outputs.append((run_id, row))
+
+    def append_call_attempt(self, run_id, attempt):
+        self.call_attempts.append((run_id, attempt))
 
     def finalize(self, result) -> None:
         self.calls.append(("finalize", result))
@@ -248,6 +262,7 @@ def settings(**overrides) -> ProviderSettings:
         "provider": "ollama",
         "model": "test-model",
         "token_ceiling": 100_000,
+        "pipeline_profile": "corrected",
     }
     values.update(overrides)
     return ProviderSettings(**values)
@@ -743,7 +758,11 @@ def test_pipeline_activity_is_forwarded_to_the_progress_callback(monkeypatch) ->
         "Orchestrator: spawning Analyzer 1.",
         "Analyzing coverage",
         "Judge: extracting coverage units from the source document.",
+        "Catalog: working on task 1.",
+        "Catalog: saved validated task 1.",
         "Judge: extracted 1 coverage units. Mapping test cases...",
+        "Evaluation: working on task 1.",
+        "Evaluation: saved validated task 1.",
         "Judge: F1=1.00 (precision=1.00, recall=1.00).",
         "Completed",
     ]
@@ -940,6 +959,32 @@ def test_pipeline_output_failure_is_semantic_and_has_empty_metrics(monkeypatch) 
     assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
     assert result.manifest.failure_message == "invalid worker output"
     assert result.metrics.completion is False
+
+
+def test_efficient_unknown_evidence_after_correction_finalizes_charged_failure(monkeypatch):
+    from brd_srs_testgen.evidence import ExtractionBatch
+
+    repository = RecordingRepository()
+    monkeypatch.setattr(runner, "parse_pdf", lambda _data: [chunk()])
+    candidate = bundle().requirements[0].model_dump(exclude={"requirement_id", "dependency_ids"})
+    candidate.update(candidate_id="CAND-001-001", source_references=[{"evidence_id": "E-invented"}])
+    invalid = ExtractionBatch.model_validate({
+        "candidates": [candidate],
+        "coverage": [{"chunk_id": chunk().chunk_id, "status": "extracted", "reason": "Claimed source support."}],
+    })
+    result = run_generation(
+        b"pdf", "sample.pdf", RunType.CENTRALIZED_MULTI_AGENT,
+        settings(pipeline_profile="efficient"), repository=repository,
+        provider_factory=lambda _run_type, ledger: ChargedProvider(ledger, [invalid, invalid]),
+    )
+    assert result.manifest.status is RunStatus.FAILED
+    assert result.manifest.failure_category is FailureCategory.SEMANTIC_VALIDATION
+    assert "Unknown or out-of-scope evidence ID" in result.manifest.failure_message
+    assert len(result.call_attempts) == len(repository.call_attempts) == 2
+    assert result.metrics.charged_tokens == 14
+    assert result.metrics.semantic_revisions == 1
+    assert not result.stage_outputs and result.bundle is None
+    assert repository.finalized == [result]
 
 
 def test_provider_factory_errors_are_safe_configuration_failures(monkeypatch) -> None:
@@ -1319,7 +1364,7 @@ def test_centralized_critic_repair_is_the_only_semantic_revision(monkeypatch) ->
         settings(provider="gemini", api_key="generation-key"),
         repository=repository,
         provider_factory=lambda _run_type, ledger: ScriptedProvider(
-            ledger, [CriticReport(accepted=False, findings=[finding]), invalid]
+            ledger, [CriticReport(accepted=False, findings=[finding]), ArtifactPatch(test_cases=invalid.test_cases)]
         ),
         judge_provider_factory=lambda ledger: NamedProvider(
             ledger, runner.JUDGE_MODEL
@@ -1580,7 +1625,11 @@ def test_progress_is_a_single_string_and_observer_errors_are_ignored(
         "Generating artifacts",
         "Analyzing coverage",
         "Judge: extracting coverage units from the source document.",
+        "Catalog: working on task 1.",
+        "Catalog: saved validated task 1.",
         "Judge: extracted 1 coverage units. Mapping test cases...",
+        "Evaluation: working on task 1.",
+        "Evaluation: saved validated task 1.",
         "Judge: F1=1.00 (precision=1.00, recall=1.00).",
         "Completed",
     ]
@@ -1792,8 +1841,12 @@ def test_runner_carries_budget_critic_setting_and_validated_blackboard(
     )
     assert result.manifest.status is (RunStatus.FAILED if fail else RunStatus.COMPLETED)
     assert result.manifest.configuration["critic_enabled"] is critic_enabled
-    assert result.stage_outputs == [row]
-    assert repository.finalized[0].stage_outputs == [row]
+    assert result.stage_outputs[0] == row
+    assert [r.stage for r in result.stage_outputs] == (["scout"] if fail else ["scout", "generation"])
+    if not fail:
+        assert result.stage_outputs[-1].output == result.bundle.model_dump(mode="json")
+        assert result.stage_outputs[-1].fingerprint
+    assert repository.finalized[0].stage_outputs == result.stage_outputs
     assert RunResult.model_validate_json(result.model_dump_json()) == result
 
 

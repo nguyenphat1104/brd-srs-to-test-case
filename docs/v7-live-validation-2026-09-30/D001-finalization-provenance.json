@@ -1,0 +1,9 @@
+{
+  "run_id": "228f8d258152-9b91a42b8a9c5070aadffefd721b8bf1",
+  "reason": "Unhandled ValueError after one local correction: Unknown or out-of-scope evidence ID. Process exited; recorded from durable calls and checkpoints without retry.",
+  "charged_tokens": 18406,
+  "calls_preserved": 4,
+  "metrics": "Unavailable: exception escaped runner before aggregate metrics were persisted. Use immutable per-call accounting.",
+  "application_source_changed": false,
+  "model_calls_repeated": 0
+}

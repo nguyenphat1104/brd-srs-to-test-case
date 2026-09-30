@@ -1,0 +1,22 @@
+{
+  "source_run": "20260929T083231067296Z-fe7216c0e95e-3bd1bb11",
+  "method": "Offline serialization comparison on historical saved artifacts; no new generation or tokenizer calls. Full source registry is measured separately, not counted as free.",
+  "counts": {
+    "chunks": 99,
+    "requirements": 230,
+    "scenarios": 62,
+    "test_cases": 63
+  },
+  "full_artifact_json_characters": 275927,
+  "compact_artifact_json_characters": 211392,
+  "artifact_only_character_reduction_percent": 23.39,
+  "extracted_source_characters": 152543,
+  "rendered_source_registry_characters": 206152,
+  "initial_extraction_groups": 32,
+  "citation_roundtrip_exact": true,
+  "limitations": [
+    "Character counts are not measured model tokens or end-to-end savings.",
+    "The registry adds input overhead; source-gap audits add calls.",
+    "No output-quality or cost-equivalence claim is established."
+  ]
+}

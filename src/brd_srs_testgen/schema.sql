@@ -31,9 +31,19 @@ ALTER TABLE runs
 
 CREATE INDEX IF NOT EXISTS runs_started_at_idx ON runs (started_at DESC);
 
+ALTER TABLE runs
+    ADD COLUMN IF NOT EXISTS diagnostics jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS model_call_attempts (
+    run_id text NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    call_id text NOT NULL,
+    payload jsonb NOT NULL CHECK (jsonb_typeof(payload) = 'object'),
+    PRIMARY KEY (run_id, call_id)
+);
+
 CREATE TABLE IF NOT EXISTS agent_stage_outputs (
     run_id text NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-    stage text NOT NULL CHECK (stage IN ('scout','curator','scenario_architect','test_writer','critic','repair')),
+    stage text NOT NULL CHECK (stage IN ('scout','source_audit','curator','scenario_architect','test_writer','critic','repair','catalog','evaluation','generation','requirements','scenarios','test_cases')),
     task_index integer NOT NULL CHECK (task_index >= 0),
     role text NOT NULL CHECK (role <> ''),
     input_ids jsonb NOT NULL CHECK (jsonb_typeof(input_ids) = 'array'),
@@ -41,6 +51,12 @@ CREATE TABLE IF NOT EXISTS agent_stage_outputs (
     created_at timestamptz NOT NULL,
     PRIMARY KEY (run_id, stage, task_index)
 );
+
+ALTER TABLE agent_stage_outputs ADD COLUMN IF NOT EXISTS fingerprint text NOT NULL DEFAULT '';
+ALTER TABLE agent_stage_outputs ADD COLUMN IF NOT EXISTS reused_from text;
+ALTER TABLE agent_stage_outputs DROP CONSTRAINT IF EXISTS agent_stage_outputs_stage_check;
+ALTER TABLE agent_stage_outputs ADD CONSTRAINT agent_stage_outputs_stage_check
+    CHECK (stage IN ('scout','source_audit','curator','scenario_architect','test_writer','critic','repair','catalog','evaluation','generation','requirements','scenarios','test_cases'));
 
 CREATE TABLE IF NOT EXISTS agent_setups (
     agent text PRIMARY KEY,

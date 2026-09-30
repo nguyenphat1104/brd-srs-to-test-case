@@ -165,7 +165,7 @@ class Requirement(StrictModel):
 
 
 class CandidateRequirement(StrictModel):
-    candidate_id: str = Field(pattern=r"^CAND-\d{3}-\d{3,}$")
+    candidate_id: str = Field(pattern=r"^CAND-\d{3,}-\d{3,}$")
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)
     requirement_type: RequirementType
@@ -209,6 +209,18 @@ class ArtifactBundle(StrictModel):
     test_cases: list[TestCase]
 
 
+class ArtifactPatch(StrictModel):
+    requirements: list[Requirement] = Field(default_factory=list)
+    scenarios: list[Scenario] = Field(default_factory=list)
+    test_cases: list[TestCase] = Field(default_factory=list)
+
+
+class RepairVerification(StrictModel):
+    resolved_finding_ids: list[str]
+    unresolved_finding_ids: list[str]
+    reasons: dict[str, str] = Field(description="One source-backed explanation per finding ID; identify the relevant artifact and what remains wrong or proves resolution.")
+
+
 class RequirementBatch(StrictModel):
     requirements: list[Requirement]
 
@@ -224,7 +236,7 @@ class RequirementDecisionAction(StrEnum):
 
 
 class RequirementDecision(StrictModel):
-    candidate_id: str = Field(pattern=r"^CAND-\d{3}-\d{3,}$")
+    candidate_id: str = Field(pattern=r"^CAND-\d{3,}-\d{3,}$")
     action: RequirementDecisionAction
     canonical_requirement_id: str | None = Field(default=None, pattern=r"^REQ-\d{3,}$")
     reason: str = Field(min_length=1)
@@ -237,6 +249,16 @@ class RequirementDecision(StrictModel):
         elif self.canonical_requirement_id is None:
             raise ValueError("retained and merged candidates require a canonical requirement ID")
         return self
+
+
+class RequirementAssignment(StrictModel):
+    candidate_id: str = Field(pattern=r"^CAND-\d{3,}-\d{3,}$")
+    canonical_requirement_id: str | None = Field(default=None, pattern=r"^REQ-\d{3,}$")
+    reason_code: Literal["distinct", "duplicate", "unsupported", "non_testable"]
+
+
+class RequirementAssignmentBatch(StrictModel):
+    assignments: list[RequirementAssignment]
 
 
 class RequirementSynthesis(StrictModel):
@@ -289,6 +311,7 @@ class CriticFinding(StrictModel):
     finding_type: str = Field(min_length=1)
     artifact_ids: list[str] = Field(min_length=1)
     responsible_role: Literal["curator", "scenario_architect", "test_writer"]
+    repair_kind: Literal["citation", "relationship", "semantic"] = "semantic"
     required_action: str = Field(min_length=1)
     source_references: list[SourceReference] = Field(min_length=1)
 
@@ -299,6 +322,8 @@ class CriticReport(StrictModel):
 
     @model_validator(mode="after")
     def validate_findings(self) -> Self:
+        if len({f.finding_id for f in self.findings}) != len(self.findings):
+            raise ValueError("finding IDs must be unique")
         if self.accepted and self.findings:
             raise ValueError("accepted reports cannot contain findings")
         if not self.accepted and not self.findings:
@@ -308,18 +333,22 @@ class CriticReport(StrictModel):
 
 class AgentStageOutput(StrictModel):
     stage: Literal[
-        "scout", "curator", "scenario_architect", "test_writer", "critic", "repair"
+        "scout", "source_audit", "curator", "scenario_architect", "test_writer", "critic", "repair", "catalog", "evaluation", "generation", "requirements", "scenarios", "test_cases"
     ]
     task_index: int = Field(ge=0)
     role: str = Field(min_length=1)
     input_ids: list[str] = Field(default_factory=list)
+    fingerprint: str = ""
+    reused_from: str | None = None
     output: dict[str, JsonValue]
     created_at: AwareDatetime
 
     def order_key(self) -> tuple[int, int]:
         stages = (
-            "scout", "curator", "scenario_architect", "test_writer", "critic", "repair"
+            "scout", "source_audit", "curator", "scenario_architect", "test_writer", "critic", "repair", "catalog", "evaluation", "generation", "requirements", "scenarios", "test_cases"
         )
+        if self.stage == "critic" and "resolved_finding_ids" in self.output:
+            return len(stages), self.task_index
         return stages.index(self.stage), self.task_index
 
 
@@ -408,8 +437,49 @@ class RunManifest(StrictModel):
         return self
 
 
+class CallAttempt(StrictModel):
+    call_id: str
+    phase: Literal["generation", "catalog", "evaluation"]
+    stage: str
+    task_index: int = Field(ge=0)
+    attempt: int = Field(ge=1)
+    model: str
+    provider: str
+    schema_name: str
+    request_hash: str
+    schema_hash: str
+    max_output_tokens: int = Field(ge=1)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    reported_total_tokens: int | None = Field(default=None, ge=0)
+    budget_tokens: int = Field(default=0, ge=0)
+    estimated_tokens: int = Field(default=0, ge=0)
+    usage: dict[str, JsonValue] = Field(default_factory=dict)
+    provider_request_id: str | None = None
+    finish_reason: str | None = None
+    status: Literal["completed", "failed", "blocked"]
+    error: str = ""
+    response_excerpt: str = ""
+    started_at: AwareDatetime
+    latency_seconds: float = Field(ge=0)
+
+
+class RunDiagnostics(StrictModel):
+    evidence_version: str = ""
+    evidence_spans: list[dict[str, JsonValue]] = Field(default_factory=list)
+    source_dispositions: list[dict[str, JsonValue]] = Field(default_factory=list)
+    recovery_parent_id: str | None = None
+    inherited_budget_tokens: int = Field(default=0, ge=0)
+    reused_tasks: int = Field(default=0, ge=0)
+    semantic_status: Literal["not_reviewed", "accepted", "unresolved"] = "not_reviewed"
+    unresolved_findings: list[CriticFinding] = Field(default_factory=list)
+    evaluation_error: str = ""
+
+
 class RunResult(StrictModel):
     manifest: RunManifest
+    call_attempts: list[CallAttempt] = Field(default_factory=list)
+    diagnostics: RunDiagnostics | None = None
     stage_outputs: list[AgentStageOutput] = Field(default_factory=list)
     bundle: ArtifactBundle | None = None
     validation: ValidationReport | None = None
@@ -422,6 +492,8 @@ class RunResult(StrictModel):
         bundle = self.bundle
         return {
             "manifest": self.manifest.model_dump(mode="json"),
+            "call_attempts": [item.model_dump(mode="json") for item in self.call_attempts],
+            "diagnostics": self.diagnostics.model_dump(mode="json") if self.diagnostics else None,
             "requirements": (
                 [item.model_dump(mode="json") for item in bundle.requirements]
                 if bundle

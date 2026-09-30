@@ -9,3 +9,4 @@ tests
 app-ba.py
 app-ba-sys-architect.py
 llm_provider.py
+.worktrees

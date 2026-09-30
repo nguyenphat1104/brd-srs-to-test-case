@@ -1,0 +1,708 @@
+{
+  "suite_id": "19ad08269f97cd64",
+  "document_id": "D002",
+  "artifacts": {
+    "requirements": [
+      {
+        "requirement_id": "REQ-001",
+        "title": "Temperature Control Range and Increments",
+        "description": "The DH system shall allow users to set thermostat target temperatures between 60\u00b0F and 80\u00b0F, inclusive, in 1-degree increments.",
+        "requirement_type": "functional",
+        "module": "Thermostat Management",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-002",
+        "title": "Thermostat Scheduling",
+        "description": "For each thermostat, the system shall support scheduling up to twenty-four one-hour temperature settings per day for every day of the week.",
+        "requirement_type": "functional",
+        "module": "Thermostat Management",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "up to twenty-four one hour settings per day for every day of the week can be scheduled."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-003",
+        "title": "Humidistat Setting Range",
+        "description": "The DH system shall allow a user to set the humidity level for a humidistat between 30% and 60%, inclusive, at 1% increments.",
+        "requirement_type": "functional",
+        "module": "Humidistat Management",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-004",
+        "title": "Security Breach Alarm Activation",
+        "description": "When a security breach occurs and a contact sensor is set OPEN, the system shall activate the alarm system.",
+        "requirement_type": "functional",
+        "module": "Security System",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "When a security breach occurs and a contact s ensor is set OPEN, the alarm system shall be activated."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-005",
+        "title": "Appliance Power Switch Control",
+        "description": "The system shall be able to provide the current state of a power switch (OFF to ON, or ON to OFF) and change its state.",
+        "requirement_type": "functional",
+        "module": "Appliance Management",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "change the state of a power switch (OFF to ON, or ON to OFF), in turn changing the state"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-006",
+        "title": "Display Refresh Rate",
+        "description": "Displays of environmental conditions (temperature, humidity, contact sensors, and power switches) shall be updated at least every two seconds.",
+        "requirement_type": "non_functional",
+        "module": "System Performance",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "Displays of environmental conditions (tempera ture, humidity, contact sensors and power switches) shall be updated at least every two seconds."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-007",
+        "title": "Account Authentication and Security",
+        "description": "Logging in to an account shall require entry of an account name and a password.",
+        "requirement_type": "non_functional",
+        "module": "System Security",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "Log in to an account shall require entry of a n account name and a password."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-008",
+        "title": "System Document Archiving Rule",
+        "description": "All system documents shall be up-to-date and reside in the document archive.",
+        "requirement_type": "business",
+        "module": "Project Management",
+        "priority": "low",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "All system documents (Software Requirements S pecification, Architectural Design Specification, Module Detailed Design, Module Source Code, and all Test Plans) shall be up-to-date"
+          }
+        ]
+      }
+    ],
+    "scenarios": [
+      {
+        "scenario_id": "SCN-001",
+        "title": "Valid Temperature Set Point Configuration",
+        "objective": "Verify that a user can set the thermostat temperature to a valid value within 60\u00b0F to 80\u00b0F.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Thermostat device is active and connected to DH Gateway."
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-002",
+        "title": "Boundary Temperature Set Point Input",
+        "objective": "Verify system behavior when attempting to set temperature at the lower/upper boundaries and out-of-range values.",
+        "scenario_type": "boundary",
+        "preconditions": [
+          "Thermostat configuration page is open."
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-003",
+        "title": "Thermostat Schedule Setup",
+        "objective": "Verify that twenty-four one-hour schedule entries per day can be set for a thermostat across all days of the week.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "User is logged into the DH web interface as Master User."
+        ],
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "up to twenty-four one hour settings per day for every day of the week can be scheduled."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-004",
+        "title": "Valid Humidistat Level Setup",
+        "objective": "Verify setting a valid humidity level within the 30% to 60% range.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Humidistat controller is online."
+        ],
+        "requirement_ids": [
+          "REQ-003"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-005",
+        "title": "Security Alarm Activation on Contact Sensor Breach",
+        "objective": "Verify state transition and alarm activation when a contact sensor transitions to OPEN during a breach.",
+        "scenario_type": "state_transition",
+        "preconditions": [
+          "Security system is armed and contact sensor is initially CLOSED."
+        ],
+        "requirement_ids": [
+          "REQ-004"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "When a security breach occurs and a contact s ensor is set OPEN, the alarm system shall be activated."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-006",
+        "title": "Appliance Switch State Transition",
+        "objective": "Verify changing appliance power switch state between OFF and ON.",
+        "scenario_type": "state_transition",
+        "preconditions": [
+          "Appliance power switch is connected and initially OFF."
+        ],
+        "requirement_ids": [
+          "REQ-005"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "change the state of a power switch (OFF to ON, or ON to OFF), in turn changing the state"
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-007",
+        "title": "Environmental Display Periodic Refresh",
+        "objective": "Verify that environmental readings update on screen at least every two seconds.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "DH dashboard display is loaded in browser."
+        ],
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "Displays of environmental conditions (tempera ture, humidity, contact sensors and power switches) shall be updated at least every two seconds."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-008",
+        "title": "User Authentication Failure",
+        "objective": "Verify negative behavior when incorrect account name or password is provided.",
+        "scenario_type": "negative",
+        "preconditions": [
+          "User is on the DH Web login page."
+        ],
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "Log in to an account shall require entry of a n account name and a password."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-009",
+        "title": "Document Compliance and Archiving Verification",
+        "objective": "Verify all final project deliverables adhere to requirements and reside in Document Archive.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Project completion phase reached."
+        ],
+        "requirement_ids": [
+          "REQ-008"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "All system documents (Software Requirements S pecification, Architectural Design Specification, Module Detailed Design, Module Source Code, and all Test Plans) shall be up-to-date"
+          }
+        ]
+      }
+    ],
+    "test_cases": [
+      {
+        "test_case_id": "TC-001",
+        "scenario_id": "SCN-001",
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "title": "Set Thermostat Temperature to 72\u00b0F",
+        "priority": "P1",
+        "preconditions": [
+          "Web server is active and user is logged in."
+        ],
+        "test_data": {
+          "target_temperature": "72"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to the Thermostat Control section in the DH web interface.",
+            "expected_result": "Thermostat control interface displays successfully."
+          },
+          {
+            "step_number": 2,
+            "action": "Select a thermostat and enter '72' in the target temperature field.",
+            "expected_result": "Value '72' is accepted in the input field."
+          },
+          {
+            "step_number": 3,
+            "action": "Click the Submit button.",
+            "expected_result": "System saves set point and updates target temperature to 72\u00b0F."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-002",
+        "scenario_id": "SCN-002",
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "title": "Verify Thermostat Boundary Values (60\u00b0F and 80\u00b0F)",
+        "priority": "P2",
+        "preconditions": [
+          "User is logged in."
+        ],
+        "test_data": {
+          "test_values": [
+            60,
+            80,
+            59
+          ]
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to Thermostat Settings.",
+            "expected_result": "Thermostat setting panel opens."
+          },
+          {
+            "step_number": 2,
+            "action": "Enter '60' for target temperature and click Save.",
+            "expected_result": "Lower boundary setting 60\u00b0F is accepted."
+          },
+          {
+            "step_number": 3,
+            "action": "Enter '80' for target temperature and click Save.",
+            "expected_result": "Upper boundary setting 80\u00b0F is accepted."
+          },
+          {
+            "step_number": 4,
+            "action": "Enter '59' for target temperature and click Save.",
+            "expected_result": "System rejects value and displays error message."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-003",
+        "scenario_id": "SCN-003",
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "title": "Configure 24 One-Hour Temperature Schedule Settings",
+        "priority": "P2",
+        "preconditions": [
+          "Thermostat is selected in DH Planner."
+        ],
+        "test_data": {
+          "slots_per_day": 24
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Open the Thermostat Planner page.",
+            "expected_result": "24 hourly setting slots for each day of the week are displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Set hourly target temperatures for all 24 1-hour slots for Monday through Sunday.",
+            "expected_result": "All 24 slots per day accept the valid temperature entries."
+          },
+          {
+            "step_number": 3,
+            "action": "Click 'Save Schedule'.",
+            "expected_result": "Thermostat schedule is successfully stored."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "up to twenty-four one hour settings per day for every day of the week can be scheduled."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-004",
+        "scenario_id": "SCN-004",
+        "requirement_ids": [
+          "REQ-003"
+        ],
+        "title": "Set Humidistat Target Humidity to 45%",
+        "priority": "P2",
+        "preconditions": [
+          "Humidistat unit is active."
+        ],
+        "test_data": {
+          "target_humidity": "45%"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to the Humidistat page.",
+            "expected_result": "Humidistat settings screen is displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Set the desired humidity level to 45%.",
+            "expected_result": "Value 45% is entered in the setting field."
+          },
+          {
+            "step_number": 3,
+            "action": "Click Apply.",
+            "expected_result": "System updates target humidity set point to 45%."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-005",
+        "scenario_id": "SCN-005",
+        "requirement_ids": [
+          "REQ-004"
+        ],
+        "title": "Trigger Sound and Light Alarms on Contact Sensor Breach",
+        "priority": "P1",
+        "preconditions": [
+          "Simulated environment with contact sensor and alarm devices active."
+        ],
+        "test_data": {
+          "sensor_id": "CS-001"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Ensure security monitoring is active with contact sensor CLOSED.",
+            "expected_result": "Security system status indicates armed and secure."
+          },
+          {
+            "step_number": 2,
+            "action": "Simulate opening the contact sensor to change state to OPEN.",
+            "expected_result": "Contact sensor state changes to OPEN."
+          },
+          {
+            "step_number": 3,
+            "action": "Observe the security system alarm response.",
+            "expected_result": "Alarm system is activated."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "When a security breach occurs and a contact s ensor is set OPEN, the alarm system shall be activated."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-006",
+        "scenario_id": "SCN-006",
+        "requirement_ids": [
+          "REQ-005"
+        ],
+        "title": "Toggle Power Switch State from OFF to ON and ON to OFF",
+        "priority": "P2",
+        "preconditions": [
+          "Appliance power switch is registered in system."
+        ],
+        "test_data": {
+          "switch_id": "PS-101"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to Appliance Manager and locate target power switch in OFF state.",
+            "expected_result": "Power switch status displays OFF."
+          },
+          {
+            "step_number": 2,
+            "action": "Click toggle control to change power switch state to ON.",
+            "expected_result": "Power switch state changes to ON and connected appliance receives power."
+          },
+          {
+            "step_number": 3,
+            "action": "Click toggle control again to change power switch state to OFF.",
+            "expected_result": "Power switch state reverts to OFF."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "change the state of a power switch (OFF to ON, or ON to OFF), in turn changing the state"
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-007",
+        "scenario_id": "SCN-007",
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "title": "Verify Environmental Display Refresh Interval",
+        "priority": "P2",
+        "preconditions": [
+          "Simulation framework running."
+        ],
+        "test_data": {
+          "max_refresh_time_sec": 2
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Open the DH main dashboard displaying sensor readings.",
+            "expected_result": "Dashboard displays current environmental readings."
+          },
+          {
+            "step_number": 2,
+            "action": "Inject a sensor temperature change in the simulated environment.",
+            "expected_result": "Sensor value change occurs in background."
+          },
+          {
+            "step_number": 3,
+            "action": "Measure time elapsed until the UI reflects the updated reading.",
+            "expected_result": "UI updates with new reading within 2 seconds."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "Displays of environmental conditions (tempera ture, humidity, contact sensors and power switches) shall be updated at least every two seconds."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-008",
+        "scenario_id": "SCN-008",
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "title": "Verify Login Rejection with Invalid Credentials",
+        "priority": "P1",
+        "preconditions": [
+          "DH system authentication service is running."
+        ],
+        "test_data": {
+          "account_name": "invalid_user",
+          "password": "wrong_pass"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Access the DigitalHome login screen.",
+            "expected_result": "Account name and Password prompt displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Enter account name 'invalid_user' and password 'wrong_pass'.",
+            "expected_result": "Fields populated with test values."
+          },
+          {
+            "step_number": 3,
+            "action": "Click Login.",
+            "expected_result": "Login is denied and clear descriptive error message is shown."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "Log in to an account shall require entry of a n account name and a password."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-009",
+        "scenario_id": "SCN-009",
+        "requirement_ids": [
+          "REQ-008"
+        ],
+        "title": "Verify Document Format and Archive Location",
+        "priority": "P3",
+        "preconditions": [
+          "Project document review phase initiated."
+        ],
+        "test_data": {
+          "format_standard": "HO2305"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Inspect format of SRS, Architectural Design, and Test Plan documents.",
+            "expected_result": "All documents comply with required formatting specifications."
+          },
+          {
+            "step_number": 2,
+            "action": "Access HomeOwner Document Archive repository.",
+            "expected_result": "Archive repository connects successfully."
+          },
+          {
+            "step_number": 3,
+            "action": "Verify presence of all up-to-date system documents in the archive.",
+            "expected_result": "All required project documents reside in the archive repository."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "All system documents (Software Requirements S pecification, Architectural Design Specification, Module Detailed Design, Module Source Code, and all Test Plans) shall be up-to-date"
+          }
+        ]
+      }
+    ]
+  }
+}

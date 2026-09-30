@@ -1,0 +1,1384 @@
+{
+  "suite_id": "69fb14a6f166fff9",
+  "document_id": "D002",
+  "artifacts": {
+    "requirements": [
+      {
+        "requirement_id": "REQ-001",
+        "title": "General User Home Environment Monitoring and Control",
+        "description": "The general user shall be able to use the Digital Home (DH) system capabilities to monitor and control the environment in his/her home.",
+        "requirement_type": "functional",
+        "module": "Environment Management",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0005-c001-76e39679522a",
+            "page_number": 5,
+            "section": "3.1 Product Description and Scope",
+            "excerpt": "3.2.1 DigitalHome Users 3.2.1.1 The general user shall be able to use the D H system capabilities to monitor and control the environment in his/her"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-002",
+        "title": "Master User Configuration Rights",
+        "description": "A designated Master user shall be able to change the configuration of the system, including adding a user account or changing default parameter settings, and having the same rights as the DH Technician described in section 3.2.2.4.",
+        "requirement_type": "functional",
+        "module": "User & System Management",
+        "priority": "high",
+        "ambiguities": [
+          "References section 3.2.2.4 for DH Technician rights, which is not fully detailed in this chunk."
+        ],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0005-c001-76e39679522a",
+            "page_number": 5,
+            "section": "3.1 Product Description and Scope",
+            "excerpt": "pages, and submitting information and requests via a web interface). 3.2.1.4 A Master user will be designated, who shall be able to change the configuration"
+          },
+          {
+            "chunk_id": "p0005-c001-76e39679522a",
+            "page_number": 5,
+            "section": "3.1 Product Description and Scope",
+            "excerpt": "of the system. For example, a Master User shall be able to add a user account or change the default parameter settings. He/she will have"
+          },
+          {
+            "chunk_id": "p0005-c001-76e39679522a",
+            "page_number": 5,
+            "section": "3.1 Product Description and Scope",
+            "excerpt": "the same right as the DH Technician, described in section 3.2.2.4. 3.2.2 DigitalHome Technician"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-003",
+        "title": "Simulated Environment for Prototype DH System",
+        "description": "The prototype DigitalHome (DH) software system shall be situated in a simulated environment with no actual physical home, where all sensors and controllers are simulated.",
+        "requirement_type": "non_functional",
+        "module": "System Architecture & Environment",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0005-c001-76e39679522a",
+            "page_number": 5,
+            "section": "3.1 Product Description and Scope",
+            "excerpt": "will be situated in a simulated environment. There will be no actual physical home and all sensors and controllers will be simulated. 3.2 Users Description"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-004",
+        "title": "Technician Rights for Configuration and Operation",
+        "description": "A DH Technician shall have rights beyond the DH General User, including being capable of setting up and making changes in the configuration of the system (e.g., setting system parameters and establishing user accounts) and starting and stopping operation of the DH System.",
+        "requirement_type": "functional",
+        "module": "User Management / System Configuration",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "Technician will have rights beyond the DH General User, capable of setting up and making changes in the configuration of the system (e.g.,setting system parameters"
+          },
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "and establishing user accounts), and starting and stopping operation of the DH System. 3.3 Development Constraints 3.3.1 The \u201cprototype\u201d version of the DigitalHome Sy stem"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-005",
+        "title": "Prototype Development Duration Constraint",
+        "description": "The \u201cprototype\u201d version of the DigitalHome System (as specified in this document) must be completed within twelve months of inception.",
+        "requirement_type": "business",
+        "module": "Development Constraints",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "(as specified in this document) must be completed within twelve months of inception. 3.3.2 The development team will consist of five eng ineers. The DigitalHomeOwner"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-006",
+        "title": "Development Process Specification",
+        "description": "The development team will use the development process specified by DigitalHomeOwner Inc.",
+        "requirement_type": "business",
+        "module": "Development Constraints",
+        "priority": "low",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "Director will provide management and communication support. 3.3.3 The development team will use the development process specified by the Digital HomeOwner Inc. 3.3.4 Where possible,"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-007",
+        "title": "Use of Standard Technology and Tools",
+        "description": "Where possible, the DigitalHome project will employ widely used, accepted, and available hardware and software technology and standards, both for product elements and for development tools.",
+        "requirement_type": "non_functional",
+        "module": "Development Constraints",
+        "priority": "low",
+        "ambiguities": [
+          "Use of phrase 'where possible' introduces ambiguity regarding strict enforceability."
+        ],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "the DigitalHome project will employ widely used, accepted, and available hardware and software technology and standards, both for product elements and for development tools. See"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-008",
+        "title": "Cost Minimization and Final Report Reporting",
+        "description": "The cost of DigitalHome elements (sensors, controllers, server, tools, etc.) for this project should be minimized. As part of the final project report, the development team will describe their efforts to minimize costs, including price comparisons between DH elements and comparable/competitive elements.",
+        "requirement_type": "business",
+        "module": "Development Constraints",
+        "priority": "low",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "section 3.4 for additional detail. 3.3.5 Because of potential market competition for D igitalHome products, the cost of DigitalHome elements (sensors, controllers, server, tools, etc.),"
+          },
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "for this project should be minimized. As part of the final project report the development team will describe their efforts to minimize costs, including price"
+          },
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "comparisons between DH elements and comparable/competitive elements. 3.3.6 The DH system will be tested in a simulated e nvironment. There will be no actual physical"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-009",
+        "title": "Simulated Environment Testing",
+        "description": "The DH system will be tested in a simulated environment without an actual physical home and with all sensors and controllers simulated. The simulated environment will be realistic and adhere to the physical properties and constraints of an actual home and to real sensors and controllers.",
+        "requirement_type": "non_functional",
+        "module": "Testing Environment",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "comparisons between DH elements and comparable/competitive elements. 3.3.6 The DH system will be tested in a simulated e nvironment. There will be no actual physical"
+          },
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "home and all sensors and controllers will be simulated. However, the simulated environment will be realistic and adhere to the physical properties and constraints of"
+          },
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "an actual home and to real sensors and controllers. 3.3.7 Major changes to this document (e.g., changes in requirements) must be approved by the Director"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-010",
+        "title": "Approval of Requirement Changes",
+        "description": "Major changes to this document (e.g., changes in requirements) must be approved by the Director of the DigitalHomeOwner Division.",
+        "requirement_type": "business",
+        "module": "Governance",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "an actual home and to real sensors and controllers. 3.3.7 Major changes to this document (e.g., changes in requirements) must be approved by the Director"
+          },
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "of the DigitalHomeOwner Division. 3.4 Operational Environment Although the system to be developed is a \u201cproof of concept\u201d system intended to help Homeowner Inc. to"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-011",
+        "title": "ISP Requirement",
+        "description": "The home system shall require an Internet Service Provider (ISP).",
+        "requirement_type": "functional",
+        "module": "Operational Environment",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "home system shall require an Internet Ser vice Provider (ISP). The ISP should be widely available (cable modem, high speed DSL), such as Bright House"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-012",
+        "title": "Individual Home Web Server Capability",
+        "description": "A DH System shall have the capability to establish an individual home web server hosted on a home computer.",
+        "requirement_type": "functional",
+        "module": "DH Home Web Server",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "or Bellsouth FastAccess. 3.4.2 DH Home Web Server 3.4.2.1 A DH System shall have the capability to es tablish an individual home web server hosted"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-013",
+        "title": "Web Server Interaction and Control Capability",
+        "description": "The home web server shall provide interaction with and control of the DH elements.",
+        "requirement_type": "functional",
+        "module": "DH Home Web Server",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "on a home computer. This server will provide a. Interaction with and control of the DH elements b. Storage of DH plans and data. c."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-014",
+        "title": "Web Server Plans and Data Storage",
+        "description": "The home web server shall provide storage of DH plans and data.",
+        "requirement_type": "functional",
+        "module": "DH Home Web Server",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "on a home computer. This server will provide a. Interaction with and control of the DH elements b. Storage of DH plans and data. c."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-015",
+        "title": "Web Server User Accounts Management",
+        "description": "The home web server shall provide the ability to establish and maintain DH User Accounts.",
+        "requirement_type": "functional",
+        "module": "DH Home Web Server",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "Ability to establish and maintain DH User Accoun ts d. Provide backup service for user account informat ion, user plans and a home database 3.4.3"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-016",
+        "title": "Web Server Backup Service",
+        "description": "The home web server shall provide backup service for user account information, user plans, and a home database.",
+        "requirement_type": "functional",
+        "module": "DH Home Web Server",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "Ability to establish and maintain DH User Accoun ts d. Provide backup service for user account informat ion, user plans and a home database 3.4.3"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-017",
+        "title": "Gateway Communication and Broadband Connectivity",
+        "description": "The DH Gateway device shall provide communication with all the DigitalHome devices and shall connect with a broadband Internet connection.",
+        "requirement_type": "functional",
+        "module": "Home DH Gateway Device",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "Home DH Gateway Device 3.4.3.1 The DH Gateway device shall provide communi cation with all the DigitalHome devices and shall connect with a broadband Internet"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-018",
+        "title": "Gateway RF Module Wireless Communication",
+        "description": "The Gateway shall contain an RF Module, which shall send and receive wireless communications between the Gateway and the other DigitalHome devices (sensors and controllers).",
+        "requirement_type": "functional",
+        "module": "Home DH Gateway Device",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "connection. 3.4.3.2 The Gateway shall contain an RF Module, whi ch shall send and receive wireless communications between the Gateway and the other DigitalHome devices"
+          },
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "(sensors and controllers). 3.4.3.3 The Gateway device shall operate up to a 10 00-foot range for indoor transmission. 3.4.4 Sensors and Controllers 3.4.4.1 The system"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-019",
+        "title": "Gateway Indoor Transmission Range",
+        "description": "The Gateway device shall operate up to a 1000-foot range for indoor transmission.",
+        "requirement_type": "non_functional",
+        "module": "Home DH Gateway Device",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "(sensors and controllers). 3.4.3.3 The Gateway device shall operate up to a 10 00-foot range for indoor transmission. 3.4.4 Sensors and Controllers 3.4.4.1 The system"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-020",
+        "title": "Digital Programmable Thermostats Temperature Regulation",
+        "description": "The system shall include digital programmable thermostats, which shall be used to monitor and regulate the temperature of an enclosed space.",
+        "requirement_type": "functional",
+        "module": "Sensors and Controllers",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "(sensors and controllers). 3.4.3.3 The Gateway device shall operate up to a 10 00-foot range for indoor transmission. 3.4.4 Sensors and Controllers 3.4.4.1 The system"
+          },
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "shall include digital programmab le thermostats, which shall be used to monitor and regulate the temperature of an enclosed space. a. The thermostat shall provide"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-021",
+        "title": "Thermostat Current Temperature Reading",
+        "description": "The thermostat shall provide a reading of the current temperature in the space where the thermostat is located.",
+        "requirement_type": "functional",
+        "module": "Sensors and Controllers",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "a reading of the cu rrent temperature in the space where the thermostat is located. b. The controller part of thermostat shall provides a \u201cset"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-022",
+        "title": "Thermostat Set Point Temperature Control",
+        "description": "The controller part of the thermostat shall provide a \u201cset point\u201d temperature that is used to control the flow of heat energy (by switching heating or cooling devices on or off as needed) to achieve the set point temperature.",
+        "requirement_type": "functional",
+        "module": "Sensors and Controllers",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "a reading of the cu rrent temperature in the space where the thermostat is located. b. The controller part of thermostat shall provides a \u201cset"
+          },
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "point\u201d temperature that is used to control the flow of heat energy (by switching heating or cooling devices on or off as needed) to achieve"
+          },
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "the set point temperature. c. The sensor part of the thermostat has a sensitiv ity range between 14\u00baF and 104\u00baF (-10\u00baC and 40\u00baC). 3.4.4.2 The"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-023",
+        "title": "Thermostat Sensor Sensitivity Range",
+        "description": "The sensor part of the thermostat has a sensitivity range between 14\u00baF and 104\u00baF (-10\u00baC and 40\u00baC).",
+        "requirement_type": "non_functional",
+        "module": "Sensors and Controllers",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "the set point temperature. c. The sensor part of the thermostat has a sensitiv ity range between 14\u00baF and 104\u00baF (-10\u00baC and 40\u00baC). 3.4.4.2 The"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-024",
+        "title": "Digital Programmable Humidistats Humidity Regulation",
+        "description": "The system shall include digital programmable humidistats, which shall be used to monitor and regulate the humidity of an enclosed space.",
+        "requirement_type": "functional",
+        "module": "Sensors and Controllers",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "the set point temperature. c. The sensor part of the thermostat has a sensitiv ity range between 14\u00baF and 104\u00baF (-10\u00baC and 40\u00baC). 3.4.4.2 The"
+          },
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "system shall include digital programmab le humidistats, which shall be used to monitor and regulate the humidity of an enclosed space. a. The humidistat shall"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-025",
+        "title": "Humidistat Current Humidity Reading",
+        "description": "The humidistat shall provide a reading of the current humidity in the space where the humidistat is located.",
+        "requirement_type": "functional",
+        "module": "Sensors and Controllers",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "system shall include digital programmab le humidistats, which shall be used to monitor and regulate the humidity of an enclosed space. a. The humidistat shall"
+          },
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "provide a reading of the cu rrent humidity in the space where the humidistat is located."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-026",
+        "title": "Technician Configuration and Maintenance Responsibility",
+        "description": "A DH Technician is responsible for setting up and maintaining the configuration of a DH system.",
+        "requirement_type": "functional",
+        "module": "User Management / System Configuration",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "Digital Home Project, SRS 1.3 Page 6 3.2.2.1 A DH Technician is responsible for setting up and maintaining the configuration of a DH system. 3.2.2.2"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-027",
+        "title": "Development Team Composition",
+        "description": "The development team will consist of five engineers.",
+        "requirement_type": "business",
+        "module": "Development Constraints",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "(as specified in this document) must be completed within twelve months of inception. 3.3.2 The development team will consist of five eng ineers. The DigitalHomeOwner"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-028",
+        "title": "Management and Communication Support",
+        "description": "The DigitalHomeOwner Director will provide management and communication support for the development team.",
+        "requirement_type": "business",
+        "module": "Governance",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "(as specified in this document) must be completed within twelve months of inception. 3.3.2 The development team will consist of five eng ineers. The DigitalHomeOwner"
+          },
+          {
+            "chunk_id": "p0006-c001-7d32d2ee4ecf",
+            "page_number": 6,
+            "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+            "excerpt": "Director will provide management and communication support. 3.3.3 The development team will use the development process specified by the Digital HomeOwner Inc. 3.3.4 Where possible,"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-029",
+        "title": "ISP Availability Requirement",
+        "description": "The ISP should be widely available (cable modem, high speed DSL), such as Bright House or Bellsouth FastAccess.",
+        "requirement_type": "non_functional",
+        "module": "Operational Environment",
+        "priority": "low",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "home system shall require an Internet Ser vice Provider (ISP). The ISP should be widely available (cable modem, high speed DSL), such as Bright House"
+          },
+          {
+            "chunk_id": "p0007-c001-21e9eb81ac44",
+            "page_number": 7,
+            "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+            "excerpt": "or Bellsouth FastAccess. 3.4.2 DH Home Web Server 3.4.2.1 A DH System shall have the capability to es tablish an individual home web server hosted"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-030",
+        "title": "Humidistat set point humidity control function",
+        "description": "The humidistat shall provide a \"set point\" humidity that is used to control humidifiers and dehumidifiers to achieve the set point humidity.",
+        "requirement_type": "functional",
+        "module": "Humidistat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "Digital Home Project, SRS 1.3 Page 8 b. The humidistat shall provide a \u201cset point\u201d humid ity that is used to control humidifiers and dehumidifiers"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "achieve the set point humidity. 3.4.4.3 The system shall include magnetic alarm con tact switches which shall be used to monitor entry through a door"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-031",
+        "title": "Magnetic alarm contact switch entry monitoring",
+        "description": "The system shall include magnetic alarm contact switches which shall be used to monitor entry through a door or window when the switch is active.",
+        "requirement_type": "functional",
+        "module": "Security",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "achieve the set point humidity. 3.4.4.3 The system shall include magnetic alarm con tact switches which shall be used to monitor entry through a door"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "or window when the switch is active. 3.4.4.4 The system shall include security sound and light alarms, which can be activated when DigitalHome senses a"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-032",
+        "title": "Security sound and light alarms activation",
+        "description": "The system shall include security sound and light alarms, which can be activated when DigitalHome senses a security breach from a magnetic contact.",
+        "requirement_type": "functional",
+        "module": "Security",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "or window when the switch is active. 3.4.4.4 The system shall include security sound and light alarms, which can be activated when DigitalHome senses a"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "security breach from a magnetic contact. 3.4.4.5 The system shall include digital programmab le power switches which shall be used to monitor the current state"
+          },
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "alarm and one light alarm subsystem, with multiple lights. 4.4.2 When a security breach occurs and a contact s ensor is set OPEN, the alarm"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-033",
+        "title": "Appliance current state monitoring via programmable power switches",
+        "description": "The system shall include digital programmable power switches which shall be used to monitor the current state of an appliance (e.g., a coffee maker is off or on).",
+        "requirement_type": "functional",
+        "module": "Power Control",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "security breach from a magnetic contact. 3.4.4.5 The system shall include digital programmab le power switches which shall be used to monitor the current state"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "of an appliance (e.g., a coffee maker is off or on). 3.4.4.6 The system shall be able to use a power swi tch to change"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-034",
+        "title": "Changing appliance state using power switch",
+        "description": "The system shall be able to use a power switch to change the state of the appliance (e.g., from \"off\" to \"on\").",
+        "requirement_type": "functional",
+        "module": "Power Control",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "of an appliance (e.g., a coffee maker is off or on). 3.4.4.6 The system shall be able to use a power swi tch to change"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "the state of the appliance (e.g., from \u201coff\u201d to \u201con\u201d). 4. Functional Requirements This section provides a description of the functional requirements. There is a"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-035",
+        "title": "Remote control of home systems via web-ready devices",
+        "description": "The DigitalHome System shall allow a web-ready computer, cell phone or PDA to control a home's temperature, humidity, lights, security, and the state of small appliances.",
+        "requirement_type": "functional",
+        "module": "General System",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "General Requirements 4.1.1 The DigitalHome System shall allow a web-read y computer, cell phone or PDA to control a home's temperature, humidity, lights, security, and"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "the state of small appliances. 4.1.2 The communication center of the DH system sha ll be a DH home web server, through which a user"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-036",
+        "title": "Communication center web server monitoring and control",
+        "description": "The communication center of the DH system shall be a DH home web server, through which a user shall be able to monitor and control home devices and systems.",
+        "requirement_type": "functional",
+        "module": "Communication",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "the state of small appliances. 4.1.2 The communication center of the DH system sha ll be a DH home web server, through which a user"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "shall be able to monitor and control home devices and systems. 4.1.3 Each DigitalHome shall contain a master contr ol device (the DH Gateway Device)"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-037",
+        "title": "Gateway device broadband and wireless communication",
+        "description": "Each DigitalHome shall contain a master control device (the DH Gateway Device) that connects to the home's broadband Internet connection, and uses wireless communication to send and receive communication between the DigitalHome system and the home devices and systems.",
+        "requirement_type": "functional",
+        "module": "Communication",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "shall be able to monitor and control home devices and systems. 4.1.3 Each DigitalHome shall contain a master contr ol device (the DH Gateway Device)"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "that connects to the home\u2019s broadband Internet connection, and uses wireless communication to send and receive communication between the DigitalHome system and the home devices"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "and systems. 4.1.4 The DigitalHome shall be equipped with variou s environmental controllers and sensors (temperature controller-sensors: thermostats, humidity controller-sensors: humidistats, contact sensors, security sound"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-038",
+        "title": "Environmental controllers and sensors equipment",
+        "description": "The DigitalHome shall be equipped with various environmental controllers and sensors (temperature controller-sensors: thermostats, humidity controller-sensors: humidistats, contact sensors, security sound and light alarms, and power switches).",
+        "requirement_type": "functional",
+        "module": "General System",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "and systems. 4.1.4 The DigitalHome shall be equipped with variou s environmental controllers and sensors (temperature controller-sensors: thermostats, humidity controller-sensors: humidistats, contact sensors, security sound"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "and light alarms, and power switches). 4.1.5 Using wireless communication, sensor values c an be read and saved in the home database. 4.1.6 Controller values"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-039",
+        "title": "Reading and saving sensor values via wireless communication",
+        "description": "Using wireless communication, sensor values can be read and saved in the home database.",
+        "requirement_type": "functional",
+        "module": "Database",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "and light alarms, and power switches). 4.1.5 Using wireless communication, sensor values c an be read and saved in the home database. 4.1.6 Controller values"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-040",
+        "title": "Sending controller values to change environment",
+        "description": "Controller values can be sent to controllers to change the DH environment.",
+        "requirement_type": "functional",
+        "module": "General System",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "and light alarms, and power switches). 4.1.5 Using wireless communication, sensor values c an be read and saved in the home database. 4.1.6 Controller values"
+          },
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "can be sent to controllers to change the DH environment. 4.2 Thermostat Requirements 4.2.1 The DigitalHome programmable thermostat shall allow a user to"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-041",
+        "title": "Programmable thermostat remote control",
+        "description": "The DigitalHome programmable thermostat shall allow a user to monitor and control a home's temperature from any location, using a web ready computer, cell phone, or PDA.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0008-c001-6ad0d628a407",
+            "page_number": 8,
+            "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+            "excerpt": "can be sent to controllers to change the DH environment. 4.2 Thermostat Requirements 4.2.1 The DigitalHome programmable thermostat shall allow a user to"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "Digital Home Project, SRS 1.3 Page 9 monitor and control a home\u2019s temperature from any location, using a web ready computer, cell phone, or PDA."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-042",
+        "title": "Reading temperature at thermostat position",
+        "description": "A DH user shall be able to read the temperature at a thermostat position.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat position. 4.2.1.2 A DH user shall be able to set"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-043",
+        "title": "Setting thermostat temperature range and increments",
+        "description": "A DH user shall be able to set the thermostat temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat position. 4.2.1.2 A DH user shall be able to set"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "the thermost at temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments. 4.2.2 Up to eight thermostats shall be"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-044",
+        "title": "Maximum number of thermostats per home",
+        "description": "Up to eight thermostats shall be placed in rooms throughout the home.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "the thermost at temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments. 4.2.2 Up to eight thermostats shall be"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "placed in ro oms throughout the home. 4.2.2.1 The thermostats may be controlled individua lly or collectively, so that temperature can be controlled at different"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-045",
+        "title": "Individual or collective thermostat control",
+        "description": "The thermostats may be controlled individually or collectively, so that temperature can be controlled at different levels in different home spaces.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "placed in ro oms throughout the home. 4.2.2.1 The thermostats may be controlled individua lly or collectively, so that temperature can be controlled at different"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "levels in different home spaces. 4.2.2.2 A single thermostat shall be placed in an e nclosed space (e.g., a room in the house) for which"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-046",
+        "title": "Single thermostat per enclosed space",
+        "description": "A single thermostat shall be placed in an enclosed space (e.g., a room in the house) for which the air temperature is to be controlled.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "levels in different home spaces. 4.2.2.2 A single thermostat shall be placed in an e nclosed space (e.g., a room in the house) for which"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "the air temperature is to be controlled. 4.2.2.3 For each thermostat, up to twenty-four one hour settings per day for every day of the week"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-047",
+        "title": "Scheduling hourly thermostat settings",
+        "description": "For each thermostat, up to twenty-four one hour settings per day for every day of the week can be scheduled.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "the air temperature is to be controlled. 4.2.2.3 For each thermostat, up to twenty-four one hour settings per day for every day of the week"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "can be scheduled. 4.2.2.4 If a thermostat device allows a user to mak e a manual temperature setting, the setting shall remain in effect until"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-048",
+        "title": "Manual thermostat setting override duration",
+        "description": "If a thermostat device allows a user to make a manual temperature setting, the setting shall remain in effect until the end of the planned or default time period, at which time the planned or default setting will be used for the next time period.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "can be scheduled. 4.2.2.4 If a thermostat device allows a user to mak e a manual temperature setting, the setting shall remain in effect until"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "the end of the planned or default time period, at which time the planned or default setting will be used for the next time period."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-049",
+        "title": "Thermostat wireless communication with master control unit",
+        "description": "A thermostat unit shall communicate, through wireless signals, with the master control unit.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "4.2.3 A thermostat unit shall communicate, through wireless signals, with the master control unit. 4.2.4 The system shall support Fahrenheit and Celsi us temperature values."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-050",
+        "title": "Support for Fahrenheit and Celsius temperature values",
+        "description": "The system shall support Fahrenheit and Celsius temperature values.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "4.2.3 A thermostat unit shall communicate, through wireless signals, with the master control unit. 4.2.4 The system shall support Fahrenheit and Celsi us temperature values."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-051",
+        "title": "Centralized HVAC system compatibility",
+        "description": "The system shall be compatible with a centralized HVAC (Heating, Ventilation and Air Conditioning) systems: gas, oil, electricity, solar, or a combination of two or more.",
+        "requirement_type": "non_functional",
+        "module": "HVAC",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "4.2.5 The system shall be compatible with a central ized HVAC (Heating, Ventilation and Air Conditioning) systems: gas, oil, electricity, solar, or a combination of"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-052",
+        "title": "ASHRAE standard adherence",
+        "description": "The system shall adhere to the standards, policies and procedures of the American Society of Heating, Refrigerating and Air-Conditioning Engineers [ASHRAE 2010].",
+        "requirement_type": "non_functional",
+        "module": "HVAC",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "two or more. The system shall adhere to the standards, policies and procedures of the American Society of Heating, Refrigerating and Air-Conditioning Engineers [ASHRAE 2010]."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-053",
+        "title": "Programmable humidistat remote control",
+        "description": "The DigitalHome programmable humidistat shall allow a user to monitor and control a home's humidity from any location, using a web ready computer, cell phone, or PDA.",
+        "requirement_type": "functional",
+        "module": "Humidistat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "4.3 Humidistat Requirements 4.3.1 The DigitalHome programmable humidistat shall allow a user to monitor and control a home\u2019s humidity from any location, using a web"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "ready computer, cell phone, or PDA. 4.3.1.1 A DH user shall be able to read the humidit y at a humidistat position. 4.3.1.2 A DH"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-054",
+        "title": "Reading humidity at humidistat position",
+        "description": "A DH user shall be able to read the humidity at a humidistat position.",
+        "requirement_type": "functional",
+        "module": "Humidistat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "ready computer, cell phone, or PDA. 4.3.1.1 A DH user shall be able to read the humidit y at a humidistat position. 4.3.1.2 A DH"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-055",
+        "title": "Setting humidistat humidity level range and increments",
+        "description": "A DH user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments.",
+        "requirement_type": "functional",
+        "module": "Humidistat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "ready computer, cell phone, or PDA. 4.3.1.1 A DH user shall be able to read the humidit y at a humidistat position. 4.3.1.2 A DH"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments. 4.3.2 Up to eight humidistats"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-056",
+        "title": "Maximum number of humidistats per home",
+        "description": "Up to eight humidistats shall be placed in rooms throughout the home.",
+        "requirement_type": "functional",
+        "module": "Humidistat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments. 4.3.2 Up to eight humidistats"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "shall be placed in ro oms throughout the home. 4.3.2.1 A single humidistat shall be placed in an e nclosed space (e.g., a room in"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-057",
+        "title": "Single humidistat per enclosed space",
+        "description": "A single humidistat shall be placed in an enclosed space (e.g., a room in the house) for which the humidity is to be controlled.",
+        "requirement_type": "functional",
+        "module": "Humidistat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "shall be placed in ro oms throughout the home. 4.3.2.1 A single humidistat shall be placed in an e nclosed space (e.g., a room in"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "the house) for which the humidity is to be controlled. 4.3.2.2 If a humdistat device allows a user to make a manual temperature setting, the"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-058",
+        "title": "Manual humidistat temperature setting duration",
+        "description": "If a humdistat device allows a user to make a manual temperature setting, the setting shall remain in effect until the end of the planned or default time period, at which time the planned or default setting will be used for the next time period.",
+        "requirement_type": "functional",
+        "module": "Humidistat",
+        "priority": "high",
+        "ambiguities": [
+          "Text specifies 'manual temperature setting' for a humidistat device."
+        ],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "the house) for which the humidity is to be controlled. 4.3.2.2 If a humdistat device allows a user to make a manual temperature setting, the"
+          },
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "setting shall remain in effect until the"
+          },
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "Digital Home Project, SRS 1.3 Page 10 end of the planned or default time period, at which time the planned or default setting will be"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-059",
+        "title": "Humidistat hourly schedule capacity",
+        "description": "For each humidistat, up to twenty-four one hour settings per day for every day of the week shall be capable of being scheduled.",
+        "requirement_type": "functional",
+        "module": "Humidistat Management",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "used for the next time period. 4.3.2.3 For each humidistat, up to twenty-four one hour settings per day for every day of the week can"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-060",
+        "title": "Humidistat wireless communication",
+        "description": "A DigitalHome system shall use wireless signals to communicate, through the master control unit, with the humidistats.",
+        "requirement_type": "functional",
+        "module": "Humidistat Management",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "be scheduled. 4.3.3 A DigitalHome system shall use wireless signa ls to communicate, through the master control unit, with the humidistats. 4.4 Security System Requirements"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-061",
+        "title": "Door and window contact sensor capacity",
+        "description": "A DigitalHome system shall be able to manage up to fifty door and window contact sensors.",
+        "requirement_type": "functional",
+        "module": "Security System",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "up to fifty door and window contact sensors. 4.4.1.2 A DigitalHome system shall be able to activ ate both light and sound alarms: one sound"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-062",
+        "title": "Security alarm activation capability",
+        "description": "A DigitalHome system shall be able to activate both light and sound alarms: one sound alarm and one light alarm subsystem, with multiple lights.",
+        "requirement_type": "functional",
+        "module": "Security System",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "up to fifty door and window contact sensors. 4.4.1.2 A DigitalHome system shall be able to activ ate both light and sound alarms: one sound"
+          },
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "alarm and one light alarm subsystem, with multiple lights. 4.4.2 When a security breach occurs and a contact s ensor is set OPEN, the alarm"
+          }
+        ]
+      }
+    ],
+    "scenarios": [],
+    "test_cases": []
+  }
+}

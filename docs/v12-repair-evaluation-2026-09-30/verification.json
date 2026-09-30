@@ -1,0 +1,80 @@
+{
+  "verified_at": "2026-09-30T15:35:37.861876+00:00",
+  "run_id": "228f8d258152-2d8979e0adf45a11ba497fad3cc6fa97",
+  "checks": [
+    "Frozen implementation and harness match their pre-call hashes.",
+    "All sixteen earlier run records equal their saved exports and are unchanged.",
+    "The retained draft is unchanged and passes deterministic validation.",
+    "Both findings have saved explanations and zero unresolved findings.",
+    "All ancestor costs are included; reported usage matches call totals and budgets."
+  ],
+  "historical_runs_checked": 16,
+  "charged_tokens": 71196,
+  "phases": {
+    "generation": 7269,
+    "evaluation": 63927
+  },
+  "stages": {
+    "critic": 7269,
+    "evaluation": 63927
+  },
+  "calls": 3,
+  "score": {
+    "catalog_id": "228f8d258152182b-e3208216665e",
+    "precision": 0.875,
+    "recall": 0.9560439560439561,
+    "f1": 0.913728432108027,
+    "true_positive_count": 84,
+    "false_positive_count": 12,
+    "false_negative_count": 4,
+    "total_coverage_units": 91,
+    "total_test_cases": 96,
+    "uncovered_unit_ids": [
+      "CU-028",
+      "CU-029",
+      "CU-031",
+      "CU-044"
+    ],
+    "unmapped_test_case_ids": [
+      "TC-002",
+      "TC-011",
+      "TC-028",
+      "TC-029",
+      "TC-030",
+      "TC-034",
+      "TC-048",
+      "TC-049",
+      "TC-050",
+      "TC-051",
+      "TC-064",
+      "TC-069"
+    ]
+  },
+  "metrics": {
+    "completion": true,
+    "schema_valid": true,
+    "citation_coverage": 1.0,
+    "requirement_scenario_coverage": 1.0,
+    "requirement_test_case_coverage": 1.0,
+    "positive_scenario_coverage": 0.9565217391304348,
+    "non_positive_scenario_coverage": 0.10869565217391304,
+    "rtm_completeness": 1.0,
+    "orphan_rate": 0.0,
+    "invalid_reference_rate": 0.0,
+    "duplicate_test_case_rate": 0.0,
+    "requirement_count": 92,
+    "scenario_count": 96,
+    "test_case_count": 96,
+    "input_tokens": 43452,
+    "output_tokens": 4737,
+    "charged_tokens": 71196,
+    "latency_seconds": 130.67593894898891,
+    "retries": 0,
+    "schema_repairs": 0,
+    "semantic_revisions": 0,
+    "budget_exhausted": false
+  },
+  "remaining_authorized_tokens": 142597,
+  "human_validation": "Pending. No people identified and no ratings supplied.",
+  "limitations": "Same approved 91-unit catalog and coverage-v7 Judge as the staged baseline. Supplementary and adaptive on a reused document, with unequal cumulative budgets. Historical failures remain. Human validation remains pending; model scores do not replace it."
+}

@@ -1,0 +1,1180 @@
+{
+  "units": [
+    {
+      "unit_id": "CU-001",
+      "title": "General user control",
+      "description": "A general user can monitor and control their home's environment.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0005-c001-76e39679522a",
+          "page_number": 5,
+          "section": "3.1 Product Description and Scope",
+          "excerpt": "3.2.1.1 The general user shall be able to use the D H system capabilities to monitor and control the environment in his/her home. 3.2.1.2 The"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-002",
+      "title": "Master user configuration",
+      "description": "A master user can change configuration, including accounts and default settings, and has technician rights.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0005-c001-76e39679522a",
+          "page_number": 5,
+          "section": "3.1 Product Description and Scope",
+          "excerpt": "A Master user will be designated, who shall be able to change the configuration of the system. For example, a Master User shall be able"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-003",
+      "title": "Technician configuration",
+      "description": "A technician can set system parameters and establish accounts.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-7d32d2ee4ecf",
+          "page_number": 6,
+          "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+          "excerpt": "capable of setting up and making changes in the configuration of the system (e.g.,setting system parameters and establishing user accounts), and starting and stopping operation"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-004",
+      "title": "Technician operation control",
+      "description": "A technician can start and stop the DigitalHome system.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-7d32d2ee4ecf",
+          "page_number": 6,
+          "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+          "excerpt": "starting and stopping operation of the DH System. 3.3 Development Constraints 3.3.1 The “prototype” version of the DigitalHome Sy stem (as specified in this document)"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-005",
+      "title": "Prototype schedule",
+      "description": "The prototype must be completed within twelve months of inception; verify by project inspection.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-7d32d2ee4ecf",
+          "page_number": 6,
+          "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+          "excerpt": "must be completed within twelve months of inception. 3.3.2 The development team will consist of five eng ineers. The DigitalHomeOwner Director will provide management and"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-006",
+      "title": "Development team size",
+      "description": "The source specifies five engineers for the development team; verify as a process constraint.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-7d32d2ee4ecf",
+          "page_number": 6,
+          "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+          "excerpt": "development team will consist of five eng ineers. The DigitalHomeOwner Director will provide management and communication support. 3.3.3 The development team will use the development"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-007",
+      "title": "Development process",
+      "description": "The team uses the company-specified development process; the supplied PDF does not define its detailed steps.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-7d32d2ee4ecf",
+          "page_number": 6,
+          "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+          "excerpt": "use the development process specified by the Digital HomeOwner Inc. 3.3.4 Where possible, the DigitalHome project will employ widely used, accepted, and available hardware and"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-008",
+      "title": "Established technologies",
+      "description": "Where possible the project uses widely used, accepted and available technologies and standards.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-7d32d2ee4ecf",
+          "page_number": 6,
+          "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+          "excerpt": "Where possible, the DigitalHome project will employ widely used, accepted, and available hardware and software technology and standards, both for product elements and for development"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-009",
+      "title": "Cost comparison report",
+      "description": "The final report describes cost-minimization efforts including comparisons with competing components.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-7d32d2ee4ecf",
+          "page_number": 6,
+          "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+          "excerpt": "describe their efforts to minimize costs, including price comparisons between DH elements and comparable/competitive elements. 3.3.6 The DH system will be tested in a simulated"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-010",
+      "title": "Realistic simulation",
+      "description": "Home, sensors and controllers are simulated and must adhere to realistic physical properties and constraints.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-7d32d2ee4ecf",
+          "page_number": 6,
+          "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+          "excerpt": "the simulated environment will be realistic and adhere to the physical properties and constraints of an actual home and to real sensors and controllers. 3.3.7"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-011",
+      "title": "Requirement change approval",
+      "description": "Major requirements changes require approval from the division director.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0006-c001-7d32d2ee4ecf",
+          "page_number": 6,
+          "section": "3.2.2.1 A DH Technician is responsible for setting up and maintaining",
+          "excerpt": "Major changes to this document (e.g., changes in requirements) must be approved by the Director of the DigitalHomeOwner Division. 3.4 Operational Environment Although the system"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-012",
+      "title": "Internet service",
+      "description": "The home system requires a widely available broadband ISP.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "The home system shall require an Internet Ser vice Provider (ISP). The ISP should be widely available (cable modem, high speed DSL), such as Bright"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-013",
+      "title": "Home server provisioning",
+      "description": "The system can establish an individual home web server on a home computer.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "es tablish an individual home web server hosted on a home computer. This server will provide a. Interaction with and control of the DH elements"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-014",
+      "title": "Home server device control",
+      "description": "The home web server supports interaction with and control of DigitalHome elements.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "Interaction with and control of the DH elements b. Storage of DH plans and data. c. Ability to establish and maintain DH User Accoun ts"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-015",
+      "title": "Plan and data storage",
+      "description": "The home web server stores DigitalHome plans and data.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "Storage of DH plans and data. c. Ability to establish and maintain DH User Accoun ts d. Provide backup service for user account informat ion,"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-016",
+      "title": "User account management",
+      "description": "The home web server can establish and maintain user accounts.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "Ability to establish and maintain DH User Accoun ts d. Provide backup service for user account informat ion, user plans and a home database 3.4.3"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-017",
+      "title": "Home server backup",
+      "description": "The home web server backs up account information, user plans and the home database.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "Provide backup service for user account informat ion, user plans and a home database 3.4.3 Home DH Gateway Device 3.4.3.1 The DH Gateway device shall"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-018",
+      "title": "Gateway connectivity",
+      "description": "The gateway connects to broadband Internet and communicates with all DigitalHome devices.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "provide communi cation with all the DigitalHome devices and shall connect with a broadband Internet connection. 3.4.3.2 The Gateway shall contain an RF Module, whi"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-019",
+      "title": "Wireless RF communication",
+      "description": "The gateway's RF module sends and receives wireless communications with sensors and controllers.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "The Gateway shall contain an RF Module, whi ch shall send and receive wireless communications between the Gateway and the other DigitalHome devices (sensors and"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-020",
+      "title": "Thermostat reading",
+      "description": "A thermostat provides the current temperature at its location.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "provide a reading of the cu rrent temperature in the space where the thermostat is located. b. The controller part of thermostat shall provides a"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-021",
+      "title": "Thermostat regulation",
+      "description": "The thermostat controls heating or cooling to achieve its set point.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "by switching heating or cooling devices on or off as needed) to achieve the set point temperature. c. The sensor part of the thermostat has"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-022",
+      "title": "Sensor temperature range",
+      "description": "The thermostat sensor's sensitivity range is 14–104°F, equivalent to −10–40°C.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "sensitiv ity range between 14ºF and 104ºF (-10ºC and 40ºC). 3.4.4.2 The system shall include digital programmab le humidistats, which shall be used to monitor"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-023",
+      "title": "Humidistat reading",
+      "description": "A humidistat provides the current humidity at its location.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0007-c001-21e9eb81ac44",
+          "page_number": 7,
+          "section": "3.4.1 The home system shall require an Internet Ser vice Provider (ISP). The",
+          "excerpt": "provide a reading of the cu rrent humidity in the space where the humidistat is located."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-024",
+      "title": "Humidistat regulation",
+      "description": "The humidistat uses a set point to control humidifiers and dehumidifiers.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-6ad0d628a407",
+          "page_number": 8,
+          "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+          "excerpt": "control humidifiers and dehumidifiers achieve the set point humidity. 3.4.4.3 The system shall include magnetic alarm con tact switches which shall be used to monitor"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-025",
+      "title": "Active contact monitoring",
+      "description": "Active magnetic contact switches monitor entry through doors or windows.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-6ad0d628a407",
+          "page_number": 8,
+          "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+          "excerpt": "monitor entry through a door or window when the switch is active. 3.4.4.4 The system shall include security sound and light alarms, which can be"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-026",
+      "title": "Alarm hardware",
+      "description": "The system includes sound and light alarms activated for the specified magnetic-contact breach.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-6ad0d628a407",
+          "page_number": 8,
+          "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+          "excerpt": "security sound and light alarms, which can be activated when DigitalHome senses a security breach from a magnetic contact. 3.4.4.5 The system shall include digital"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-027",
+      "title": "Remote web control",
+      "description": "Users can control temperature, humidity, lighting, security and appliances using a web-ready computer, phone or PDA.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-6ad0d628a407",
+          "page_number": 8,
+          "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+          "excerpt": "allow a web-read y computer, cell phone or PDA to control a home's temperature, humidity, lights, security, and the state of small appliances. 4.1.2 The"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-028",
+      "title": "Wireless sensor persistence",
+      "description": "Sensor readings obtained wirelessly can be saved in the home database.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-6ad0d628a407",
+          "page_number": 8,
+          "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+          "excerpt": "sensor values c an be read and saved in the home database. 4.1.6 Controller values can be sent to controllers to change the DH environment."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-029",
+      "title": "Controller commands",
+      "description": "The system sends controller values to change the home environment.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0008-c001-6ad0d628a407",
+          "page_number": 8,
+          "section": "3.4.4.3 The system shall include magnetic alarm con tact switches",
+          "excerpt": "Controller values can be sent to controllers to change the DH environment. 4.2 Thermostat Requirements 4.2.1 The DigitalHome programmable thermostat shall allow a user to"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-030",
+      "title": "Temperature setting range",
+      "description": "User thermostat set points are 60–80°F inclusive.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "between 60 ° F and 80 ° F, inclusive, at one degree increments. 4.2.2 Up to eight thermostats shall be placed in ro oms throughout"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-031",
+      "title": "Temperature increments",
+      "description": "User thermostat set points use one-degree increments.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "inclusive, at one degree increments. 4.2.2 Up to eight thermostats shall be placed in ro oms throughout the home. 4.2.2.1 The thermostats may be controlled"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-032",
+      "title": "Thermostat capacity",
+      "description": "The system supports up to eight thermostats.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "Up to eight thermostats shall be placed in ro oms throughout the home. 4.2.2.1 The thermostats may be controlled individua lly or collectively, so that"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-033",
+      "title": "Individual and collective temperature control",
+      "description": "Thermostats can be controlled individually or collectively.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "controlled individua lly or collectively, so that temperature can be controlled at different levels in different home spaces. 4.2.2.2 A single thermostat shall be placed"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-034",
+      "title": "Thermostat placement",
+      "description": "A single thermostat is placed in each enclosed space whose temperature is controlled.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "A single thermostat shall be placed in an e nclosed space (e.g., a room in the house) for which the air temperature is to be"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-035",
+      "title": "Thermostat weekly schedule",
+      "description": "Each thermostat supports up to 24 one-hour settings per day for every day of the week.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "up to twenty-four one hour settings per day for every day of the week can be scheduled. 4.2.2.4 If a thermostat device allows a user"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-036",
+      "title": "Thermostat override expiry",
+      "description": "A manual thermostat setting, when supported, lasts until the current planned/default period ends, then the next period's setting applies.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "the setting shall remain in effect until the end of the planned or default time period, at which time the planned or default setting will"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-037",
+      "title": "Temperature units",
+      "description": "The system supports Fahrenheit and Celsius temperature values.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "support Fahrenheit and Celsi us temperature values. 4.2.5 The system shall be compatible with a central ized HVAC (Heating, Ventilation and Air Conditioning) systems: gas,"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-038",
+      "title": "HVAC compatibility",
+      "description": "The system is compatible with centralized HVAC powered by gas, oil, electricity, solar or combinations.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "gas, oil, electricity, solar, or a combination of two or more. The system shall adhere to the standards, policies and procedures of the American Society"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-039",
+      "title": "ASHRAE adherence",
+      "description": "The system must adhere to the referenced ASHRAE standards, policies and procedures; detailed external rules are not supplied.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "adhere to the standards, policies and procedures of the American Society of Heating, Refrigerating and Air-Conditioning Engineers [ASHRAE 2010]. 4.3 Humidistat Requirements 4.3.1 The DigitalHome"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-040",
+      "title": "Humidity setting range",
+      "description": "User humidity set points are 30–60% inclusive.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "from 30% to 60%, inclusive a 1% increments. 4.3.2 Up to eight humidistats shall be placed in ro oms throughout the home. 4.3.2.1 A single"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-041",
+      "title": "Humidity increments",
+      "description": "User humidity set points use 1% increments.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "inclusive a 1% increments. 4.3.2 Up to eight humidistats shall be placed in ro oms throughout the home. 4.3.2.1 A single humidistat shall be placed"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-042",
+      "title": "Humidistat capacity",
+      "description": "The system supports up to eight humidistats.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "Up to eight humidistats shall be placed in ro oms throughout the home. 4.3.2.1 A single humidistat shall be placed in an e nclosed space"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-043",
+      "title": "Humidistat placement",
+      "description": "A single humidistat is placed in each enclosed space whose humidity is controlled.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0009-c001-a474f150b1dc",
+          "page_number": 9,
+          "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+          "excerpt": "A single humidistat shall be placed in an e nclosed space (e.g., a room in the house) for which the humidity is to be controlled."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-044",
+      "title": "Humidistat weekly schedule",
+      "description": "Each humidistat supports up to 24 one-hour settings per day for every day of the week.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "For each humidistat, up to twenty-four one hour settings per day for every day of the week can be scheduled. 4.3.3 A DigitalHome system shall"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-045",
+      "title": "Wireless humidistat communication",
+      "description": "The system communicates wirelessly with humidistats through the master control unit.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "use wireless signa ls to communicate, through the master control unit, with the humidistats. 4.4 Security System Requirements 4.4.1 The DigitalHome security system consists of"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-046",
+      "title": "Contact sensor capacity",
+      "description": "The system manages up to 50 door and window contact sensors.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "up to fifty door and window contact sensors. 4.4.1.2 A DigitalHome system shall be able to activ ate both light and sound alarms: one sound"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-047",
+      "title": "Alarm subsystem configuration",
+      "description": "The system supports one sound alarm subsystem and one light alarm subsystem with multiple lights.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "one sound alarm and one light alarm subsystem, with multiple lights. 4.4.2 When a security breach occurs and a contact s ensor is set OPEN,"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-048",
+      "title": "Security alarm trigger",
+      "description": "A security breach with the contact sensor set OPEN activates the alarm system.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "When a security breach occurs and a contact s ensor is set OPEN, the alarm system shall be activated. 4.5 Appliance Management Requirements 4.5.1 The"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-049",
+      "title": "Power switch capacity",
+      "description": "The appliance manager supports up to 100 power switches.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "up to one hundred 115 volt, 10 amp power switches. 4.5.3 The system shall be able to provide informat ion about the state of a"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-050",
+      "title": "Power switch rating",
+      "description": "The supported power switches are rated 115 volts and 10 amps.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "115 volt, 10 amp power switches. 4.5.3 The system shall be able to provide informat ion about the state of a power switch (OFF or"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-051",
+      "title": "Appliance state reading",
+      "description": "The system reports power-switch ON/OFF state and the connected appliance state.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "provide informat ion about the state of a power switch (OFF or ON), indicating the whether an appliance connected to the power switch is OFF"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-052",
+      "title": "Appliance state changes",
+      "description": "The system changes switches from OFF to ON and ON to OFF.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "change the state of a power switch (OFF to ON, or ON to OFF), in turn changing the state of an appliance connected to the"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-053",
+      "title": "Appliance override expiry",
+      "description": "A manual power-switch change lasts until the current planned/default period ends, then the next period's setting applies.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "If a user changes the state of power switch d evice manually, the device shall remain in that state until the end of the planned"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-054",
+      "title": "Parameter planning",
+      "description": "The planner schedules temperature, humidity, security contacts and appliance/light states for specified time periods.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0010-c001-6577cda47ae7",
+          "page_number": 10,
+          "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+          "excerpt": "set various preset home parameters (temperature, humidity, security contacts, and on/off appliance/light status) for certain time periods. 4.6.2 DigitalHome provides a monthly planner. 4.6.2.1 For"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-055",
+      "title": "Monthly plan editing",
+      "description": "For a selected month/year a user can create or modify the daily parameter plan with up to four time periods per day.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "modify a month plan that specifies for each day, for up to four daily time periods, the environmental parameter settings (temperature, humidity, contact sensors and"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-056",
+      "title": "Planned-value override",
+      "description": "A user can override planned parameters on the website or using manual device switches when available.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "A user shall be able to override planned pa rameter values, through the DH website, or if available, through manual switches on household devices 4.6.3"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-057",
+      "title": "Report history",
+      "description": "Monthly management/control reports are available for a selected month/year within the past two years.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "in the past two y ears, DigitalHome shall be able to provide a report on the management and control of the home. 4.6.3.1 The month"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-058",
+      "title": "Environmental report statistics",
+      "description": "Monthly reports show daily averages and timed maxima/minima for temperature and humidity by device.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "daily averag e, maximum (with time) and minimum (with time) values of temperature and humidity for each thermostat and humidistat, respectively. 4.6.3.2 The month report"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-059",
+      "title": "Security event report",
+      "description": "Monthly reports include the day and time of security alarm activations.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "provide the day and time for which any security breaches occurred, that is, when the security alarms were activated. 4.6.3.3 The month report shall provide"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-060",
+      "title": "Downtime report",
+      "description": "Monthly reports include periods when the system was not operating.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "periods of time when the DH System was not in operation.. 5. Other Non-Functional Requirements 5.1 Performance Requirements 5.1.1 Displays of environmental conditions (tempera ture,"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-061",
+      "title": "Display update rate",
+      "description": "Environmental displays update at least every two seconds.",
+      "unit_type": "non_functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "updated at least every two seconds. 5.1.2 Sensor (temperature, humidity, contact sensor , power state) shall have a minimum data acquisition rate of 10 Hz."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-062",
+      "title": "Sensor acquisition rate",
+      "description": "Sensors have a minimum data acquisition rate of 10 Hz.",
+      "unit_type": "non_functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "minimum data acquisition rate of 10 Hz. 5.1.3 An environmental sensor or controller device shall have to be within 1000 feet of the master control"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-063",
+      "title": "Communication range",
+      "description": "An environmental sensor/controller must be within 1,000 feet of the master control device to communicate.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "1000 feet of the master control device, in order to be in communication with the system. 5.2 Reliability 5.2.1 The DigitalHome System must be highly"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-064",
+      "title": "Reliability limit",
+      "description": "The system has no more than one failure per 10,000 operating hours.",
+      "unit_type": "non_functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "no more than 1 failure per 10,000 hours of operation. 5.2.2 The Digital Home System shall incorporate bac kup and recovery mechanisms. 5.2.2.1 The DH"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-065",
+      "title": "Daily backup",
+      "description": "The system backs up configuration, defaults, plans and usage data daily.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "backup all system data ( configuration, default parameter settings, planning, and usage data) on a daily basis, with the backup time set by the DH"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-066",
+      "title": "Backup time configuration",
+      "description": "The technician sets backup time during system setup.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "the backup time set by the DH Technician at system set up. 5.2.2.2 If the DH System fails (due to power loss, loss of internet"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-067",
+      "title": "Latest-backup recovery",
+      "description": "After the specified power, Internet, software or hardware failures, recover system data from the most recent backup.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0011-c001-4058e38ebb88",
+          "page_number": 11,
+          "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+          "excerpt": "the system recovery mechanism shall restore system data (configuration, default parameter settings, planning, and usage data) from the most recent backup."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-068",
+      "title": "Descriptive error response",
+      "description": "All operations handle exceptions and show a clear descriptive message for errors or exceptional conditions.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "clear, descriptive message when an error or an exceptional condition occurs. 5.3 Safety Requirements 5.3.1 Although there are no specific safety require ments, high system"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-069",
+      "title": "Installation account",
+      "description": "A DigitalHome user account is established upon installation.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "Upon installation, a DigitalHome user account shall be established. The DigitalHome web system shall provide for authentication and information encryption through a recognized reliable and"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-070",
+      "title": "Authentication protection",
+      "description": "The web system provides authentication using recognized reliable security technology.",
+      "unit_type": "non_functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "provide for authentication and information encryption through a recognized reliable and effective security technology, such as Transport Layer Security. 5.4.2 Log in to an account"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-071",
+      "title": "Information encryption",
+      "description": "The web system encrypts information using recognized reliable security technology such as TLS.",
+      "unit_type": "non_functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "information encryption through a recognized reliable and effective security technology, such as Transport Layer Security. 5.4.2 Log in to an account shall require entry of"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-072",
+      "title": "Login credentials",
+      "description": "Account login requires an account name and password.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "a n account name and a password. 5.5 Maintenance Requirements 5.5.1 The development of the DH system shall use me thods and techniques such as"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-073",
+      "title": "Development documentation",
+      "description": "Maintenance support includes documentation of requirements, design and code.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "Documentation of requirements, design, and code 5.5.1.2 Use of abstraction, information hiding and module independence in system design; and 5.5.1.3 Use of IEEE standards [IEEE830,"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-074",
+      "title": "Maintainable design",
+      "description": "Maintenance support includes abstraction, information hiding and module independence.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "Use of abstraction, information hiding and module independence in system design; and 5.5.1.3 Use of IEEE standards [IEEE830, IEEE1008, I EEE1016, IEEE1028] and the HomeOwner"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-075",
+      "title": "Development standards",
+      "description": "Development uses the listed IEEE standards and HomeOwner coding standard; their detailed contents are outside the supplied PDF.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "Use of IEEE standards [IEEE830, IEEE1008, I EEE1016, IEEE1028] and the HomeOwner Coding Standard [HO4710]. 5.5.2 Although the product produced under this docu ment will"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-076",
+      "title": "Reusable prototype components",
+      "description": "Prototype modules/components are designed and implemented for incorporation into a fully specified commercial version.",
+      "unit_type": "constraint",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "may be incorporated in a fully specified commercial version of the DigitalHome System. 5.6 Business Rules 5.6.1 All system documents (Software Requirements S pecification, Architectural"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-077",
+      "title": "Final document currency",
+      "description": "At project completion, system documents are up to date.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "shall be up-to-date, use the Homeowner document format [HO2305] and reside in the HomeOwner Document Archive at completion of the project. 5.6.2 HomeOwner has designated"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-078",
+      "title": "Final document format",
+      "description": "System documents use the HomeOwner document format at project completion.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "use the Homeowner document format [HO2305] and reside in the HomeOwner Document Archive at completion of the project. 5.6.2 HomeOwner has designated object-oriented deve lopment,"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-079",
+      "title": "Final document archive",
+      "description": "System documents reside in the HomeOwner document archive at project completion.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "reside in the HomeOwner Document Archive at completion of the project. 5.6.2 HomeOwner has designated object-oriented deve lopment, using UML 2.0, as the preferred method"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-080",
+      "title": "Development-method exceptions",
+      "description": "Object-oriented development with UML 2.0 is preferred; exceptions require CIO approval.",
+      "unit_type": "business_rule",
+      "source_references": [
+        {
+          "chunk_id": "p0012-c001-339819371795",
+          "page_number": 12,
+          "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+          "excerpt": "Exceptions to this rule must be approved by the CIO."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-081",
+      "title": "Online user documentation",
+      "description": "The system provides online documentation for the installation in the user's home.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-1470a9ea6115",
+          "page_number": 13,
+          "section": "5.7 User Documentation:",
+          "excerpt": "online documentation about the DigitalHome system installed in their home. The user documentation shall include the following: 5.7.1.1 An FAQ section – a set of"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-082",
+      "title": "FAQ help",
+      "description": "User documentation includes an FAQ about system use and maintenance.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-1470a9ea6115",
+          "page_number": 13,
+          "section": "5.7 User Documentation:",
+          "excerpt": "An FAQ section – a set of “Frequently Asked Questions” about use and maintenance of the DigitalHome System (e.g., “How do I change my password?”,"
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-083",
+      "title": "Parameter and sensor help",
+      "description": "User documentation explains parameter settings, sensor readings and their limits/accuracy.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-1470a9ea6115",
+          "page_number": 13,
+          "section": "5.7 User Documentation:",
+          "excerpt": "information on limitations and constraints on parameter settings and sensor reading accuracy. 5.7.1.3 A section that describes how to use the DH Planner."
+        }
+      ]
+    },
+    {
+      "unit_id": "CU-084",
+      "title": "Planner help",
+      "description": "User documentation explains how to use the DigitalHome planner.",
+      "unit_type": "functional",
+      "source_references": [
+        {
+          "chunk_id": "p0013-c001-1470a9ea6115",
+          "page_number": 13,
+          "section": "5.7 User Documentation:",
+          "excerpt": "A section that describes how to use the DH Planner."
+        }
+      ]
+    }
+  ]
+}

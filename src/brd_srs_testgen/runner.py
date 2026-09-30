@@ -7,7 +7,8 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+from importlib.metadata import version
 from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
 
@@ -56,11 +57,11 @@ from .providers import (
     StructuredOutputError,
     StructuredProvider,
 )
-from .storage import RunRepository
+from .storage import RunRepository, ImmutableRunError
 from .validation import build_rtm, compute_metrics, validate_bundle
 
 
-SCHEMA_VERSION = "research-core-v1"
+SCHEMA_VERSION = "research-core-v3"
 LOCAL_REQUEST_TOKEN_BUDGET = 12_000
 LOCAL_PROVIDERS = {"lm_studio", "llama_cpp", "ollama"}
 THINKING_LEVELS = {"minimal", "low", "medium", "high"}
@@ -68,7 +69,7 @@ JUDGE_PROVIDER = "gemini"
 JUDGE_MODEL = "gemini-3.6-flash"
 JUDGE_THINKING_LEVEL = "medium"
 JUDGE_TOKEN_CEILING = 100_000
-COVERAGE_PROMPT_VERSION = "coverage-v2"
+COVERAGE_PROMPT_VERSION = "coverage-v7"
 COVERAGE_SCHEMA_VERSION = "coverage-catalog-v1"
 EVALUATOR_VERSION = (
     f"{COVERAGE_PROMPT_VERSION}:{COVERAGE_SCHEMA_VERSION}:"
@@ -114,6 +115,7 @@ class ProviderSettings:
     agent_thinking_levels: dict[str, str] = field(default_factory=dict)
     agent_max_output_tokens: dict[str, int] = field(default_factory=dict)
     critic_enabled: bool = True
+    pipeline_profile: str = "efficient"
     provider_api_keys: dict[str, str] = field(default_factory=dict, repr=False)
     provider_base_urls: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -184,6 +186,10 @@ class ProviderSettings:
             "agents": agents,
             "token_ceiling": self.token_ceiling,
             "critic_enabled": self.critic_enabled,
+            "pipeline_profile": self.pipeline_profile,
+            "agent_setups": {key: value.model_dump(mode="json") for key, value in self.agent_setups.items()},
+            "provider_endpoint_hashes": {provider: hashlib.sha256(self.base_url_for(provider).encode()).hexdigest()
+                                         for provider in {self.provider, *self.agent_providers.values()} if provider in LOCAL_PROVIDERS},
         }
 
     def with_model(self, model: str) -> ProviderSettings:
@@ -195,6 +201,8 @@ class ProviderSettings:
         return replace(self, agent_setups=agent_setups)
 
     def validate(self) -> None:
+        if self.pipeline_profile not in {"corrected", "efficient"}:
+            raise ValueError("Pipeline profile must be corrected or efficient.")
         if not isinstance(self.critic_enabled, bool):
             raise ValueError("Critic enabled must be a boolean.")
         if (
@@ -555,6 +563,28 @@ def _revision_chunks(
     return [chunk for chunk in chunks if chunk.chunk_id in source_chunk_ids]
 
 
+def implementation_snapshot() -> dict:
+    return {
+        "source_sha256": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                          for name in ("runner.py", "pipelines.py", "prompts.py", "providers.py", "documents.py", "models.py", "coverage.py", "validation.py", "evidence.py", "efficient.py", "evaluation.py", "benchmark.py", "storage.py", "schema.sql")},
+        "dependencies": {name: version(name) for name in ("google-genai", "pydantic", "pypdf", "psycopg")},
+    }
+
+
+def inherited_budget_tokens(repository: RunRepository, parent: RunResult) -> int:
+    """Sum each durable ancestor's own cost, including interrupted ancestors."""
+    total, seen = 0, set()
+    document_hash = parent.manifest.document_hash
+    while parent is not None:
+        if parent.manifest.run_id in seen or parent.manifest.document_hash != document_hash:
+            raise ConfigurationError("Recovery ancestry is cyclic or references another document.")
+        seen.add(parent.manifest.run_id)
+        total += parent.metrics.charged_tokens if parent.metrics else sum(c.budget_tokens for c in parent.call_attempts)
+        parent_id = parent.manifest.configuration.get("recovery_parent_id")
+        parent = repository.load_run(parent_id) if parent_id else None
+    return total
+
+
 def run_generation(
     pdf_bytes: bytes,
     source_filename: str,
@@ -565,6 +595,8 @@ def run_generation(
     progress: Progress | None = None,
     provider_factory: ProviderFactory | None = None,
     judge_provider_factory: JudgeProviderFactory | None = None,
+    resume_from: str | None = None,
+    request_id: str | None = None,
 ) -> RunResult:
     settings.validate()
     primary_agent = RUN_AGENTS[run_type][0]
@@ -579,9 +611,15 @@ def run_generation(
     ):
         display_name = "document.pdf"
 
-    document_hash = hashlib.sha256(pdf_bytes).hexdigest()
+    parent = repository.load_run(resume_from) if resume_from else None
+    if parent is not None and parent.manifest.run_type is not run_type:
+        raise ConfigurationError("Recovery must use the original run type.")
+    inherited_tokens = inherited_budget_tokens(repository, parent) if parent else 0
+    document_hash = parent.manifest.document_hash if parent else hashlib.sha256(pdf_bytes).hexdigest()
+    if request_id is not None and re.fullmatch(r"[0-9a-f]{32}", request_id) is None:
+        raise ConfigurationError("Request ID must be a UUID hex string.")
     manifest = RunManifest(
-        run_id=_run_id(document_hash),
+        run_id=f"{document_hash[:12]}-{request_id}" if request_id else _run_id(document_hash),
         source_filename=display_name,
         document_hash=document_hash,
         run_type=run_type,
@@ -592,308 +630,377 @@ def run_generation(
         token_ceiling=settings.token_ceiling,
         prompt_version=PROMPT_VERSION,
         schema_version=SCHEMA_VERSION,
-        configuration=settings.snapshot(run_type),
+        configuration={
+            **settings.snapshot(run_type),
+            "implementation": implementation_snapshot(),
+        },
         started_at=_now(),
     )
-    repository.create_run(manifest)
-    repository.append_event(manifest.run_id, "started")
-    _notify(progress, "Preparing document")
-
-    try:
-        chunks = parse_pdf(pdf_bytes)
-    except DocumentError as error:
-        manifest = manifest.model_copy(
-            update={
-                "status": RunStatus.FAILED,
-                "completed_at": _now(),
-                "failure_category": FailureCategory.PARSING,
-                "failure_message": _safe_message(error, settings),
-            }
-        )
-        result = RunResult(manifest=manifest)
-        repository.finalize(result)
-        _notify(progress, "Failed")
-        return result
-
-    repository.save_chunks(manifest.run_id, chunks)
-    repository.append_event(manifest.run_id, "parsed")
-    _notify(progress, "Generating artifacts")
-
-    provider_factory = provider_factory or (
-        lambda _run_type, ledger: _make_provider(primary_settings, ledger)
-    )
-    ledger = BudgetLedger(settings.token_ceiling)
-    context: PipelineContext | None = None
-    bundle: ArtifactBundle | None = None
-    validation: ValidationReport | None = None
-    coverage: CoverageScore | None = None
-    coverage_evaluation: CoverageEvaluation | None = None
-    judge_charged_tokens = 0
-    rtm: list[RTMRow] = []
-    started = time.perf_counter()
-    try:
+    if parent:
+        manifest.configuration["recovery_parent_id"] = parent.manifest.run_id
+    with repository.run_lease(manifest.run_id, resume_from):
         try:
-            provider = provider_factory(run_type, ledger)
-        except ValueError as error:
-            raise ConfigurationError(str(error)) from error
-        if getattr(provider, "ledger", None) is not ledger:
-            raise ConfigurationError("Provider must use the run budget ledger.")
-        if getattr(provider, "model", None) != primary_settings.model:
-            raise ConfigurationError("Provider model must match the run model.")
+            repository.create_run(manifest)
+        except ImmutableRunError:
+            if request_id is None:
+                raise
+            existing = repository.load_run(manifest.run_id)
+            if (existing.manifest.document_hash != document_hash
+                    or existing.manifest.configuration != manifest.configuration):
+                raise ConfigurationError("Request ID was already used with different inputs.")
+            return existing
+        repository.append_event(manifest.run_id, "started")
+        _notify(progress, "Preparing document")
 
-        providers: dict[str, StructuredProvider] = {}
-        for agent in RUN_AGENTS[run_type][1:]:
-            agent_settings = settings.for_agent(agent)
-            if (
-                agent_settings.provider == primary_settings.provider
-                and agent_settings.model == primary_settings.model
-                and agent_settings.thinking_level == primary_settings.thinking_level
-            ):
-                continue
-            agent_provider = _make_provider(agent_settings, ledger)
-            if getattr(agent_provider, "ledger", None) is not ledger:
-                raise ConfigurationError("Provider must use the run budget ledger.")
-            if getattr(agent_provider, "model", None) != agent_settings.model:
-                raise ConfigurationError(
-                    "Agent provider model must match its configured model."
-                )
-            providers[agent] = agent_provider
-
-        configured_providers = {
-            settings.provider_for(agent) for agent in RUN_AGENTS[run_type]
-        }
-        local_provider = bool(configured_providers & LOCAL_PROVIDERS)
-        context = PipelineContext(
-            provider=provider,
-            token_ceiling=settings.token_ceiling,
-            critic_enabled=settings.critic_enabled,
-            providers=providers,
-            agent_setups=settings.agent_setups,
-            agent_prompts=settings.agent_prompts,
-            agent_max_output_tokens=settings.agent_max_output_tokens,
-            progress=progress,
-            max_request_tokens=(
-                LOCAL_REQUEST_TOKEN_BUDGET
-                if "llama_cpp" in configured_providers
-                else None
-            ),
-            worker_limit=1 if local_provider else WORKER_COUNT,
-            bounded_tasks=local_provider,
-        )
-        bundle = canonicalize_source_references(
-            PIPELINES[run_type](context, chunks), chunks
-        )
-        validation = validate_bundle(bundle, chunks)
-        if (
-            run_type is not RunType.CENTRALIZED_MULTI_AGENT
-            and validation.issues
-            and all(
-                issue.code == "uncovered_requirement"
-                for issue in validation.issues
-            )
-        ):
-            bundle = _repair_coverage(
-                context, bundle, validation.uncovered_requirement_ids
-            )
-            validation = validate_bundle(bundle, chunks)
-        if (
-            run_type is not RunType.CENTRALIZED_MULTI_AGENT
-            and not validation.valid
-            and context.max_request_tokens is None
-        ):
-            bundle = context.revise(
-                [],
-                "artifact bundle",
-                bundle,
-                ReviewResult(
-                    accepted=False,
-                    issues=[
-                        ReviewIssue(
-                            artifact_id=issue.artifact_id,
-                            reason=f"{issue.code}: {issue.message}",
-                        )
-                        for issue in validation.issues
-                    ],
-                ),
-                _revision_chunks(bundle, validation, chunks),
-                ArtifactBundle,
-                (
-                    settings.agent_max_output_tokens.get(
-                        "test_cases", STAGED_OUTPUT_TOKEN_DEFAULTS["test_cases"]
-                    )
-                    if run_type is RunType.STAGED_SINGLE_AGENT
-                    else 16_000
-                ),
-            )
-            bundle = canonicalize_source_references(bundle, chunks)
-            validation = validate_bundle(bundle, chunks)
-
-        rtm = build_rtm(bundle)
-        if bundle is not None:
-            _notify(progress, "Analyzing coverage")
-            judge_ledger = BudgetLedger(JUDGE_TOKEN_CEILING)
-            judge_context: PipelineContext | None = None
-            catalog = repository.load_coverage_catalog(
-                document_hash, EVALUATOR_VERSION
-            )
-            try:
-                if judge_provider_factory is not None:
-                    judge_provider = judge_provider_factory(judge_ledger)
-                elif not settings.api_key_for(JUDGE_PROVIDER).strip():
-                    raise ConfigurationError(
-                        "Gemini API key is required for the fixed judge."
-                    )
-                else:
-                    judge_provider = _make_judge_provider(settings, judge_ledger)
-                if getattr(judge_provider, "ledger", None) is not judge_ledger:
-                    raise ConfigurationError(
-                        "Judge provider must use the judge budget ledger."
-                    )
-                if getattr(judge_provider, "model", None) != JUDGE_MODEL:
-                    raise ConfigurationError(
-                        "Judge provider model must be Gemini 3.6 Flash."
-                    )
-                judge_context = PipelineContext(
-                    provider=judge_provider,
-                    token_ceiling=JUDGE_TOKEN_CEILING,
-                    agent_setups={
-                        "coverage_analyzer": AgentSetup(
-                            agent="coverage_analyzer",
-                            role="Independent quality judge",
-                        )
-                    },
-                    progress=progress,
-                )
-                if catalog is None:
-                    _notify(
-                        progress,
-                        "Judge: extracting coverage units from the source document.",
-                    )
-                    catalog = extract_coverage_catalog(
-                        judge_context,
-                        chunks,
-                        document_hash=document_hash,
-                        evaluator_version=EVALUATOR_VERSION,
-                        catalog_id=(
-                            f"{document_hash[:16]}-"
-                            f"{hashlib.sha256(EVALUATOR_VERSION.encode()).hexdigest()[:12]}"
-                        ),
-                        created_at=_now(),
-                    )
-                    catalog = repository.save_coverage_catalog(catalog)
-                    _notify(
-                        progress,
-                        f"Judge: extracted {len(catalog.units)} coverage units. "
-                        "Mapping test cases...",
-                    )
-                else:
-                    _notify(
-                        progress,
-                        f"Judge: reusing {len(catalog.units)} frozen coverage units. "
-                        "Mapping test cases...",
-                    )
-                coverage_evaluation = evaluate_against_catalog(
-                    judge_context,
-                    run_id=manifest.run_id,
-                    bundle=bundle,
-                    catalog=catalog,
-                    evaluated_at=_now(),
-                )
-                coverage = coverage_evaluation.score
-                if coverage is not None:
-                    _notify(
-                        progress,
-                        f"Judge: F1={coverage.f1:.2f} "
-                        f"(precision={coverage.precision:.2f}, "
-                        f"recall={coverage.recall:.2f}).",
-                    )
-            except (
-                ConfigurationError,
-                ProviderError,
-                PipelineOutputError,
-                ValueError,
-                ValidationError,
-            ) as error:
-                message = _safe_message(error, settings)
-                if catalog is not None:
-                    coverage_evaluation = CoverageEvaluation(
-                        run_id=manifest.run_id,
-                        catalog_id=catalog.catalog_id,
-                        status=CoverageEvaluationStatus.FAILED,
-                        error=message,
-                        evaluated_at=_now(),
-                    )
-                _notify(progress, f"Coverage evaluation failed: {message}")
-            finally:
-                judge_charged_tokens = judge_ledger.used
-                if judge_context is not None:
-                    context.input_tokens += judge_context.input_tokens
-                    context.output_tokens += judge_context.output_tokens
-                    context.retries += judge_context.retries
-                    context.schema_repairs += judge_context.schema_repairs
-                    context.semantic_revisions += judge_context.semantic_revisions
-        metrics = compute_metrics(
-            bundle,
-            validation,
-            input_tokens=context.input_tokens,
-            output_tokens=context.output_tokens,
-            charged_tokens=context.charged_tokens + judge_charged_tokens,
-            latency_seconds=time.perf_counter() - started,
-            retries=context.retries,
-            schema_repairs=context.schema_repairs,
-            semantic_revisions=context.semantic_revisions,
-            budget_exhausted=False,
-        )
-        if validation.valid:
-            manifest = manifest.model_copy(
-                update={"status": RunStatus.COMPLETED, "completed_at": _now()}
-            )
-        else:
+        try:
+            chunks = repository.load_chunks(parent.manifest.run_id) if parent else parse_pdf(pdf_bytes)
+        except DocumentError as error:
             manifest = manifest.model_copy(
                 update={
                     "status": RunStatus.FAILED,
                     "completed_at": _now(),
-                    "failure_category": FailureCategory.SEMANTIC_VALIDATION,
-                    "failure_message": (
-                        f"{len(validation.issues)} deterministic validation issues."
-                    ),
+                    "failure_category": FailureCategory.PARSING,
+                    "failure_message": _safe_message(error, settings),
                 }
             )
-    except Exception as error:
-        category = _failure_category(error)
-        if category is None:
-            raise
-        metrics = _empty_metrics(
-            context,
-            latency_seconds=time.perf_counter() - started,
-            budget_exhausted=category is FailureCategory.BUDGET_EXHAUSTION,
-            charged_tokens=ledger.used,
-        )
-        bundle = None
-        validation = None
-        rtm = []
-        manifest = manifest.model_copy(
-            update={
-                "status": RunStatus.FAILED,
-                "completed_at": _now(),
-                "failure_category": category,
-                "failure_message": _safe_message(error, settings),
-            }
-        )
+            result = RunResult(manifest=manifest)
+            repository.finalize(result)
+            _notify(progress, "Failed")
+            return result
 
-    result = RunResult(
-        manifest=manifest,
-        stage_outputs=(
-            sorted(context.stage_outputs, key=AgentStageOutput.order_key)
-            if context else []
-        ),
-        bundle=bundle,
-        validation=validation,
-        rtm=rtm,
-        metrics=metrics,
-        coverage=coverage,
-        coverage_evaluation=coverage_evaluation,
-    )
-    repository.finalize(result)
-    _notify(progress, manifest.status.value.title())
-    return result
+        repository.save_chunks(manifest.run_id, chunks)
+        repository.append_event(manifest.run_id, "parsed")
+        _notify(progress, "Generating artifacts")
+
+        provider_factory = provider_factory or (
+            lambda _run_type, ledger: _make_provider(primary_settings, ledger)
+        )
+        ledger = BudgetLedger(settings.token_ceiling)
+        context: PipelineContext | None = None
+        bundle: ArtifactBundle | None = None
+        validation: ValidationReport | None = None
+        coverage: CoverageScore | None = None
+        coverage_evaluation: CoverageEvaluation | None = None
+        judge_charged_tokens = 0
+        rtm: list[RTMRow] = []
+        started = time.perf_counter()
+        try:
+            try:
+                provider = provider_factory(run_type, ledger)
+            except ValueError as error:
+                raise ConfigurationError(str(error)) from error
+            if getattr(provider, "ledger", None) is not ledger:
+                raise ConfigurationError("Provider must use the run budget ledger.")
+            if getattr(provider, "model", None) != primary_settings.model:
+                raise ConfigurationError("Provider model must match the run model.")
+
+            providers: dict[str, StructuredProvider] = {}
+            for agent in RUN_AGENTS[run_type][1:]:
+                agent_settings = settings.for_agent(agent)
+                if (
+                    agent_settings.provider == primary_settings.provider
+                    and agent_settings.model == primary_settings.model
+                    and agent_settings.thinking_level == primary_settings.thinking_level
+                ):
+                    continue
+                agent_provider = _make_provider(agent_settings, ledger)
+                if getattr(agent_provider, "ledger", None) is not ledger:
+                    raise ConfigurationError("Provider must use the run budget ledger.")
+                if getattr(agent_provider, "model", None) != agent_settings.model:
+                    raise ConfigurationError(
+                        "Agent provider model must match its configured model."
+                    )
+                providers[agent] = agent_provider
+
+            configured_providers = {
+                settings.provider_for(agent) for agent in RUN_AGENTS[run_type]
+            }
+            local_provider = bool(configured_providers & LOCAL_PROVIDERS)
+            context = PipelineContext(
+                provider=provider,
+                efficient=settings.pipeline_profile == "efficient",
+                recovery_signature=hashlib.sha256(json.dumps({
+                    "document_hash": document_hash,
+                    "configuration": {k:v for k,v in manifest.configuration.items() if k != "recovery_parent_id"},
+                }, sort_keys=True).encode()).hexdigest(),
+                recovery_parent=parent.manifest.run_id if parent else None,
+                checkpoints=parent.stage_outputs if parent else [],
+                stage_recorder=lambda row: repository.append_stage_output(manifest.run_id, row),
+                call_recorder=lambda row: repository.append_call_attempt(manifest.run_id, row),
+                sanitize=lambda value: _safe_message(ValueError(value), settings),
+                provider_names={agent: settings.provider_for(agent) for agent in RUN_AGENTS[run_type]},
+                token_ceiling=settings.token_ceiling,
+                critic_enabled=settings.critic_enabled,
+                providers=providers,
+                agent_setups=settings.agent_setups,
+                agent_prompts=settings.agent_prompts,
+                agent_max_output_tokens=settings.agent_max_output_tokens,
+                progress=progress,
+                max_request_tokens=(
+                    LOCAL_REQUEST_TOKEN_BUDGET
+                    if "llama_cpp" in configured_providers
+                    else None
+                ),
+                worker_limit=1 if local_provider else WORKER_COUNT,
+                bounded_tasks=local_provider,
+            )
+            if parent:
+                context.diagnostics.recovery_parent_id = parent.manifest.run_id
+                context.diagnostics.inherited_budget_tokens = inherited_tokens
+            saved_generation = next((row for row in context.checkpoints
+                if row.stage == "generation" and row.fingerprint == context.recovery_signature), None)
+            if saved_generation and not validate_bundle(ArtifactBundle.model_validate(saved_generation.output), chunks).valid:
+                raise PipelineOutputError("Saved generation failed validation; it cannot be reused.")
+            bundle = canonicalize_source_references(
+                ArtifactBundle.model_validate(saved_generation.output) if saved_generation else PIPELINES[run_type](context, chunks), chunks
+            )
+            validation = validate_bundle(bundle, chunks)
+            if (
+                run_type is not RunType.CENTRALIZED_MULTI_AGENT
+                and validation.issues
+                and all(
+                    issue.code == "uncovered_requirement"
+                    for issue in validation.issues
+                )
+            ):
+                bundle = _repair_coverage(
+                    context, bundle, validation.uncovered_requirement_ids
+                )
+                validation = validate_bundle(bundle, chunks)
+            if (
+                run_type is not RunType.CENTRALIZED_MULTI_AGENT
+                and not validation.valid
+                and context.max_request_tokens is None
+            ):
+                bundle = context.revise(
+                    [],
+                    "artifact bundle",
+                    bundle,
+                    ReviewResult(
+                        accepted=False,
+                        issues=[
+                            ReviewIssue(
+                                artifact_id=issue.artifact_id,
+                                reason=f"{issue.code}: {issue.message}",
+                            )
+                            for issue in validation.issues
+                        ],
+                    ),
+                    _revision_chunks(bundle, validation, chunks),
+                    ArtifactBundle,
+                    (
+                        settings.agent_max_output_tokens.get(
+                            "test_cases", STAGED_OUTPUT_TOKEN_DEFAULTS["test_cases"]
+                        )
+                        if run_type is RunType.STAGED_SINGLE_AGENT
+                        else 16_000
+                    ),
+                )
+                bundle = canonicalize_source_references(bundle, chunks)
+                validation = validate_bundle(bundle, chunks)
+
+            if validation.valid:
+                if saved_generation:
+                    context.diagnostics.reused_tasks += 1
+                    if parent and parent.diagnostics:
+                        context.diagnostics.semantic_status = parent.diagnostics.semantic_status
+                        context.diagnostics.unresolved_findings = parent.diagnostics.unresolved_findings
+                        context.diagnostics.source_dispositions = parent.diagnostics.source_dispositions
+                        context.diagnostics.evidence_version = parent.diagnostics.evidence_version
+                        context.diagnostics.evidence_spans = parent.diagnostics.evidence_spans
+                context.record_stage("generation", 0, [c.chunk_id for c in chunks], bundle,
+                                     fingerprint=context.recovery_signature,
+                                     reused_from=parent.manifest.run_id if saved_generation else None)
+            rtm = build_rtm(bundle)
+            if bundle is not None:
+                _notify(progress, "Analyzing coverage")
+                judge_ledger = BudgetLedger(JUDGE_TOKEN_CEILING)
+                judge_context: PipelineContext | None = None
+                catalog = repository.load_coverage_catalog(
+                    document_hash, EVALUATOR_VERSION
+                )
+                try:
+                    if judge_provider_factory is not None:
+                        judge_provider = judge_provider_factory(judge_ledger)
+                    elif not settings.api_key_for(JUDGE_PROVIDER).strip():
+                        raise ConfigurationError(
+                            "Gemini API key is required for the fixed judge."
+                        )
+                    else:
+                        judge_provider = _make_judge_provider(settings, judge_ledger)
+                    if getattr(judge_provider, "ledger", None) is not judge_ledger:
+                        raise ConfigurationError(
+                            "Judge provider must use the judge budget ledger."
+                        )
+                    if getattr(judge_provider, "model", None) != JUDGE_MODEL:
+                        raise ConfigurationError(
+                            "Judge provider model must be Gemini 3.6 Flash."
+                        )
+                    judge_context = PipelineContext(
+                        provider=judge_provider,
+                        efficient=True,
+                        recovery_signature=context.recovery_signature + EVALUATOR_VERSION,
+                        recovery_parent=context.recovery_parent,
+                        checkpoints=context.checkpoints,
+                        stage_recorder=context.stage_recorder,
+                        call_recorder=lambda row: repository.append_call_attempt(manifest.run_id, row),
+                        sanitize=lambda value: _safe_message(ValueError(value), settings),
+                        provider_names={"coverage_analyzer": JUDGE_PROVIDER},
+                        token_ceiling=JUDGE_TOKEN_CEILING,
+                        agent_setups={
+                            "coverage_analyzer": AgentSetup(
+                                agent="coverage_analyzer",
+                                role="Independent quality judge",
+                            )
+                        },
+                        progress=progress,
+                    )
+                    if catalog is None:
+                        _notify(
+                            progress,
+                            "Judge: extracting coverage units from the source document.",
+                        )
+                        catalog = extract_coverage_catalog(
+                            judge_context,
+                            chunks,
+                            document_hash=document_hash,
+                            evaluator_version=EVALUATOR_VERSION,
+                            catalog_id=(
+                                f"{document_hash[:16]}-"
+                                f"{hashlib.sha256(EVALUATOR_VERSION.encode()).hexdigest()[:12]}"
+                            ),
+                            created_at=_now(),
+                        )
+                        catalog = repository.save_coverage_catalog(catalog)
+                        _notify(
+                            progress,
+                            f"Judge: extracted {len(catalog.units)} coverage units. "
+                            "Mapping test cases...",
+                        )
+                    else:
+                        _notify(
+                            progress,
+                            f"Judge: reusing {len(catalog.units)} frozen coverage units. "
+                            "Mapping test cases...",
+                        )
+                    coverage_evaluation = evaluate_against_catalog(
+                        judge_context,
+                        run_id=manifest.run_id,
+                        bundle=bundle,
+                        catalog=catalog,
+                        evaluated_at=_now(),
+                    )
+                    coverage = coverage_evaluation.score
+                    if coverage is not None:
+                        _notify(
+                            progress,
+                            f"Judge: F1={coverage.f1:.2f} "
+                            f"(precision={coverage.precision:.2f}, "
+                            f"recall={coverage.recall:.2f}).",
+                        )
+                except (
+                    ConfigurationError,
+                    BudgetExceeded,
+                    StructuredOutputError,
+                    ProviderError,
+                    PipelineOutputError,
+                    ValueError,
+                    ValidationError,
+                ) as error:
+                    message = _safe_message(error, settings)
+                    context.diagnostics.evaluation_error = message
+                    if catalog is not None:
+                        coverage_evaluation = CoverageEvaluation(
+                            run_id=manifest.run_id,
+                            catalog_id=catalog.catalog_id,
+                            status=CoverageEvaluationStatus.FAILED,
+                            error=message,
+                            evaluated_at=_now(),
+                        )
+                    _notify(progress, f"Coverage evaluation failed: {message}")
+                finally:
+                    judge_charged_tokens = judge_ledger.used
+                    if judge_context is not None:
+                        context.stage_outputs.extend(judge_context.stage_outputs)
+                        context.diagnostics.reused_tasks += judge_context.diagnostics.reused_tasks
+                        context.call_attempts.extend(judge_context.call_attempts)
+                        context.input_tokens += judge_context.input_tokens
+                        context.output_tokens += judge_context.output_tokens
+                        context.retries += judge_context.retries
+                        context.schema_repairs += judge_context.schema_repairs
+                        context.semantic_revisions += judge_context.semantic_revisions
+            metrics = compute_metrics(
+                bundle,
+                validation,
+                input_tokens=context.input_tokens,
+                output_tokens=context.output_tokens,
+                charged_tokens=context.charged_tokens + judge_charged_tokens,
+                latency_seconds=time.perf_counter() - started,
+                retries=context.retries,
+                schema_repairs=context.schema_repairs,
+                semantic_revisions=context.semantic_revisions,
+                budget_exhausted=False,
+            )
+            if validation.valid:
+                manifest = manifest.model_copy(
+                    update={"status": RunStatus.COMPLETED, "completed_at": _now()}
+                )
+            else:
+                manifest = manifest.model_copy(
+                    update={
+                        "status": RunStatus.FAILED,
+                        "completed_at": _now(),
+                        "failure_category": FailureCategory.SEMANTIC_VALIDATION,
+                        "failure_message": (
+                            f"{len(validation.issues)} deterministic validation issues."
+                        ),
+                    }
+                )
+        except Exception as error:
+            category = _failure_category(error)
+            if category is None:
+                raise
+            metrics = _empty_metrics(
+                context,
+                latency_seconds=time.perf_counter() - started,
+                budget_exhausted=category is FailureCategory.BUDGET_EXHAUSTION,
+                charged_tokens=ledger.used,
+            )
+            bundle = bundle or (context.partial_bundle if context else None)
+            if bundle is not None:
+                validation = validate_bundle(bundle, chunks)
+                rtm = build_rtm(bundle)
+                metrics = compute_metrics(
+                    bundle, validation, input_tokens=metrics.input_tokens,
+                    output_tokens=metrics.output_tokens, charged_tokens=metrics.charged_tokens,
+                    latency_seconds=metrics.latency_seconds, retries=metrics.retries,
+                    schema_repairs=metrics.schema_repairs, semantic_revisions=metrics.semantic_revisions,
+                    budget_exhausted=metrics.budget_exhausted,
+                ).model_copy(update={"completion": False})
+            manifest = manifest.model_copy(
+                update={
+                    "status": RunStatus.FAILED,
+                    "completed_at": _now(),
+                    "failure_category": category,
+                    "failure_message": _safe_message(error, settings),
+                }
+            )
+
+        result = RunResult(
+            manifest=manifest,
+            stage_outputs=(
+                sorted(context.stage_outputs, key=AgentStageOutput.order_key)
+                if context else []
+            ),
+            bundle=bundle,
+            call_attempts=sorted(context.call_attempts, key=lambda row: (row.started_at, row.call_id)) if context else [],
+            diagnostics=context.diagnostics if context else None,
+            validation=validation,
+            rtm=rtm,
+            metrics=metrics,
+            coverage=coverage,
+            coverage_evaluation=coverage_evaluation,
+        )
+        repository.finalize(result)
+        _notify(progress, manifest.status.value.title())
+        return result

@@ -1,0 +1,176 @@
+{
+  "run_id": "20260929T083231067296Z-fe7216c0e95e-3bd1bb11",
+  "source_chars": 152543,
+  "scout_evidence_chars_with_overlap": 207823,
+  "stage_prompt_characters_excluding_schema_setup_custom_and_corrections": {
+    "scout": {
+      "calls": 32,
+      "sum": 259043,
+      "max": 10996
+    },
+    "curator_assignment": {
+      "calls": 1,
+      "sum": 321922,
+      "max": 321922
+    },
+    "curator_materialization": {
+      "calls": 10,
+      "sum": 344339,
+      "max": 42370
+    },
+    "scenario_architect": {
+      "calls": 1,
+      "sum": 300325,
+      "max": 300325
+    },
+    "test_writer": {
+      "calls": 21,
+      "sum": 366585,
+      "max": 27130
+    },
+    "critic": {
+      "calls": 1,
+      "sum": 435324,
+      "max": 435324
+    },
+    "repair": {
+      "calls": 1,
+      "sum": 436699,
+      "max": 436699
+    }
+  },
+  "base_generation_calls": 67,
+  "inferred_generation_calls_including_11_scout_corrections": 78,
+  "counts": {
+    "candidates": 283,
+    "requirements": 230,
+    "scenarios": 62,
+    "test_cases": 63
+  },
+  "repair_role": "scenario_architect",
+  "repair_max_output_tokens": 30000,
+  "full_bundle_compact_json_chars": 275927,
+  "target_artifacts_compact_json_chars": 3401,
+  "repair_target_ids": [
+    "SCN-013",
+    "TC-013",
+    "TC-062"
+  ],
+  "critic_findings": {
+    "accepted": false,
+    "findings": [
+      {
+        "finding_id": "FIND-001",
+        "severity": "medium",
+        "finding_type": "traceability",
+        "artifact_ids": [
+          "SCN-013"
+        ],
+        "responsible_role": "scenario_architect",
+        "required_action": "Update SCN-013 source references to correctly cite the excerpt from chunk p0026-c001-419637ab0eaf that includes 'Read the TAM.' rather than repeating the heater excerpt.",
+        "source_references": [
+          {
+            "chunk_id": "p0026-c001-419637ab0eaf",
+            "page_number": 26,
+            "section": "04121-XCPSRS-01",
+            "excerpt": "Control the heaters on the telescope tube and on the thermal baffles. • Read the TAM."
+          }
+        ]
+      },
+      {
+        "finding_id": "FIND-002",
+        "severity": "medium",
+        "finding_type": "traceability",
+        "artifact_ids": [
+          "TC-013"
+        ],
+        "responsible_role": "test_writer",
+        "required_action": "Update TC-013 source references to cite the excerpt containing 'Read the TAM.' to correctly cover REQ-032.",
+        "source_references": [
+          {
+            "chunk_id": "p0026-c001-419637ab0eaf",
+            "page_number": 26,
+            "section": "04121-XCPSRS-01",
+            "excerpt": "Control the heaters on the telescope tube and on the thermal baffles. • Read the TAM."
+          }
+        ]
+      },
+      {
+        "finding_id": "FIND-003",
+        "severity": "low",
+        "finding_type": "groundedness",
+        "artifact_ids": [
+          "TC-062"
+        ],
+        "responsible_role": "test_writer",
+        "required_action": "Remove step 2 from TC-062 or update its expected result. The source evidence specifies that when receiving X_TEC_MAN_HEAT while in Manual Cooling Mode, the command is ignored, not rejected.",
+        "source_references": [
+          {
+            "chunk_id": "p0105-c001-2dc2ab702ba7",
+            "page_number": 105,
+            "section": "RED TEC_VOLTAGE,",
+            "excerpt": "If TEC is in Manual Cooling Mode: ignore command."
+          }
+        ]
+      }
+    ]
+  },
+  "deterministic_validation_before_repair": {
+    "valid": true,
+    "issue_counts": {}
+  },
+  "scenario_type_counts": {
+    "positive": 46,
+    "negative": 2,
+    "state_transition": 7,
+    "boundary": 5,
+    "edge": 2
+  },
+  "writer_evidence_chars": {
+    "sum": 143387,
+    "max": 13420
+  },
+  "versions": {
+    "python": "3.11.15",
+    "pypdf": "6.16.2"
+  },
+  "audit_date": "2026-09-29",
+  "measurement_notes": [
+    "Read-only inspection; no generation or count_tokens API calls.",
+    "Prompt lengths are characters, not tokens, reconstructed from persisted artifacts and matching deployed source.",
+    "Reconstructed prompts omit response schemas, role setup text, run-specific instructions, and the original citation-correction prompts.",
+    "Generation call count is inferred from control flow and saved semantic_revisions; no per-call token records exist."
+  ],
+  "persisted_metrics": {
+    "input_tokens": 753182,
+    "output_tokens": 220640,
+    "charged_tokens": 973822,
+    "retries": 0,
+    "schema_repairs": 0,
+    "semantic_revisions": 11,
+    "latency_seconds": 836.644880597014
+  },
+  "document": {
+    "filename": "2001 - telescope.pdf",
+    "sha256": "fe7216c0e95efcd917d0b7d150ee8a4841131ad9c4f9b2e3b9316a803aa80a14",
+    "file_bytes": 701945,
+    "pages": 107,
+    "saved_chunks": 99,
+    "saved_extracted_chars": 152543
+  },
+  "configuration": {
+    "token_ceiling": 2000000,
+    "model": "gemini-3.6-flash",
+    "generation_thinking": "minimal",
+    "critic_enabled": true
+  },
+  "verified_citation_guard_conflict": "Critic-requested citation-only change to SCN-013 raises PipelineOutputError: Repair changed links only.",
+  "deployed_and_workspace_matching_sha256": {
+    "pipelines.py": "0cb47efd48640f083ec30c3c6838f86d2186115fc823a83d20baad8ec4dcbe0f",
+    "prompts.py": "abdf097e0404aa551d6de1a7c9e2e0a3209cae4582fcb08d95ec7776e9dfa605",
+    "providers.py": "ee131bc0c3e2b5fe241f39610e7c1f4ba90561d8bb518b2c591c45ad9bab39b8",
+    "runner.py": "8ec62201954a3883e50c618aea30e6d2db0e572b5fe9f87ff0b2ac5057e1c324",
+    "documents.py": "577108b5d8b68f0f2b5f2cb74b3e359b7f4c775d4b89574bba3060e01b7302f8"
+  }
+}
+

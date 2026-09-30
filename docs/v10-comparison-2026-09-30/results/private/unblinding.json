@@ -1,0 +1,14 @@
+{
+  "d4a90fffd3189ab4": {
+    "run_id": "228f8d258152-4f89b893392f5051a9a23f295a752501",
+    "condition": "staged",
+    "repeat": 0,
+    "document_id": "D001"
+  },
+  "3a2263bd9fbde770": {
+    "run_id": "228f8d258152-ab53f20cf7e65c37b3abbc83c947bb90",
+    "condition": "multi_efficient",
+    "repeat": 0,
+    "document_id": "D001"
+  }
+}

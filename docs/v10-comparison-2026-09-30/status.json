@@ -1,0 +1,12 @@
+{
+  "state": "gated_validation_recorded",
+  "manifest_sha256": "96dd4596b64a9c42c8acb1d208474416f4e3af4f224b0eddbbd07cd2618e2968",
+  "started_at": "2026-09-30T08:20:58.234653+00:00",
+  "previously_accounted_tokens": 1092824,
+  "recorded_trials": 2,
+  "stopped_by_gate": null,
+  "validation_spent_tokens": 253622,
+  "total_spent_tokens": 1346446,
+  "remaining_authorized_tokens": 253554,
+  "updated_at": "2026-09-30T08:29:23.077009+00:00"
+}

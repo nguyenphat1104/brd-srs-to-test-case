@@ -291,7 +291,7 @@ def test_gemini_reports_incomplete_structured_output_without_hiding_usage() -> N
     assert ledger.used == 15
 
 
-def test_gemini_does_not_undercharge_reported_total_tokens() -> None:
+def test_gemini_preserves_authoritative_reported_total_tokens() -> None:
     interactions = FakeInteractions(
         usage=SimpleNamespace(
             total_input_tokens=10,
@@ -309,8 +309,8 @@ def test_gemini_does_not_undercharge_reported_total_tokens() -> None:
         max_output_tokens=40,
     )
 
-    assert result.total_tokens == 15
-    assert ledger.used == 15
+    assert result.total_tokens == 2
+    assert ledger.used == 2
 
 
 def test_gemini_uses_input_and_output_when_total_is_absent() -> None:
@@ -756,6 +756,26 @@ def test_gemini_interaction_errors_are_classified(
     assert raised.value.retryable is retryable
     assert ledger.used == used
     assert ledger.reserved == 0
+
+
+@pytest.mark.parametrize(('message', 'attempts'), [
+    ('Your project has exceeded its monthly spending cap.', 1),
+    ('Your PROJECT SPEND CAP has been reached.', 1),
+    ('Rate limit exceeded; try again later.', 3),
+])
+def test_hard_spending_caps_stop_but_temporary_rate_limits_retry(message, attempts):
+    from brd_srs_testgen.pipelines import PipelineContext
+    error = StatusError(429)
+    error.args = (message,)
+    interactions = SimpleNamespace(create=Mock(side_effect=error))
+    provider = GeminiProvider(SimpleNamespace(models=FakeModels(), interactions=interactions),
+                              'gemini-test', BudgetLedger(limit=1000))
+    context = PipelineContext(provider=provider, sleep=lambda _: None)
+    with pytest.raises(ProviderError, match=message):
+        context.generate([{'role':'user','content':'Extract'}], RequirementBatch, 40)
+    assert interactions.create.call_count == len(context.call_attempts) == attempts
+    assert provider.ledger.used == 50 * attempts
+    assert all(call.estimated_tokens == 50 for call in context.call_attempts)
 
 
 @pytest.mark.parametrize(

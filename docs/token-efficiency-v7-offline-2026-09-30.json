@@ -1,0 +1,50 @@
+{
+  "curator": {
+    "v6": {
+      "initial_tasks": 16,
+      "total_request_characters": 929883,
+      "largest_request_characters": 83012,
+      "tasks_over_48000_before_runtime_splitting": 12
+    },
+    "v7": {
+      "initial_tasks": 9,
+      "total_request_characters": 370333,
+      "largest_request_characters": 44942,
+      "tasks_over_48000_before_runtime_splitting": 0
+    }
+  },
+  "test_writer": {
+    "v6": {
+      "initial_tasks": 21,
+      "total_request_characters": 416249,
+      "largest_request_characters": 29617,
+      "tasks_over_48000_before_runtime_splitting": 0
+    },
+    "v7": {
+      "initial_tasks": 9,
+      "total_request_characters": 299354,
+      "largest_request_characters": 41244,
+      "tasks_over_48000_before_runtime_splitting": 0
+    }
+  },
+  "judge_fixed_batches_request_characters": {
+    "v5": 1106241,
+    "v6": 1103725
+  },
+  "source_run": "20260929T083231067296Z-fe7216c0e95e-3bd1bb11",
+  "trace_sha256": "e6df02d979769c74a96e0ffd1b0f66a4523c26e3e2e7c8c40a8e7e951950e9c9",
+  "paid_calls": 0,
+  "counts": {
+    "candidates": 283,
+    "requirements": 230,
+    "scenarios": 62,
+    "test_cases": 63
+  },
+  "limitations": [
+    "Request characters and initial task counts, not model tokens, latency or end-to-end savings.",
+    "Curator replay retains all candidates identically in both versions; real decisions may differ.",
+    "Runtime splits, corrections and generated outputs are not measured.",
+    "Evaluator comparison adds previously omitted preconditions/test data; semantic inputs differ.",
+    "No quality claim or automatic/human evaluation was produced."
+  ]
+}

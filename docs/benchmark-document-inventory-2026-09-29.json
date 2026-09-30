@@ -1,0 +1,558 @@
+[
+  {
+    "path": "/Users/jun/projects/citd-final/req/0000 - cctns.pdf",
+    "sha256": "c34ebce2bf6bff2bb166c2b5f83800a33e47310f9acbfb9ce0e42208c27b1f8d",
+    "bytes": 350677,
+    "pages": 19,
+    "chunks": 18,
+    "characters": 34146,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/0000 - gamma j.pdf",
+    "sha256": "056dc0bbb4c67adf6d6548c4a07d3580852b6ee57a60b2ed1e59e51b13821306",
+    "bytes": 1292947,
+    "pages": 44,
+    "chunks": 42,
+    "characters": 42859,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/0000 - inventory.pdf",
+    "sha256": "ed71c1321b23026aa83be410cbb1713e9a4db50ef55c17b1f8489b6cc86e5f9d",
+    "bytes": 837509,
+    "pages": 31,
+    "chunks": 30,
+    "characters": 22267,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/1995 - gemini.pdf",
+    "sha256": "1b9ad3e8377052e5690922c3eebbcd1118bd870593a1f8c2fb2692e40d668264",
+    "bytes": 5128485,
+    "pages": 96,
+    "chunks": 95,
+    "characters": 157449,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/1998 - themas.pdf",
+    "sha256": "414fc8c90aa3d3184b94aa776ef8303ba3ab5a189ef468758dc6666b281a0742",
+    "bytes": 68429,
+    "pages": 40,
+    "chunks": 36,
+    "characters": 37396,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/1999 - tcs.pdf",
+    "sha256": "16c34d404c8f9de2d72b6ccfca3a0e1392a14f821b7a625e71f05b3897dac9b0",
+    "bytes": 588229,
+    "error": "Encrypted PDFs are not supported.",
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2001 - beyond.pdf",
+    "sha256": "6869d3c6ce76a5eb6467948ad697c77e94c4efdb4f4834c618d9390cdb25cbe3",
+    "bytes": 604084,
+    "pages": 44,
+    "chunks": 41,
+    "characters": 70489,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2001 - ctc network.pdf",
+    "sha256": "aeaf02a4e5fed1fc2304a38b68af3b608c4a9af6604dc6468cd7482e324f5876",
+    "bytes": 277703,
+    "pages": 32,
+    "chunks": 30,
+    "characters": 35752,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2001 - elsfork.pdf",
+    "sha256": "dcbf288ffad5312f9265f7fac74700913fb13015761f11dd0033c84631473e8b",
+    "bytes": 950557,
+    "pages": 69,
+    "chunks": 61,
+    "characters": 114173,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2001 - esa.pdf",
+    "sha256": "4efbc55434515497d0fcb6728bd640ec7a2aa2064e823312a3bf7ba64d1d8b2b",
+    "bytes": 102821,
+    "pages": 17,
+    "chunks": 16,
+    "characters": 31307,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2001 - hats.pdf",
+    "sha256": "295b3690601348d46b97c579ba94353563c23a4b7886d987db2390b3c4976834",
+    "bytes": 377900,
+    "pages": 56,
+    "chunks": 53,
+    "characters": 129674,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2001 - space fractions.pdf",
+    "sha256": "3b2daaee1b3e30340222a0f1aae833a1a549dba3e2b22edee5d30199d332b7e3",
+    "bytes": 103193,
+    "pages": 9,
+    "chunks": 8,
+    "characters": 18581,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2001 - telescope.pdf",
+    "sha256": "fe7216c0e95efcd917d0b7d150ee8a4841131ad9c4f9b2e3b9316a803aa80a14",
+    "bytes": 701945,
+    "pages": 107,
+    "chunks": 99,
+    "characters": 152610,
+    "development_only": true
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2002 - evla back.pdf",
+    "sha256": "f08c1b886ef283af108b7ebe81663e11793e31a88633d15bbaae85633eae8086",
+    "bytes": 247337,
+    "pages": 22,
+    "chunks": 20,
+    "characters": 34378,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2002 - evla corr.pdf",
+    "sha256": "6c4cc3c13e25ce0a55b6528a32b709840199d2eced70fb028c4c86762ef20e17",
+    "bytes": 57698,
+    "pages": 17,
+    "chunks": 15,
+    "characters": 27158,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2002 - sce api.pdf",
+    "sha256": "23135280b5f7c78215f551fb3d46161f70fcb278f6f979e3fc484aacdfd2709c",
+    "bytes": 746386,
+    "pages": 94,
+    "chunks": 94,
+    "characters": 195857,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2003 - agentmom.pdf",
+    "sha256": "c02ac202894f1411747a884de713b15ef222256bbe3f451b26d835d95697df51",
+    "bytes": 28814,
+    "pages": 8,
+    "chunks": 7,
+    "characters": 10892,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2003 - pnnl.pdf",
+    "sha256": "03fc3c1e24651b1a8aae5ee9b2b7d206fd56cf5ebda1d2607a1ce0d7b11fe1a4",
+    "bytes": 1668868,
+    "pages": 176,
+    "chunks": 175,
+    "characters": 222444,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2003 - qheadache.pdf",
+    "sha256": "0c5b68f8df28005f549bcb2703bc5a487833c144962bc19aae3ca9e75678211e",
+    "bytes": 72966,
+    "pages": 15,
+    "chunks": 13,
+    "characters": 12118,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2003 - tachonet.pdf",
+    "sha256": "da0bbf2f62cf8867ad9e8d5506e050606a80e1b75b478a860279df3c53e96bc0",
+    "bytes": 366464,
+    "pages": 56,
+    "chunks": 55,
+    "characters": 68421,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2004 - colorcast.pdf",
+    "sha256": "56ec21cadca455dd743f9273653fe206cac8be2ed4f8f99ff5a0e72d965c6325",
+    "bytes": 77602,
+    "pages": 18,
+    "chunks": 17,
+    "characters": 24654,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2004 - grid bgc.pdf",
+    "sha256": "ab1c39758177753310dec1873a4a5a15a04832281f4e5f9cbb1fe52b5d0e37f2",
+    "bytes": 124522,
+    "pages": 34,
+    "chunks": 34,
+    "characters": 50321,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2004 - rlcs.pdf",
+    "sha256": "fed49b723d0603b5c462d17327ca0c0def0f6e4db1da9ee8165f978b0edbd275",
+    "bytes": 598933,
+    "pages": 66,
+    "chunks": 64,
+    "characters": 99474,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2004 - sprat.pdf",
+    "sha256": "6a5f54ed6401cb947abf9af27c781786a86c55768c3edb51e0d9e74d27bf2beb",
+    "bytes": 362599,
+    "pages": 33,
+    "chunks": 32,
+    "characters": 45541,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2004 - watcom gui.pdf",
+    "sha256": "2519bfde72175e77d6b1b5dec60188dd2398531f5086c04752955256aac8ad09",
+    "bytes": 828896,
+    "pages": 54,
+    "chunks": 53,
+    "characters": 69589,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2004 - watcom.pdf",
+    "sha256": "aa219f45a90c01ba400d34e333c3d77e344d7328715aba831a9799dd1c1ab755",
+    "bytes": 801604,
+    "pages": 55,
+    "chunks": 54,
+    "characters": 95000,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2005 - clarus low.pdf",
+    "sha256": "2321ec2961032e60cc33cedab166da8175902ec5e4db9e04baf0286554c8ba1f",
+    "bytes": 664919,
+    "pages": 99,
+    "chunks": 97,
+    "characters": 143107,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2005 - grid 3D.pdf",
+    "sha256": "e64a61638b26b7fcec4044c1217a30d200f12ddeba6cbdd522c23c04817f4238",
+    "bytes": 164056,
+    "pages": 15,
+    "chunks": 14,
+    "characters": 13658,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2005 - microcare.pdf",
+    "sha256": "116bea5470a773e4b5917e2e27b06a8df8c7e8da9f336752b4423b09c36471f0",
+    "bytes": 639507,
+    "pages": 33,
+    "chunks": 33,
+    "characters": 41419,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2005 - phin.pdf",
+    "sha256": "a6ebe829f3843915fca0d99fb7e126398702f81de452e92d68ceddcf42eaee01",
+    "bytes": 134701,
+    "pages": 16,
+    "chunks": 15,
+    "characters": 37902,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2005 - pontis.pdf",
+    "sha256": "92731c839cad8c6def79c3b1e74d364ecc038d569da19e37e776c0141067a63f",
+    "bytes": 2702800,
+    "pages": 82,
+    "chunks": 72,
+    "characters": 121291,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2005 - triangle.pdf",
+    "sha256": "6e27e44e6ae1fa8cb54ea45c98155b51fb4558015bba0969a0ac70d975fb921d",
+    "bytes": 111158,
+    "pages": 23,
+    "chunks": 19,
+    "characters": 26442,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2005 - znix.pdf",
+    "sha256": "f980f763c078f789a8876c616d88747f7fb4f7e6ac33d27a5f3a4ecc0d210971",
+    "bytes": 157806,
+    "pages": 20,
+    "chunks": 19,
+    "characters": 22074,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2006 - eirene sys 15.pdf",
+    "sha256": "3e0239757cc730f0a010da3f2c2b71713e8198bfbbcaafd9b4f9888f14d1767b",
+    "bytes": 889601,
+    "pages": 138,
+    "chunks": 137,
+    "characters": 176670,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2006 - stewards.pdf",
+    "sha256": "28d29827db9b1eb2286bf26ae20d1e803c3190ba2d24f5acc4a2d6ece9e4d3ea",
+    "bytes": 431631,
+    "pages": 45,
+    "chunks": 43,
+    "characters": 66942,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2007 - central trading system.pdf",
+    "sha256": "00cc02b0b130462881e4424cadacf1bdc21bc25df579daa7af1d842c728d3203",
+    "bytes": 186273,
+    "pages": 17,
+    "chunks": 16,
+    "characters": 15557,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2007 - eirene fun 7.pdf",
+    "sha256": "a2b4a3d440a782e57228a229f05d761e1d73ff3311b5764a65371ba5756100cf",
+    "bytes": 393868,
+    "pages": 97,
+    "chunks": 96,
+    "characters": 133980,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2007 - ertms.pdf",
+    "sha256": "e352f0102a23ad7ccc8b89b2be7132224050594aed00c66b9d8ebcd587f21f52",
+    "bytes": 193210,
+    "pages": 98,
+    "chunks": 96,
+    "characters": 53506,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2007 - get real 0.2.pdf",
+    "sha256": "2dfd7850234733c0d613682849263614f603360c8319efce37d47df10307c906",
+    "bytes": 39711,
+    "pages": 10,
+    "chunks": 9,
+    "characters": 14757,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2007 - mdot.pdf",
+    "sha256": "458662aedd3dbc3b15be191dea671a2cd23bf129ef0d1581d9079f63c1f1d3f2",
+    "bytes": 515595,
+    "pages": 56,
+    "chunks": 53,
+    "characters": 102830,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2007 - nde.pdf",
+    "sha256": "b8b1b13b6b0a776ec620b17475ca6ddee1b9310e2651253ae9d20e08f741ab2a",
+    "bytes": 376618,
+    "pages": 99,
+    "chunks": 97,
+    "characters": 152663,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2007 - puget sound.pdf",
+    "sha256": "bc8fea411b7e40f114e453f09451cd3777da5f218f0d1414fbb640ec5ed9dce8",
+    "bytes": 686573,
+    "pages": 14,
+    "chunks": 13,
+    "characters": 25397,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2007 - water use.pdf",
+    "sha256": "a82e718e6ac8ed71a589e3fff18446c19b20114f3fffb6d2688b5926c45e53f4",
+    "bytes": 201046,
+    "pages": 42,
+    "chunks": 40,
+    "characters": 90718,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2008 - caiso.pdf",
+    "sha256": "07ccfef5adc0ce709a39bc19b9322daf1945e677153880b1813650f15b5e4a80",
+    "bytes": 141978,
+    "pages": 11,
+    "chunks": 10,
+    "characters": 15192,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2008 - keepass.pdf",
+    "sha256": "58b171a34980641f05ee12b864e73f06d37982992aec81f99e2d5a9eb29ab89b",
+    "bytes": 118767,
+    "pages": 29,
+    "chunks": 27,
+    "characters": 41857,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2008 - peering.pdf",
+    "sha256": "c667519c0deeb20168ececdeadf7d43fc73b8d8cfbd7001d149cfb913f387989",
+    "bytes": 1554816,
+    "pages": 17,
+    "chunks": 16,
+    "characters": 36676,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2008 - vub.pdf",
+    "sha256": "d4553dd3e8153e14fd9007104bef14c051a7e430451a54bd8d86d89b34c1ff4a",
+    "bytes": 220333,
+    "pages": 40,
+    "chunks": 40,
+    "characters": 49916,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2009 - email.pdf",
+    "sha256": "a86fae275016a4ab3f47fca95ef7b2a609c61366e724f0ee6524080c7b44374f",
+    "bytes": 113292,
+    "pages": 15,
+    "chunks": 14,
+    "characters": 27975,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2009 - gaia.pdf",
+    "sha256": "ce6c4e7562e7fada5e013ead697121e6ebe63f02f6ff5816585f07999b65b8f7",
+    "bytes": 432080,
+    "pages": 28,
+    "chunks": 28,
+    "characters": 25738,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2009 - inventory 2.0.pdf",
+    "sha256": "8a6b52f80b4eba9fb1d6f4819fd00c06365b3c3bd8754076828d793942bb2f3e",
+    "bytes": 918592,
+    "pages": 62,
+    "chunks": 61,
+    "characters": 107601,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2009 - library.pdf",
+    "sha256": "4beadd9fc0991c9052c94d209e6bfb3c1e2c4a92823cdd69ef2add3c3d308059",
+    "bytes": 120402,
+    "pages": 18,
+    "chunks": 17,
+    "characters": 26197,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2009 - model manager.pdf",
+    "sha256": "228f8d258152182bdf94bfcd0f7ac22db55ac076137430a1227eec76c26d3cea",
+    "bytes": 51864,
+    "pages": 13,
+    "chunks": 12,
+    "characters": 21358,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2009 - peazip.pdf",
+    "sha256": "b8225e2377db2332ea3ce80c8f36b8ef965d0a3ef7ff75114838d2823b41c875",
+    "bytes": 789186,
+    "pages": 34,
+    "chunks": 33,
+    "characters": 49094,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2009 - peppol.pdf",
+    "sha256": "515704f939b4edbc931235aa74de991df3d638e32c973f9fc55313fd1c0f9228",
+    "bytes": 2114776,
+    "pages": 127,
+    "chunks": 122,
+    "characters": 358669,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2009 - video search.pdf",
+    "sha256": "5398e732e9dcd6d25b8805259a296f456df13ffbf0753b4ade1deec82e251436",
+    "bytes": 80130,
+    "pages": 14,
+    "chunks": 13,
+    "characters": 16217,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2009 - warc III.pdf",
+    "sha256": "c164f7caa474fd7a03615a987352df2853fd46a2edb24c7ca1ae5f67984ac3c0",
+    "bytes": 549220,
+    "pages": 10,
+    "chunks": 9,
+    "characters": 23997,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2010 - blit draft.pdf",
+    "sha256": "68182d426aff403b70c8dc73a35291b9ea423ec2d1a98af2bb5f16628b924dc0",
+    "bytes": 277514,
+    "pages": 12,
+    "chunks": 11,
+    "characters": 13026,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2010 - fishing.pdf",
+    "sha256": "bce302c57b65f2dd3e0ad25f5bf07293b95c1ffb071c60617ad9220cd64d9080",
+    "bytes": 427907,
+    "pages": 49,
+    "chunks": 48,
+    "characters": 92593,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2010 - gparted.pdf",
+    "sha256": "0412ad1e13d7adeaa91361afc89958beca5e5787fe7e79a8d8aa0476155e0cc9",
+    "bytes": 1424942,
+    "pages": 26,
+    "chunks": 25,
+    "characters": 26524,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2010 - home 1.3.pdf",
+    "sha256": "32ec89e47ed200cb34e619a806265a12f49b6e4fa45af2844f12f883cefb254c",
+    "bytes": 132705,
+    "pages": 15,
+    "chunks": 14,
+    "characters": 24965,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2010 - mashboot.pdf",
+    "sha256": "afd8495db93df87833b876e424102cec3a246534e2e791f24a84d1126adefde4",
+    "bytes": 573961,
+    "pages": 15,
+    "chunks": 15,
+    "characters": 21810,
+    "development_only": false
+  },
+  {
+    "path": "/Users/jun/projects/citd-final/req/2010 - split merge.pdf",
+    "sha256": "099f99c92a29713f98d44fc914af9aa8380a4f0c7f9069de5c1f287823a16475",
+    "bytes": 2918527,
+    "pages": 34,
+    "chunks": 33,
+    "characters": 34576,
+    "development_only": false
+  }
+]

@@ -1,0 +1,69 @@
+2026-09-30T06:48:20.836111+00:00 Preflight passed: ten earlier trials unchanged, budgets reconciled, v8 source archived, approved content unchanged.
+2026-09-30T06:48:43.943886+00:00 Preflight passed: ten earlier trials unchanged, budgets reconciled, v8 source archived, approved content unchanged.
+2026-09-30T06:48:43.955872+00:00 TRIAL START 2009 - model manager.pdf
+2026-09-30T06:48:43.965032+00:00 Preparing document
+2026-09-30T06:48:44.219094+00:00 Generating artifacts
+2026-09-30T06:48:44.238988+00:00 Scout: working on task 1.
+2026-09-30T06:48:58.201657+00:00 Scout: saved validated task 1.
+2026-09-30T06:48:58.205736+00:00 Source Audit: working on task 1.
+2026-09-30T06:49:02.277840+00:00 Source Audit: saved validated task 1.
+2026-09-30T06:49:02.280850+00:00 Scout: working on task 4.
+2026-09-30T06:49:23.153652+00:00 Scout: saved validated task 4.
+2026-09-30T06:49:23.159597+00:00 Source Audit: working on task 4.
+2026-09-30T06:49:29.173535+00:00 Source Audit: saved validated task 4.
+2026-09-30T06:49:29.178131+00:00 Scout: working on task 7.
+2026-09-30T06:49:50.266567+00:00 Scout: saved validated task 7.
+2026-09-30T06:49:50.273044+00:00 Source Audit: working on task 7.
+2026-09-30T06:49:55.276691+00:00 Source Audit: saved validated task 7.
+2026-09-30T06:49:55.283303+00:00 Scout: working on task 10.
+2026-09-30T06:50:20.588130+00:00 Scout: saved validated task 10.
+2026-09-30T06:50:20.596340+00:00 Source Audit: working on task 10.
+2026-09-30T06:50:27.134514+00:00 Source Audit: saved validated task 10.
+2026-09-30T06:50:27.138953+00:00 Scout: working on task 13.
+2026-09-30T06:50:37.200962+00:00 Scout: saved validated task 13.
+2026-09-30T06:50:37.204859+00:00 Source Audit: working on task 13.
+2026-09-30T06:50:41.414180+00:00 Source Audit: saved validated task 13.
+2026-09-30T06:50:41.501124+00:00 Curator: working on task 1.
+2026-09-30T06:51:00.557419+00:00 Curator: saved validated task 1.
+2026-09-30T06:51:00.665403+00:00 Curator: working on task 4.
+2026-09-30T06:51:16.251668+00:00 Curator: saved validated task 4.
+2026-09-30T06:51:16.266108+00:00 Curator: working on task 7.
+2026-09-30T06:51:23.236801+00:00 Curator: saved validated task 7.
+2026-09-30T06:51:23.350526+00:00 Test Writer: working on task 1.
+2026-09-30T06:51:39.415214+00:00 Test Writer: saved validated task 1.
+2026-09-30T06:51:39.422918+00:00 Test Writer: working on task 4.
+2026-09-30T06:51:53.178055+00:00 Test Writer: saved validated task 4.
+2026-09-30T06:51:53.187989+00:00 Test Writer: working on task 7.
+2026-09-30T06:52:06.822743+00:00 Test Writer: saved validated task 7.
+2026-09-30T06:52:06.831916+00:00 Test Writer: working on task 10.
+2026-09-30T06:52:23.931991+00:00 Test Writer: saved validated task 10.
+2026-09-30T06:52:23.940432+00:00 Test Writer: working on task 13.
+2026-09-30T06:52:40.030659+00:00 Test Writer: saved validated task 13.
+2026-09-30T06:52:40.041851+00:00 Test Writer: working on task 16.
+2026-09-30T06:52:55.794002+00:00 Test Writer: saved validated task 16.
+2026-09-30T06:52:55.803900+00:00 Test Writer: working on task 19.
+2026-09-30T06:53:11.860397+00:00 Test Writer: saved validated task 19.
+2026-09-30T06:53:11.873108+00:00 Test Writer: working on task 22.
+2026-09-30T06:53:26.772471+00:00 Test Writer: saved validated task 22.
+2026-09-30T06:53:26.783842+00:00 Test Writer: working on task 25.
+2026-09-30T06:53:40.136673+00:00 Test Writer: saved validated task 25.
+2026-09-30T06:53:40.146195+00:00 Test Writer: working on task 28.
+2026-09-30T06:53:49.749598+00:00 Test Writer: saved validated task 28.
+2026-09-30T06:53:49.760591+00:00 Test Writer: working on task 31.
+2026-09-30T06:54:01.907856+00:00 Test Writer: saved validated task 31.
+2026-09-30T06:54:01.919342+00:00 Test Writer: working on task 34.
+2026-09-30T06:54:15.683907+00:00 Test Writer: saved validated task 34.
+2026-09-30T06:54:15.838234+00:00 Critic: working on task 1.
+2026-09-30T06:54:20.937531+00:00 Critic: saved validated task 1.
+2026-09-30T06:54:20.949180+00:00 Critic: working on task 4.
+2026-09-30T06:54:26.063988+00:00 Critic: saved validated task 4.
+2026-09-30T06:54:26.073825+00:00 Critic: working on task 7.
+2026-09-30T06:54:30.907692+00:00 Critic: saved validated task 7.
+2026-09-30T06:54:30.916552+00:00 Critic: working on task 10.
+2026-09-30T06:54:35.615058+00:00 Critic: saved validated task 10.
+2026-09-30T06:54:35.623995+00:00 Critic: working on task 13.
+2026-09-30T06:54:41.152811+00:00 critic: correcting invalid task output once.
+2026-09-30T06:54:47.374334+00:00 Failed
+2026-09-30T06:54:47.375560+00:00 TRIAL END 228f8d258152-a8bb2f86768b58fabd15afea9724fe44: failed; 173649 tokens.
+2026-09-30T06:54:47.395825+00:00 First document did not complete generation and evaluation; second document not purchased.
+2026-09-30T06:54:47.436982+00:00 {"state": "gated_validation_recorded", "manifest_sha256": "e56d644f0d75b3746bb6f7687bdffeaa3b0ea3778f5cb31a31fdebb2adf43018", "started_at": "2026-09-30T06:48:43.944322+00:00", "previously_accounted_tokens": 732219, "recorded_trials": 1, "stopped_by_gate": "First document did not complete generation and evaluation; second document not purchased.", "validation_spent_tokens": 173649, "total_spent_tokens": 905868, "remaining_authorized_tokens": 694132}

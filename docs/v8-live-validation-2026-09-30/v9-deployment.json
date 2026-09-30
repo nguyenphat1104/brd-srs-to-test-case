@@ -1,0 +1,38 @@
+{
+  "verified_at": "2026-09-30T07:02:17.534Z",
+  "health": "ok",
+  "prompt_version": "research-core-v9",
+  "implementation": {
+    "source_sha256": {
+      "runner.py": "c98f652639b72126ce3d1b476e90a1a9cc40ae3619183ec2ca73991404ba4f03",
+      "pipelines.py": "45fcfa72430be9311655ccd24b6df953fb970c69f2a68e6da41058ddc8fa5453",
+      "prompts.py": "42151de48de07ee9bda420903f122ceac45623c5991e27565c63e69cf467ecdf",
+      "providers.py": "c53ebf1b627eb98aae79788bb96fef765f784447ee889f5a9133a7eb31d67e33",
+      "documents.py": "a1d9aca9e59d19f0dc4d14235f975dad83766952c5bba04612fe52685f4b6aaf",
+      "models.py": "4e4db7f8c7b29b1263b547cd90e7278e9973d5fe08a62279faa86a7f4b752c72",
+      "coverage.py": "d276d797971929cb589dad89f02379e7ee7b78742c9cf2edd47e979c55580dd1",
+      "validation.py": "20f414af71541e189fcd69d8974d2adaced1b5bb91a9964e1b2553b6f4ed0a59",
+      "evidence.py": "05e1f41de986af60a92879359c06d0f0f8ccd9f3d496d1a42bc5f9416a5a9f3a",
+      "efficient.py": "a9ddbc7590947e161d01aa90b0f1fc17c33ee8c66c325e04db89810523d07c45",
+      "evaluation.py": "d1ff55c7a0c8ed39034520d847e32c0825aa4a8f4cc164703123e04faafc80da",
+      "benchmark.py": "76b0be1b05bf09cc5ee817cd30a7f9b78626fccae1a1a3edbd6cb02a34fbd70b",
+      "storage.py": "3dbb38e46c5df5c138325b2dfaa08618278a86bf39767da27a74517f569e21ad",
+      "schema.sql": "88932b3571aeab596fcc203ca9bbdeb0e7351d6bf3d2f4154ba45dd169d3168b"
+    },
+    "dependencies": {
+      "google-genai": "2.19.0",
+      "pydantic": "2.13.4",
+      "pypdf": "6.16.2",
+      "psycopg": "3.3.4"
+    }
+  },
+  "app_sha256": "c424734e741cba8b5bd0b35c324e5a8cadd554853f0f856315bbc2a754de9a1f",
+  "image_id": "sha256:489836e8aa50a52b81dd5e28e32dc403d3c59f9b42d6cf9a040381c9ff186727",
+  "previous_image": "citd-before-v9:20260930",
+  "full_tests_passed": 577,
+  "existing_collection_warnings": 3,
+  "total_accounted_tokens": 905868,
+  "remaining_authorized_tokens": 694132,
+  "v9_live_validation": "Not performed; v8 stopped at the declared gate. Post-trial routing correction verified locally.",
+  "quality_preservation": "Not established."
+}

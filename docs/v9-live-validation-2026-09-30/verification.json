@@ -1,0 +1,49 @@
+{
+  "verified_at": "2026-09-30T07:22:45.589743+00:00",
+  "manifest_sha256": "44c18e67f818b6f6ca0f0816fe4b5b586fb12fa320a3b38221e15f2032d294a9",
+  "checks": [
+    "Recorded trial results equal the database and all eleven earlier trials are unchanged.",
+    "Frozen source archive, PDFs and approved catalogs match their recorded hashes.",
+    "Per-call accounting reconciles with run metrics and both budgets.",
+    "Unpurchased second trial is absent when the gate stops execution."
+  ],
+  "trials": [
+    {
+      "document_id": "D001",
+      "run_id": "228f8d258152-b992e6e7f67752d1980370f383c70209",
+      "status": "failed",
+      "failure_message": "Need 17619 tokens; 13044 remain.",
+      "budget_tokens": 186956,
+      "phases": {
+        "generation": 186956
+      },
+      "stages": {
+        "generation/scout": 24618,
+        "generation/source_audit": 17318,
+        "generation/curator": 43280,
+        "generation/test_writer": 56206,
+        "generation/critic": 45534
+      },
+      "call_statuses": {
+        "completed": 32,
+        "blocked": 1
+      },
+      "estimated_tokens": 0,
+      "artifact_counts": {
+        "requirements": 99,
+        "scenarios": 105,
+        "test_cases": 105
+      },
+      "f1": null,
+      "evaluation_error": ""
+    }
+  ],
+  "prior_spent_tokens": 905868,
+  "validation_spent_tokens": 186956,
+  "total_spent_tokens": 1092824,
+  "remaining_authorized_tokens": 507176,
+  "recorded_trials": 1,
+  "planned_trials": 2,
+  "stopped_by_gate": "First document did not complete generation and evaluation; second document not purchased.",
+  "quality_preservation": "Not established by development trials; held-out comparisons and independent human reviews remain required."
+}

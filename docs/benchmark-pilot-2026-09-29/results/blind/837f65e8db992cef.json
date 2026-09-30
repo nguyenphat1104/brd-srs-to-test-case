@@ -1,0 +1,1137 @@
+{
+  "suite_id": "837f65e8db992cef",
+  "document_id": "D002",
+  "artifacts": {
+    "requirements": [
+      {
+        "requirement_id": "REQ-001",
+        "title": "Temperature Reading and Control Range",
+        "description": "Allow a user to monitor and read temperature at a thermostat, and set thermostat target temperatures between 60\u00b0F and 80\u00b0F inclusive at 1\u00b0F increments.",
+        "requirement_type": "functional",
+        "module": "Thermostat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the thermost at temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-002",
+        "title": "Humidistat Reading and Control Range",
+        "description": "Allow a user to monitor humidity at a humidistat position and set the relative humidity level from 30% to 60% inclusive in 1% increments.",
+        "requirement_type": "functional",
+        "module": "Humidistat",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-003",
+        "title": "Security Alarm Activation on Breach",
+        "description": "Manage up to 50 door and window contact sensors and automatically activate both light and sound alarms when a security breach occurs and a contact sensor is set OPEN.",
+        "requirement_type": "functional",
+        "module": "Security",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "When a security breach occurs and a contact s ensor is set OPEN, the alarm system shall be activated."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-004",
+        "title": "Appliance Power Switch Control",
+        "description": "Manage power switches connected to small appliances and allow users to query switch state (OFF or ON) and toggle switch states.",
+        "requirement_type": "functional",
+        "module": "Appliance Management",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "The system shall be able to change the state of a power switch (OFF to ON, or ON to OFF)"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-005",
+        "title": "Monthly Environment Planning and Manual Override",
+        "description": "Provide a monthly planner where users can set environmental parameters for up to four daily time periods, while allowing manual or website overrides until the end of the planned period.",
+        "requirement_type": "functional",
+        "module": "Planner",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "A user shall be able to override planned pa rameter values, through the DH website, or if available, through manual switches on household devices"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-006",
+        "title": "Historical Environmental Monthly Reporting",
+        "description": "Generate monthly reports for any month in the past two years containing temperature/humidity averages and extremes, security breach timestamps, and system downtime periods.",
+        "requirement_type": "functional",
+        "module": "Reporting",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "For a given month and year, in the past two y ears, DigitalHome shall be able to provide a report on the management and control of the home."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-007",
+        "title": "Display Refresh Rate and Data Acquisition Rate",
+        "description": "Update displays of environmental conditions at least every two seconds and acquire sensor data at a minimum acquisition rate of 10 Hz.",
+        "requirement_type": "non_functional",
+        "module": "Performance",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "Displays of environmental conditions (tempera ture, humidity, contact sensors and power switches) shall be updated at least every two seconds."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-008",
+        "title": "Daily Automated System Backup and Recovery",
+        "description": "Perform daily automated backups of all system configuration, default settings, planning, and usage data, and automatically restore data upon failure recovery.",
+        "requirement_type": "non_functional",
+        "module": "Reliability",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "The DH System will backup all system data ( configuration, default parameter settings, planning, and usage data) on a daily basis"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-009",
+        "title": "User Authentication and Encryption",
+        "description": "Require an account name and password for login, while securing communication using TLS encryption and standard authentication methods.",
+        "requirement_type": "non_functional",
+        "module": "Security",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "Log in to an account shall require entry of a n account name and a password."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-010",
+        "title": "Project Documentation Archiving",
+        "description": "Maintain up-to-date system documentation following HomeOwner document formats and store all required project artifacts in the HomeOwner Document Archive upon completion.",
+        "requirement_type": "business",
+        "module": "Documentation",
+        "priority": "low",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "All system documents (Software Requirements S pecification, Architectural Design Specification, Module Detailed Design, Module Source Code, and all Test Plans) shall be up-to-date"
+          }
+        ]
+      }
+    ],
+    "scenarios": [
+      {
+        "scenario_id": "SCN-001",
+        "title": "Set Thermostat Temperature Within Valid Bounds",
+        "objective": "Verify that a user can monitor current temperature and update target temperature to valid values within 60\u00b0F to 80\u00b0F at 1\u00b0F increments.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "The user is authenticated and the thermostat device is online."
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the thermost at temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-002",
+        "title": "Thermostat Boundary Value Testing at 60\u00b0F and 80\u00b0F",
+        "objective": "Verify system behavior when setting thermostat target temperature exactly at the lower boundary (60\u00b0F) and upper boundary (80\u00b0F).",
+        "scenario_type": "boundary",
+        "preconditions": [
+          "Thermostat control page is active on the user interface."
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the thermost at temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-003",
+        "title": "Reject Out-of-Range Thermostat Temperature Settings",
+        "objective": "Verify that setting thermostat temperatures below 60\u00b0F or above 80\u00b0F is rejected.",
+        "scenario_type": "negative",
+        "preconditions": [
+          "User is navigating the thermostat temperature adjustment module."
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the thermost at temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-004",
+        "title": "Set Humidistat Humidity Level Within Valid Bounds",
+        "objective": "Verify that a user can set relative humidity levels between 30% and 60% inclusive in 1% increments.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Humidistat module is connected and functional."
+        ],
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-005",
+        "title": "Humidistat Boundary Value Testing at 30% and 60%",
+        "objective": "Verify system acceptance when setting target humidity at the exact boundaries of 30% and 60%.",
+        "scenario_type": "boundary",
+        "preconditions": [
+          "Humidistat interface is loaded."
+        ],
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-006",
+        "title": "Reject Out-of-Range Humidistat Target Levels",
+        "objective": "Verify that attempts to set humidity below 30% or above 60% fail and trigger appropriate error responses.",
+        "scenario_type": "negative",
+        "preconditions": [
+          "Humidistat control module is active."
+        ],
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-007",
+        "title": "Trigger Security Alarms Upon Contact Sensor Breach",
+        "objective": "Verify that when a contact sensor transitions to OPEN during a security breach, both light and sound alarms activate.",
+        "scenario_type": "state_transition",
+        "preconditions": [
+          "Security system is armed and contact sensors are monitored."
+        ],
+        "requirement_ids": [
+          "REQ-003"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "When a security breach occurs and a contact s ensor is set OPEN, the alarm system shall be activated."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-008",
+        "title": "Query and Toggle Appliance Power Switch State",
+        "objective": "Verify that users can view switch status and toggle power switches between OFF and ON.",
+        "scenario_type": "state_transition",
+        "preconditions": [
+          "Small appliance power switch is connected to the DigitalHome network."
+        ],
+        "requirement_ids": [
+          "REQ-004"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "The system shall be able to change the state of a power switch (OFF to ON, or ON to OFF)"
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-009",
+        "title": "Monthly Environment Planning and Manual Device Override",
+        "objective": "Verify that a monthly plan can be configured for four daily time periods and manual overrides remain in effect until the end of the planned period.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "A monthly plan has been created and activated."
+        ],
+        "requirement_ids": [
+          "REQ-005"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "A user shall be able to override planned pa rameter values, through the DH website, or if available, through manual switches on household devices"
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-010",
+        "title": "Generate Historical Monthly Environment Report",
+        "objective": "Verify that monthly reports can be generated for any month within the past two years containing averages, extremes, breaches, and system downtime.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "System has historical log data stored for the selected past period."
+        ],
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "For a given month and year, in the past two y ears, DigitalHome shall be able to provide a report on the management and control of the home."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-011",
+        "title": "Reject Historical Report Request Beyond Two Years",
+        "objective": "Verify that requesting monthly historical reports for dates older than two years returns an appropriate restriction message.",
+        "scenario_type": "edge",
+        "preconditions": [
+          "User is on the DH reporting module interface."
+        ],
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "For a given month and year, in the past two y ears, DigitalHome shall be able to provide a report on the management and control of the home."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-012",
+        "title": "Display Update and Data Acquisition Rate Validation",
+        "objective": "Verify that environmental conditions update at least every 2 seconds and sensors acquire data at minimum 10 Hz.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Sensors and UI display monitoring tools are active."
+        ],
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "Displays of environmental conditions (tempera ture, humidity, contact sensors and power switches) shall be updated at least every two seconds."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-013",
+        "title": "Daily Automated System Backup and Post-Failure Recovery",
+        "objective": "Verify that daily automated backup occurs and system data is restored automatically following recovery from a failure.",
+        "scenario_type": "state_transition",
+        "preconditions": [
+          "Daily backup time is configured by the technician."
+        ],
+        "requirement_ids": [
+          "REQ-008"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "The DH System will backup all system data ( configuration, default parameter settings, planning, and usage data) on a daily basis"
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-014",
+        "title": "User Authentication Success via Valid Credentials",
+        "objective": "Verify successful login when correct account name and password are provided over encrypted communication.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "A valid user account exists on the DH Web Server."
+        ],
+        "requirement_ids": [
+          "REQ-009"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "Log in to an account shall require entry of a n account name and a password."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-015",
+        "title": "User Authentication Failure via Invalid Password",
+        "objective": "Verify that entering an incorrect password denies login access and displays an error message.",
+        "scenario_type": "negative",
+        "preconditions": [
+          "User account exists."
+        ],
+        "requirement_ids": [
+          "REQ-009"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "Log in to an account shall require entry of a n account name and a password."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-016",
+        "title": "Verify Documentation Format and Archiving Compliance",
+        "objective": "Verify that all required system software documents adhere to HomeOwner formats and reside in the Document Archive.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Project completion phase is active."
+        ],
+        "requirement_ids": [
+          "REQ-010"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "All system documents (Software Requirements S pecification, Architectural Design Specification, Module Detailed Design, Module Source Code, and all Test Plans) shall be up-to-date"
+          }
+        ]
+      }
+    ],
+    "test_cases": [
+      {
+        "test_case_id": "TC-001",
+        "scenario_id": "SCN-001",
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "title": "Monitor and Update Thermostat Target Temperature within Valid Range",
+        "priority": "P1",
+        "preconditions": [
+          "The user is authenticated and the thermostat device is online."
+        ],
+        "test_data": {
+          "target_temp": "72\u00b0F"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to the Thermostat Control page on the DigitalHome web interface.",
+            "expected_result": "The current temperature reading from the thermostat is displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Enter a target temperature of 72\u00b0F in the target temperature field and click Save.",
+            "expected_result": "The target temperature updates to 72\u00b0F and a success notification is shown."
+          },
+          {
+            "step_number": 3,
+            "action": "Refresh the Thermostat Control page.",
+            "expected_result": "The target temperature remains persistent at 72\u00b0F."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the thermost at temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-002",
+        "scenario_id": "SCN-002",
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "title": "Verify Thermostat Temperature Lower and Upper Boundary Settings",
+        "priority": "P1",
+        "preconditions": [
+          "Thermostat control page is active on the user interface."
+        ],
+        "test_data": {
+          "lower_bound": "60\u00b0F",
+          "upper_bound": "80\u00b0F"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Set the thermostat target temperature to 60\u00b0F and submit.",
+            "expected_result": "The system accepts 60\u00b0F as the set point without error."
+          },
+          {
+            "step_number": 2,
+            "action": "Set the thermostat target temperature to 80\u00b0F and submit.",
+            "expected_result": "The system accepts 80\u00b0F as the set point without error."
+          },
+          {
+            "step_number": 3,
+            "action": "Verify current settings on the UI.",
+            "expected_result": "The target temperature displays 80\u00b0F."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the thermost at temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-003",
+        "scenario_id": "SCN-003",
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "title": "Attempt Thermostat Settings Outside Permissible Bounds",
+        "priority": "P2",
+        "preconditions": [
+          "User is navigating the thermostat temperature adjustment module."
+        ],
+        "test_data": {
+          "invalid_high": "81\u00b0F",
+          "invalid_low": "59\u00b0F"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Enter 59\u00b0F into the thermostat target input box and submit.",
+            "expected_result": "The input is rejected and an out-of-range error message is displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Enter 81\u00b0F into the thermostat target input box and submit.",
+            "expected_result": "The input is rejected and an out-of-range error message is displayed."
+          },
+          {
+            "step_number": 3,
+            "action": "Verify target temperature setting on the web interface.",
+            "expected_result": "The target temperature remains unchanged at its previous valid value."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the thermost at temperatures to between 60 \u00b0 F and 80 \u00b0 F, inclusive, at one degree increments."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-004",
+        "scenario_id": "SCN-004",
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "title": "Set Humidistat Humidity Level Within Valid Bounds",
+        "priority": "P1",
+        "preconditions": [
+          "Humidistat module is connected and functional."
+        ],
+        "test_data": {
+          "target_humidity": "45%"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Open the Humidistat Control section on the DigitalHome web page.",
+            "expected_result": "The current relative humidity reading is displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Set the relative humidity target to 45% and click Submit.",
+            "expected_result": "The system accepts 45% and updates the set point display."
+          },
+          {
+            "step_number": 3,
+            "action": "Refresh the Humidistat Control page.",
+            "expected_result": "The relative humidity setting displays 45%."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-005",
+        "scenario_id": "SCN-005",
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "title": "Verify Humidistat Target Boundaries at 30% and 60%",
+        "priority": "P1",
+        "preconditions": [
+          "Humidistat interface is loaded."
+        ],
+        "test_data": {
+          "max_humidity": "60%",
+          "min_humidity": "30%"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Set the humidistat target humidity level to 30% and save.",
+            "expected_result": "The system accepts 30% target humidity without error."
+          },
+          {
+            "step_number": 2,
+            "action": "Set the humidistat target humidity level to 60% and save.",
+            "expected_result": "The system accepts 60% target humidity without error."
+          },
+          {
+            "step_number": 3,
+            "action": "Verify target humidity setting on the interface.",
+            "expected_result": "The target humidity displays 60%."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-006",
+        "scenario_id": "SCN-006",
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "title": "Attempt Invalid Humidistat Level Inputs Below 30% or Above 60%",
+        "priority": "P2",
+        "preconditions": [
+          "Humidistat control module is active."
+        ],
+        "test_data": {
+          "invalid_high": "61%",
+          "invalid_low": "29%"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Input 29% for target humidity and submit.",
+            "expected_result": "The system rejects the input and displays a descriptive validation message."
+          },
+          {
+            "step_number": 2,
+            "action": "Input 61% for target humidity and submit.",
+            "expected_result": "The system rejects the input and displays a descriptive validation message."
+          },
+          {
+            "step_number": 3,
+            "action": "Check active humidistat setting on the UI.",
+            "expected_result": "The target humidity value retains its previous valid setting."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-a474f150b1dc",
+            "page_number": 9,
+            "section": "4.2.1.1 A DH user shall be able to read the tempera ture at a thermostat",
+            "excerpt": "A DH user shall be able to set the humidity level for a humidistat, from 30% to 60%, inclusive a 1% increments."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-007",
+        "scenario_id": "SCN-007",
+        "requirement_ids": [
+          "REQ-003"
+        ],
+        "title": "Verify Alarm System Activation on Contact Sensor Breach",
+        "priority": "P1",
+        "preconditions": [
+          "Security system is armed and contact sensors are monitored."
+        ],
+        "test_data": {
+          "sensor_id": "Door-Contact-01"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Arm the DigitalHome security system from the security control panel.",
+            "expected_result": "The system status displays ARMED."
+          },
+          {
+            "step_number": 2,
+            "action": "Trigger a contact sensor on a monitored door/window to change state to OPEN.",
+            "expected_result": "The contact sensor status changes to OPEN."
+          },
+          {
+            "step_number": 3,
+            "action": "Observe the security alarm indicators.",
+            "expected_result": "Both sound alarm and light alarm sub-systems activate immediately."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "When a security breach occurs and a contact s ensor is set OPEN, the alarm system shall be activated."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-008",
+        "scenario_id": "SCN-008",
+        "requirement_ids": [
+          "REQ-004"
+        ],
+        "title": "Query State and Toggle Appliance Power Switch",
+        "priority": "P2",
+        "preconditions": [
+          "Small appliance power switch is connected to the DigitalHome network."
+        ],
+        "test_data": {
+          "switch_id": "Appliance-Switch-01"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to the Appliance Management module on the web interface.",
+            "expected_result": "The current power switch state (OFF or ON) for connected appliances is displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Click the toggle switch for a selected small appliance power switch currently OFF.",
+            "expected_result": "The switch changes state to ON, and connected appliance turns on."
+          },
+          {
+            "step_number": 3,
+            "action": "Click the toggle switch for the same appliance again.",
+            "expected_result": "The switch changes state to OFF, and connected appliance turns off."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-6577cda47ae7",
+            "page_number": 10,
+            "section": "4.3.2.3 For each humidistat, up to twenty-four one hour settings per day",
+            "excerpt": "The system shall be able to change the state of a power switch (OFF to ON, or ON to OFF)"
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-009",
+        "scenario_id": "SCN-009",
+        "requirement_ids": [
+          "REQ-005"
+        ],
+        "title": "Verify Monthly Environment Planning and Manual Override",
+        "priority": "P2",
+        "preconditions": [
+          "A monthly plan has been created and activated."
+        ],
+        "test_data": {
+          "periods_per_day": 4
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Configure a monthly plan with specific temperature parameters for four daily time periods.",
+            "expected_result": "The monthly plan is saved and active."
+          },
+          {
+            "step_number": 2,
+            "action": "Perform a manual override via the website for the current time period setting.",
+            "expected_result": "The manual override value takes effect immediately on the system."
+          },
+          {
+            "step_number": 3,
+            "action": "Advance the system time to the start of the next planned period.",
+            "expected_result": "The override expires and the planned parameter setting for the new time period is applied."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "A user shall be able to override planned pa rameter values, through the DH website, or if available, through manual switches on household devices"
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-010",
+        "scenario_id": "SCN-010",
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "title": "Generate Historical Monthly Environment Report Within 2 Years",
+        "priority": "P2",
+        "preconditions": [
+          "System has historical log data stored for the selected past period."
+        ],
+        "test_data": {
+          "selected_month": "6 months ago"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to the Reports page and select a month/year within the past two years (e.g., 6 months ago).",
+            "expected_result": "The report options for the selected month are shown."
+          },
+          {
+            "step_number": 2,
+            "action": "Click Generate Report.",
+            "expected_result": "A report is generated containing daily average, maximum, and minimum temperature and humidity values."
+          },
+          {
+            "step_number": 3,
+            "action": "Inspect the generated report sections.",
+            "expected_result": "Security breach timestamps and system downtime periods are accurately listed."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "For a given month and year, in the past two y ears, DigitalHome shall be able to provide a report on the management and control of the home."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-011",
+        "scenario_id": "SCN-011",
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "title": "Verify Rejection of Report Request Beyond Two Years",
+        "priority": "P3",
+        "preconditions": [
+          "User is on the DH reporting module interface."
+        ],
+        "test_data": {
+          "invalid_month": "25 months ago"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to the historical report selection menu.",
+            "expected_result": "The month and year selection inputs are accessible."
+          },
+          {
+            "step_number": 2,
+            "action": "Select a month and year older than two years (e.g., 25 months ago) and attempt to generate a report.",
+            "expected_result": "The system restricts the selection or displays a clear descriptive error message indicating data is unavailable beyond two years."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "For a given month and year, in the past two y ears, DigitalHome shall be able to provide a report on the management and control of the home."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-012",
+        "scenario_id": "SCN-012",
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "title": "Validate Display Refresh Rate and Sensor Data Acquisition Rate",
+        "priority": "P1",
+        "preconditions": [
+          "Sensors and UI display monitoring tools are active."
+        ],
+        "test_data": {
+          "min_acq_rate_hz": 10,
+          "min_refresh_rate_sec": 2
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Change environmental sensor readings (e.g. temperature or contact sensor state).",
+            "expected_result": "Sensor acquires data samples at a rate of at least 10 Hz."
+          },
+          {
+            "step_number": 2,
+            "action": "Observe the web interface environmental displays while sensor values are updated.",
+            "expected_result": "The display updates with new values at least every two seconds."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "Displays of environmental conditions (tempera ture, humidity, contact sensors and power switches) shall be updated at least every two seconds."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-013",
+        "scenario_id": "SCN-013",
+        "requirement_ids": [
+          "REQ-008"
+        ],
+        "title": "Verify Daily Backup Execution and Automated Failure Recovery",
+        "priority": "P1",
+        "preconditions": [
+          "Daily backup time is configured by the technician."
+        ],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Trigger the scheduled daily system backup job.",
+            "expected_result": "System configuration, default settings, planning, and usage data are successfully backed up."
+          },
+          {
+            "step_number": 2,
+            "action": "Simulate a system failure (e.g., power interruption recovery).",
+            "expected_result": "The system initiates auto-recovery on restart."
+          },
+          {
+            "step_number": 3,
+            "action": "Check system configuration, settings, and planning data post-restart.",
+            "expected_result": "All system data is automatically restored from the most recent daily backup."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-4058e38ebb88",
+            "page_number": 11,
+            "section": "4.6.2.2 A user shall be able to override planned pa rameter values,",
+            "excerpt": "The DH System will backup all system data ( configuration, default parameter settings, planning, and usage data) on a daily basis"
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-014",
+        "scenario_id": "SCN-014",
+        "requirement_ids": [
+          "REQ-009"
+        ],
+        "title": "User Authentication via Valid Account Name and Password",
+        "priority": "P1",
+        "preconditions": [
+          "A valid user account exists on the DH Web Server."
+        ],
+        "test_data": {
+          "account_name": "test_user",
+          "password": "ValidPassword123"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Access the DigitalHome login web page.",
+            "expected_result": "Login form prompting for account name and password opens over HTTPS (TLS encryption)."
+          },
+          {
+            "step_number": 2,
+            "action": "Enter valid account name and valid password, then click Log In.",
+            "expected_result": "Authentication succeeds and user is redirected to the main home dashboard."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "Log in to an account shall require entry of a n account name and a password."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-015",
+        "scenario_id": "SCN-015",
+        "requirement_ids": [
+          "REQ-009"
+        ],
+        "title": "Reject Authentication Attempt with Invalid Password",
+        "priority": "P2",
+        "preconditions": [
+          "User account exists."
+        ],
+        "test_data": {
+          "account_name": "test_user",
+          "invalid_password": "WrongPassword!"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to the DigitalHome login page.",
+            "expected_result": "Account name and password fields are visible."
+          },
+          {
+            "step_number": 2,
+            "action": "Enter valid account name and an incorrect password, then click Log In.",
+            "expected_result": "Login fails and a clear authentication error message is displayed."
+          },
+          {
+            "step_number": 3,
+            "action": "Verify user session status.",
+            "expected_result": "User remains unauthenticated and dashboard access is blocked."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "Log in to an account shall require entry of a n account name and a password."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-016",
+        "scenario_id": "SCN-016",
+        "requirement_ids": [
+          "REQ-010"
+        ],
+        "title": "Verify Project Documentation Archiving and Format Compliance",
+        "priority": "P3",
+        "preconditions": [
+          "Project completion phase is active."
+        ],
+        "test_data": {
+          "format": "HomeOwner HO2305"
+        },
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Inspect system documentation artifacts (SRS, Architectural Design, Detailed Design, Source Code, Test Plans).",
+            "expected_result": "All documents adhere to the required HomeOwner document format."
+          },
+          {
+            "step_number": 2,
+            "action": "Check the HomeOwner Document Archive repository.",
+            "expected_result": "All required up-to-date project documents are present in the HomeOwner Document Archive."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-339819371795",
+            "page_number": 12,
+            "section": "5.2.3 All DigitalHome operations shall incorporate exception handling so that",
+            "excerpt": "All system documents (Software Requirements S pecification, Architectural Design Specification, Module Detailed Design, Module Source Code, and all Test Plans) shall be up-to-date"
+          }
+        ]
+      }
+    ]
+  }
+}

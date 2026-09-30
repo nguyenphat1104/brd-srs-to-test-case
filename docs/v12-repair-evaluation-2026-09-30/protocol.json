@@ -1,0 +1,140 @@
+{
+  "type": "saved-draft-reassessment-v12",
+  "authorization": "User explicitly requested items 1\u20134, including fixing verification/accounting and running evaluation.",
+  "parent_run_id": "228f8d258152-09213b14a3d55011801176c96ca9ecae",
+  "parent_bundle_sha256": "327cc68bbc87b32051c05c8e55168e8e6b81e6ceffb1b2d0aa3eb1bae34227d4",
+  "implementation": {
+    "source_sha256": {
+      "runner.py": "9eaef2a3cfa9de6ae648aea15ec0abfd371b95050a98d65e073e06bafd6b89a9",
+      "pipelines.py": "88994b17481f94bebb379524f28de6c4f2869521b197c37793a74e627953f9ec",
+      "prompts.py": "28586fd37c4f734ffc7e58dd87e6aaeb2512e0a217b28bb721cb42c61b1fd380",
+      "providers.py": "915afd1e0179fb702b76dd2c3dbfd89730ff0166dc4727723219c78b1ebc878a",
+      "documents.py": "a1d9aca9e59d19f0dc4d14235f975dad83766952c5bba04612fe52685f4b6aaf",
+      "models.py": "ef4719cb7a9d397b2aa415be4b8ba65f5715829061615cbd53b8be11f0aee5c4",
+      "coverage.py": "998675c48b6ae9706a6ad38acf8dca125893ae3d70b0d58595b7a5a50900d66d",
+      "validation.py": "20f414af71541e189fcd69d8974d2adaced1b5bb91a9964e1b2553b6f4ed0a59",
+      "evidence.py": "aac1c221f4a84b91fe38ed40f5e64168768593fd75d42e1843f46ac900fb71b0",
+      "efficient.py": "ba3d8e09792ee0a87f7268d07b0e6cd8bcf6cf340ced3edacf9e1e9fa713a88f",
+      "evaluation.py": "d1ff55c7a0c8ed39034520d847e32c0825aa4a8f4cc164703123e04faafc80da",
+      "benchmark.py": "76b0be1b05bf09cc5ee817cd30a7f9b78626fccae1a1a3edbd6cb02a34fbd70b",
+      "storage.py": "3dbb38e46c5df5c138325b2dfaa08618278a86bf39767da27a74517f569e21ad",
+      "schema.sql": "88932b3571aeab596fcc203ca9bbdeb0e7351d6bf3d2f4154ba45dd169d3168b"
+    },
+    "dependencies": {
+      "google-genai": "2.19.0",
+      "pydantic": "2.13.4",
+      "pypdf": "6.16.2",
+      "psycopg": "3.3.4"
+    }
+  },
+  "harness_sha256": "097b0601db2f09e6f1372e2f56b3410f36f71e50c6e009ec4f7193fe08baa2d4",
+  "configuration": {
+    "agents": {
+      "scout": {
+        "provider": "gemini",
+        "model": "gemini-3.6-flash",
+        "prompt": "",
+        "thinking_level": "minimal",
+        "max_output_tokens": null
+      },
+      "curator": {
+        "provider": "gemini",
+        "model": "gemini-3.6-flash",
+        "prompt": "",
+        "thinking_level": "minimal",
+        "max_output_tokens": null
+      },
+      "scenario_architect": {
+        "provider": "gemini",
+        "model": "gemini-3.6-flash",
+        "prompt": "",
+        "thinking_level": "minimal",
+        "max_output_tokens": null
+      },
+      "test_writer": {
+        "provider": "gemini",
+        "model": "gemini-3.6-flash",
+        "prompt": "",
+        "thinking_level": "minimal",
+        "max_output_tokens": null
+      },
+      "critic": {
+        "provider": "gemini",
+        "model": "gemini-3.6-flash",
+        "prompt": "",
+        "thinking_level": "minimal",
+        "max_output_tokens": null
+      },
+      "judge": {
+        "provider": "gemini",
+        "model": "gemini-3.6-flash",
+        "prompt": "Extract atomic source coverage units and strictly map generated test cases for precision, recall, and F1 scoring.",
+        "thinking_level": "medium",
+        "token_ceiling": 100000,
+        "fixed": true
+      }
+    },
+    "token_ceiling": 40000,
+    "critic_enabled": true,
+    "pipeline_profile": "efficient",
+    "agent_setups": {
+      "analyst": {
+        "agent": "analyst",
+        "role": "Requirement analyst",
+        "instructions": ""
+      },
+      "test_generator": {
+        "agent": "test_generator",
+        "role": "Test designer",
+        "instructions": ""
+      },
+      "reviewer": {
+        "agent": "reviewer",
+        "role": "Requirements curator",
+        "instructions": ""
+      },
+      "coverage_analyzer": {
+        "agent": "coverage_analyzer",
+        "role": "Coverage analyst",
+        "instructions": ""
+      },
+      "scout": {
+        "agent": "scout",
+        "role": "Evidence scout",
+        "instructions": ""
+      },
+      "curator": {
+        "agent": "curator",
+        "role": "Requirement curator",
+        "instructions": ""
+      },
+      "scenario_architect": {
+        "agent": "scenario_architect",
+        "role": "Scenario architect",
+        "instructions": ""
+      },
+      "test_writer": {
+        "agent": "test_writer",
+        "role": "Test writer",
+        "instructions": ""
+      },
+      "critic": {
+        "agent": "critic",
+        "role": "Artifact critic",
+        "instructions": ""
+      }
+    },
+    "provider_endpoint_hashes": {}
+  },
+  "previous_accounted_tokens": 1373710,
+  "uncertain_retry_hold_tokens": 12497,
+  "previous_conservative_total": 1386207,
+  "total_authorized_tokens": 1600000,
+  "generation_cap": 40000,
+  "judge_cap": 100000,
+  "maximum_additional_tokens": 140000,
+  "scope": "Import the exact saved 96-test draft as experimental input. This is explicit artifact reuse across versions, not fingerprint-matched task reuse or a fresh generation trial. No old checkpoint is accepted as a current-version validation.",
+  "procedure": "Reassess both original findings with source-backed explanations and downstream artifacts. If unresolved, permit one semantic patch of TC-074 for FIND-001 and TC-096 for FIND-002; preserve all other artifacts and IDs. Verify the original findings again. Judge runs only if both pass and deterministic validation passes. No further recovery in this protocol.",
+  "limits": "Same approved 91-unit catalog and coverage-v7 Judge as the staged baseline. Supplementary and adaptive on a reused document, with unequal cumulative budgets. Historical failures remain. Human validation remains pending; model scores do not replace it.",
+  "sha256": "ca81396833686b8404f9453c7bbc3e266e1b0818981c2d1597a4e14915b1a4d1"
+}

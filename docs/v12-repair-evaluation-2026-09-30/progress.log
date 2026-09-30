@@ -1,0 +1,15 @@
+2026-09-30T15:32:37.283434+00:00 Preparing document
+2026-09-30T15:32:37.290460+00:00 Generating artifacts
+2026-09-30T15:32:37.307372+00:00 Imported saved draft; no extraction, curation, writing or previous Critic calls purchased.
+2026-09-30T15:32:37.308990+00:00 Critic: working on task 1.
+2026-09-30T15:32:44.071873+00:00 Critic: saved validated task 1.
+2026-09-30T15:32:44.072897+00:00 Initial verification: {"resolved_finding_ids":["FIND-001","FIND-002"],"unresolved_finding_ids":[],"reasons":{"FIND-001":"In TC-074, step 6 covers viewing the job queue and email notifications, matching SCN-074 which includes REQ-071 for email notifications as supported by chunk p0011-c001-b1a8090b0217: 'User can receive an email notification when job is started, finished or killed.'","FIND-002":"REQ-092 is covered by downstream scenario SCN-096 ('Non-Super User Denied Resuming Another User's Stopped Job') and test case TC-096, which verify permission denial when a non-super user attempts to resume another user's stopped job, adhering to chunk p0013-c001-139ddec67a27: 'User can resume his/her stopped job. A “super user” can resume any stopped job.'"}}
+2026-09-30T15:32:44.168553+00:00 Analyzing coverage
+2026-09-30T15:32:44.176303+00:00 Judge: reusing 91 frozen coverage units. Mapping test cases...
+2026-09-30T15:32:44.314136+00:00 Evaluation: working on task 1.
+2026-09-30T15:33:51.756083+00:00 Evaluation: saved validated task 1.
+2026-09-30T15:33:51.762632+00:00 Evaluation: working on task 4.
+2026-09-30T15:34:46.598395+00:00 Evaluation: saved validated task 4.
+2026-09-30T15:34:46.601767+00:00 Judge: F1=0.91 (precision=0.88, recall=0.96).
+2026-09-30T15:34:46.674192+00:00 Completed
+2026-09-30T15:34:46.750393+00:00 {"run_id": "228f8d258152-2d8979e0adf45a11ba497fad3cc6fa97", "status": "completed", "failure": null, "additional_tokens": 71196, "phases": {"generation": 7269, "evaluation": 63927, "catalog": 0}, "estimated_tokens": 0, "inherited_accounted_tokens": 216366, "workflow_accounted_tokens": 287562, "total_accounted_tokens": 1444906, "conservative_total_tokens": 1457403, "remaining_authorized_tokens": 142597, "f1": 0.913728432108027, "semantic_status": "accepted", "evaluation_error": "", "human_reviews": "Pending; no reviewers identified or ratings supplied.", "interpretation": "Same approved 91-unit catalog and coverage-v7 Judge as the staged baseline. Supplementary and adaptive on a reused document, with unequal cumulative budgets. Historical failures remain. Human validation remains pending; model scores do not replace it."}

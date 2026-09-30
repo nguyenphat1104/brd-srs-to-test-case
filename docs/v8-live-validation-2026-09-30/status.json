@@ -1,0 +1,15 @@
+{
+  "state": "stopped_after_first_failed_trial",
+  "manifest_sha256": "e56d644f0d75b3746bb6f7687bdffeaa3b0ea3778f5cb31a31fdebb2adf43018",
+  "started_at": "2026-09-30T06:48:43.944322+00:00",
+  "previously_accounted_tokens": 732219,
+  "recorded_trials": 1,
+  "stopped_by_gate": "First document did not complete generation and evaluation; second document not purchased.",
+  "validation_spent_tokens": 173649,
+  "total_spent_tokens": 905868,
+  "remaining_authorized_tokens": 694132,
+  "updated_at": "2026-09-30T06:54:47.437212+00:00",
+  "followup_version": "research-core-v9",
+  "followup_deployed": true,
+  "human_rows_with_scores": 0
+}

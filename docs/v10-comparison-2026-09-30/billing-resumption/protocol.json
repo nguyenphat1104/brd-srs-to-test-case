@@ -1,0 +1,22 @@
+{
+  "type": "posthoc-billing-resumption-v1",
+  "parent_run_id": "228f8d258152-93f5e43fcdcc593997ed320b56ffd569",
+  "original_trial_run_id": "228f8d258152-ab53f20cf7e65c37b3abbc83c947bb90",
+  "authorization": "User: increased budget try again. This refers to the provider spending cap; the original 1600000-token experiment ceiling remains unchanged.",
+  "comparison_manifest_sha256": "96dd4596b64a9c42c8acb1d208474416f4e3af4f224b0eddbbd07cd2618e2968",
+  "previously_accounted_tokens": 1358943,
+  "unobserved_retry_hold_tokens": 12497,
+  "previous_conservative_total": 1371440,
+  "additional_generation_limit": 100000,
+  "additional_judge_limit": 100000,
+  "maximum_additional_tokens": 200000,
+  "total_authorized_tokens": 1600000,
+  "configured_generation_limit": 200000,
+  "budget_note": "Original settings remain identical for checkpoint fingerprints. An external study limit tightens the new generation ledger to 100000. Inherited cost is reported separately and included in cumulative workflow cost.",
+  "interpretation": "Supplementary recovery after a failed matched trial; not a fresh repetition or a pass at the original cumulative 200000 ceiling.",
+  "gate": "Verify all 31 saved tasks are reused before the first new repair call. No new recovery run if this continuation fails; ordinary bounded in-run correction and transient retries remain unchanged.",
+  "frozen_image": "sha256:641da14a8f074ed98d550410ec0dca1e9f498ed59f91d6485c7f2494654a9ca1",
+  "harness_sha256": "e6c001b6bf58a1437d4cd81d59a17d3076a76c6b97a6dec8fff368e265bf4cc5",
+  "external_provider_guard": "Frozen v10 generation, prompts, schemas and checkpoints. This harness additionally marks explicit monthly/project spending-cap 429 errors nonretryable, matching v11, for generation and Judge. This external failure-only guard is not part of the frozen backend fingerprint.",
+  "sha256": "9306627af7ab13cadd7a355a6170629778b7aa29b484bb34067af6aea1a04546"
+}

@@ -253,6 +253,36 @@ def _show_detail(at: AppTest, result: RunResult) -> None:
     at.session_state["selected_run"] = result
 
 
+def test_recovery_action_uses_saved_configuration_and_links_new_run(monkeypatch):
+    from brd_srs_testgen import runner
+    from brd_srs_testgen.models import RunDiagnostics
+    settings=runner.ProviderSettings(provider='gemini',model='gemini-3.6-flash',token_ceiling=100000,
+        api_key='test-gemini-key',thinking_level='minimal',agent_setups=default_agent_setups())
+    result=completed_run(run_id='recover-original',run_type=RunType.CENTRALIZED_MULTI_AGENT)
+    result.manifest=result.manifest.model_copy(update={'provider':'gemini','model':'gemini-3.6-flash',
+        'status':RunStatus.FAILED,'failure_category':FailureCategory.SCHEMA_FAILURE,
+        'failure_message':'Writer output truncated.','configuration':settings.snapshot(RunType.CENTRALIZED_MULTI_AGENT)})
+    result.stage_outputs=[AgentStageOutput(stage='scout',task_index=0,role='scout',fingerprint='saved',
+        output={'candidates':[]},created_at=datetime.now(UTC))]
+    result.diagnostics=RunDiagnostics(semantic_status='not_reviewed')
+    recovered=completed_run(run_id='recover-new',run_type=RunType.CENTRALIZED_MULTI_AGENT)
+    calls=[]
+    def recover(data,filename,run_type,config,**kwargs):
+        assert data==b'' and kwargs['resume_from']==result.manifest.run_id
+        assert config.snapshot(run_type)==settings.snapshot(run_type)
+        assert len(kwargs['request_id'])==32
+        calls.append(kwargs['request_id'])
+        return recovered
+    monkeypatch.setattr(runner,'run_generation',recover)
+    repo=FakeRepository(results={result.manifest.run_id:result,recovered.manifest.run_id:recovered})
+    at=_app_test(repo);_show_detail(at,result);at.run()
+    assert not at.exception
+    assert 'validated checkpoints are available' in _rendered_text(at)
+    _element(at.button,'Resume unfinished work').click();at.run()
+    assert not at.exception
+    assert calls and at.session_state['selected_run_id']=='recover-new'
+
+
 def _open_settings_step(at: AppTest, run_type: RunType) -> None:
     _element(at.button, "Create new run").click()
     at.run()
@@ -935,7 +965,7 @@ def test_completed_detail_groups_artifacts_and_configuration() -> None:
         f"detail-{result.manifest.run_id}-rtm",
         f"detail-{result.manifest.run_id}-bundle",
     }
-    assert _element(at.metric, "Charged tokens").value == "30"
+    assert _element(at.metric, "Budget-accounted tokens").value == "30"
     assert "Latency 0.10 s · 0 retries" in text
     assert "Citation coverage" in text
     assert "Positive scenario coverage" in text
@@ -1372,7 +1402,7 @@ def test_failed_semantic_result_keeps_artifact_details_and_diagnostics() -> None
         "#### Test cases"
     ) < [element.value for element in at.markdown].index("#### Requirements")
     assert {button.label for button in at.download_button} == {
-        "Download diagnostics"
+        "Download diagnostics", "Download draft bundle"
     }
 
 
@@ -1389,6 +1419,7 @@ def test_create_runs_one_selected_type_and_opens_returned_detail() -> None:
         *,
         repository,
         progress,
+        request_id=None,
     ):
         progress(
             ActivityEvent(

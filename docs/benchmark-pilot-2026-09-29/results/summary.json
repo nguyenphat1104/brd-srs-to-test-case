@@ -1,0 +1,90 @@
+{
+  "conditions": {
+    "single": {
+      "attempts": 2,
+      "completed": 2,
+      "evaluation_unavailable": 0,
+      "budget_tokens_by_phase": {
+        "generation": 43176,
+        "catalog": 0,
+        "evaluation": 78086
+      },
+      "generation_tokens_per_completed_suite": 21588.0,
+      "mean_f1_when_available": 0.45151515151515154,
+      "mean_latency_seconds": 136.68769399810117,
+      "human_approved_cost_per_suite": null
+    },
+    "staged": {
+      "attempts": 2,
+      "completed": 2,
+      "evaluation_unavailable": 0,
+      "budget_tokens_by_phase": {
+        "generation": 100832,
+        "catalog": 0,
+        "evaluation": 124802
+      },
+      "generation_tokens_per_completed_suite": 50416.0,
+      "mean_f1_when_available": 0.6214324373083169,
+      "mean_latency_seconds": 218.62960785254836,
+      "human_approved_cost_per_suite": null
+    },
+    "multi_corrected": {
+      "attempts": 2,
+      "completed": 0,
+      "evaluation_unavailable": 2,
+      "budget_tokens_by_phase": {
+        "generation": 46235,
+        "catalog": 0,
+        "evaluation": 0
+      },
+      "generation_tokens_per_completed_suite": null,
+      "mean_f1_when_available": null,
+      "mean_latency_seconds": 27.27180806605611,
+      "human_approved_cost_per_suite": null
+    },
+    "multi_efficient": {
+      "attempts": 2,
+      "completed": 0,
+      "evaluation_unavailable": 2,
+      "budget_tokens_by_phase": {
+        "generation": 105584,
+        "catalog": 0,
+        "evaluation": 0
+      },
+      "generation_tokens_per_completed_suite": null,
+      "mean_f1_when_available": null,
+      "mean_latency_seconds": 110.82604437554255,
+      "human_approved_cost_per_suite": null
+    }
+  },
+  "paired_document_differences": {
+    "single": {
+      "documents": [],
+      "mean_f1_difference": null,
+      "bootstrap_95_interval": null,
+      "predeclared_f1_tolerance": null,
+      "f1_noninferiority": "inconclusive",
+      "note": "Exploratory document-level bootstrap; more repeats do not replace independent documents. Missing trials and human ratings prevent a quality-equivalence claim."
+    },
+    "staged": {
+      "documents": [],
+      "mean_f1_difference": null,
+      "bootstrap_95_interval": null,
+      "predeclared_f1_tolerance": null,
+      "f1_noninferiority": "inconclusive",
+      "note": "Exploratory document-level bootstrap; more repeats do not replace independent documents. Missing trials and human ratings prevent a quality-equivalence claim."
+    },
+    "multi_corrected": {
+      "documents": [],
+      "mean_f1_difference": null,
+      "bootstrap_95_interval": null,
+      "predeclared_f1_tolerance": null,
+      "f1_noninferiority": "inconclusive",
+      "note": "Exploratory document-level bootstrap; more repeats do not replace independent documents. Missing trials and human ratings prevent a quality-equivalence claim."
+    }
+  },
+  "quality_preservation": "Not established: requires complete evaluations and blinded human ratings, including critical-error checks.",
+  "planned_trials": 8,
+  "recorded_trials": 8,
+  "budget_accounted_tokens": 498715
+}

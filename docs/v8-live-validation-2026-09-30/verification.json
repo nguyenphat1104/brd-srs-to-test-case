@@ -1,0 +1,48 @@
+{
+  "verified_at": "2026-09-30T07:01:44.600325+00:00",
+  "manifest_sha256": "e56d644f0d75b3746bb6f7687bdffeaa3b0ea3778f5cb31a31fdebb2adf43018",
+  "checks": [
+    "Recorded trial results equal the database and all ten earlier trials are unchanged.",
+    "Frozen source archive, PDFs and approved catalogs match their recorded hashes.",
+    "Per-call accounting reconciles with run metrics and both budgets.",
+    "Unpurchased second trial is absent when the gate stops execution."
+  ],
+  "trials": [
+    {
+      "document_id": "D001",
+      "run_id": "228f8d258152-a8bb2f86768b58fabd15afea9724fe44",
+      "status": "failed",
+      "failure_message": "Finding FIND-001 assigns REQ-057 to the wrong responsible role scenario_architect.",
+      "budget_tokens": 173649,
+      "phases": {
+        "generation": 173649
+      },
+      "stages": {
+        "generation/scout": 24266,
+        "generation/source_audit": 16861,
+        "generation/curator": 29399,
+        "generation/test_writer": 49595,
+        "generation/critic": 53528
+      },
+      "call_statuses": {
+        "completed": 31
+      },
+      "estimated_tokens": 0,
+      "artifact_counts": {
+        "requirements": 94,
+        "scenarios": 99,
+        "test_cases": 99
+      },
+      "f1": null,
+      "evaluation_error": ""
+    }
+  ],
+  "prior_spent_tokens": 732219,
+  "validation_spent_tokens": 173649,
+  "total_spent_tokens": 905868,
+  "remaining_authorized_tokens": 694132,
+  "recorded_trials": 1,
+  "planned_trials": 2,
+  "stopped_by_gate": "First document did not complete generation and evaluation; second document not purchased.",
+  "quality_preservation": "Not established by development trials; held-out comparisons and independent human reviews remain required."
+}

@@ -4,6 +4,7 @@ import json
 import socket
 import threading
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import PurePath
 from typing import Generic, Protocol, TypeVar
@@ -19,6 +20,12 @@ Messages = list[dict[str, str]]
 RETRYABLE_CODES = {408, 429, 500, 502, 503, 504}
 TIMEOUT_CODES = {408, 504}
 LM_STUDIO_MIN_CONTEXT = 32_768
+CALL_USAGE: ContextVar[dict | None] = ContextVar("call_usage", default=None)
+
+
+def _record_usage(**values: object) -> None:
+    if (usage := CALL_USAGE.get()) is not None:
+        usage.update(values)
 
 
 class BudgetExceeded(RuntimeError):
@@ -47,8 +54,8 @@ class StructuredOutputError(RuntimeError):
         self,
         raw_text: str,
         *,
-        input_tokens: int = 0,
-        output_tokens: int = 0,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
         latency_seconds: float = 0.0,
         incomplete: bool = False,
     ) -> None:
@@ -125,12 +132,16 @@ class BudgetLedger:
         with self._lock:
             self.reserved -= self._release(reservation)
 
-    def settle(self, reservation: Reservation, actual_tokens: int) -> None:
+    def settle(self, reservation: Reservation, actual_tokens: int, *, estimated: bool = False) -> None:
         _token_count(actual_tokens, "Actual token count")
         with self._lock:
             self.reserved -= self._release(reservation)
             self.used += actual_tokens
             over = self.used + self.reserved > self.limit
+        if (usage := CALL_USAGE.get()) is not None:
+            usage["budget_tokens"] = usage.get("budget_tokens", 0) + actual_tokens
+            if estimated:
+                usage["estimated_tokens"] = usage.get("estimated_tokens", 0) + actual_tokens
         if over:
             raise BudgetExceeded(
                 f"Actual usage {self.used} exceeded token limit {self.limit}."
@@ -229,10 +240,13 @@ def _is_timeout(error: Exception) -> bool:
 
 def _provider_error(error: Exception) -> ProviderError:
     code = _error_code(error)
+    spending_cap = code == 429 and any(
+        marker in str(error).lower() for marker in ('monthly spending cap', 'project spend cap')
+    )
     return ProviderError(
         str(error),
         code=code,
-        retryable=code in RETRYABLE_CODES or _is_transient(error),
+        retryable=not spending_cap and (code in RETRYABLE_CODES or _is_transient(error)),
         timed_out=_is_timeout(error),
     )
 
@@ -565,9 +579,24 @@ class GeminiProvider:
             if isinstance(error, (ValueError, TypeError)):
                 self.ledger.cancel(reservation)
             else:
-                self.ledger.settle(reservation, reservation.tokens)
+                self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise _provider_error(error) from error
 
+        raw_usage = getattr(interaction, "usage", None)
+        _record_usage(
+            usage=(raw_usage.model_dump(mode="json", exclude_none=True)
+                   if hasattr(raw_usage, "model_dump") else {
+                       key: value for key, value in getattr(raw_usage, "__dict__", {}).items()
+                       if isinstance(value, (int, float, str, bool))
+                   }),
+            provider_request_id=getattr(interaction, "id", None),
+            finish_reason=getattr(interaction, "status", None),
+        )
+        _record_usage(reported_total_tokens=None)
+        for field_name, attribute in (("input_tokens", "total_input_tokens"), ("output_tokens", "total_output_tokens"), ("reported_total_tokens", "total_tokens")):
+            value = getattr(raw_usage, attribute, None)
+            if type(value) is int and value >= 0:
+                _record_usage(**{field_name: value})
         try:
             input_tokens = _token_count(
                 interaction.usage.total_input_tokens, "Input token count"
@@ -579,13 +608,10 @@ class GeminiProvider:
             total_tokens = (
                 input_tokens + output_tokens
                 if reported_total is None
-                else max(
-                    _token_count(reported_total, "Total token count"),
-                    input_tokens + output_tokens,
-                )
+                else _token_count(reported_total, "Total token count")
             )
         except Exception as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(
                 "Gemini returned an incomplete response.", code=None, retryable=False
             ) from error
@@ -673,7 +699,7 @@ class OllamaProvider:
             self.ledger.cancel(reservation)
             raise ProviderError("Invalid Ollama URL.", code=None, retryable=False) from error
         except HTTPError as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(
                 str(error),
                 code=error.code,
@@ -681,7 +707,7 @@ class OllamaProvider:
                 timed_out=error.code in TIMEOUT_CODES,
             ) from error
         except URLError as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(
                 str(error),
                 code=None,
@@ -689,7 +715,7 @@ class OllamaProvider:
                 timed_out=_is_timeout(error.reason),
             ) from error
         except (TimeoutError, ConnectionError) as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(
                 str(error),
                 code=None,
@@ -697,14 +723,14 @@ class OllamaProvider:
                 timed_out=_is_timeout(error),
             ) from error
         except Exception as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(str(error), code=None, retryable=False) from error
 
         try:
             with response:
                 result = json.load(response)
         except Exception as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(str(error), code=None, retryable=False) from error
 
         try:
@@ -714,12 +740,23 @@ class OllamaProvider:
             )
             raw_text = result["message"]["content"]
         except (KeyError, TypeError, ValueError) as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(
                 "Ollama returned an incomplete response.", code=None, retryable=False
             ) from error
 
+        _record_usage(
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            reported_total_tokens=None,
+            usage={"prompt_eval_count": input_tokens, "eval_count": output_tokens},
+            finish_reason=result.get("done_reason"),
+        )
         self.ledger.settle(reservation, input_tokens + output_tokens)
+        if result.get("done_reason") == "length":
+            raise StructuredOutputError(
+                raw_text if isinstance(raw_text, str) else "", input_tokens=input_tokens, output_tokens=output_tokens,
+                latency_seconds=time.perf_counter() - started, incomplete=True,
+            )
         try:
             value = schema.model_validate_json(raw_text)
         except Exception as error:
@@ -838,7 +875,7 @@ class LMStudioProvider:
                 "Invalid LM Studio URL.", code=None, retryable=False
             ) from error
         except HTTPError as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(
                 _lm_studio_error_message(error),
                 code=error.code,
@@ -846,7 +883,7 @@ class LMStudioProvider:
                 timed_out=error.code in TIMEOUT_CODES,
             ) from error
         except URLError as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(
                 str(error),
                 code=None,
@@ -854,7 +891,7 @@ class LMStudioProvider:
                 timed_out=_is_timeout(error.reason),
             ) from error
         except (TimeoutError, ConnectionError) as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(
                 str(error),
                 code=None,
@@ -862,7 +899,7 @@ class LMStudioProvider:
                 timed_out=_is_timeout(error),
             ) from error
         except Exception as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(str(error), code=None, retryable=False) from error
 
         try:
@@ -873,16 +910,29 @@ class LMStudioProvider:
             output_tokens = _token_count(
                 usage["completion_tokens"], "Output token count"
             )
+            reported_total = usage.get("total_tokens")
+            total_tokens = input_tokens + output_tokens if reported_total is None else _token_count(reported_total, "Total token count")
             raw_text = result["choices"][0]["message"]["content"]
         except (IndexError, KeyError, TypeError, ValueError) as error:
-            self.ledger.settle(reservation, reservation.tokens)
+            self.ledger.settle(reservation, reservation.tokens, estimated=True)
             raise ProviderError(
                 "LM Studio returned an incomplete response.",
                 code=None,
                 retryable=False,
             ) from error
 
-        self.ledger.settle(reservation, input_tokens + output_tokens)
+        _record_usage(
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            reported_total_tokens=reported_total, usage=usage,
+            provider_request_id=result.get("id"),
+            finish_reason=result["choices"][0].get("finish_reason"),
+        )
+        self.ledger.settle(reservation, total_tokens)
+        if result["choices"][0].get("finish_reason") == "length":
+            raise StructuredOutputError(
+                raw_text if isinstance(raw_text, str) else "", input_tokens=input_tokens, output_tokens=output_tokens,
+                latency_seconds=time.perf_counter() - started, incomplete=True,
+            )
         try:
             value = schema.model_validate_json(raw_text)
         except Exception as error:

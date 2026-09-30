@@ -1,0 +1,9 @@
+{
+  "recorded_at": "2026-09-30T04:28:59.824020+00:00",
+  "question": "May I send the two approved PDFs (Model Manager and DigitalHome), their source excerpts, and derived requirements/test cases to Google\u2019s Gemini API for the eight comparisons within your existing budget?",
+  "user_answer": "Yes, authorize sending this content to Gemini",
+  "destination": "Google Gemini API",
+  "total_authorized_budget_tokens": 1600000,
+  "remaining_trial_budget_tokens": 1576387,
+  "preceding_launch": "Rejected by automatic approval review before execution; no paid comparison calls."
+}

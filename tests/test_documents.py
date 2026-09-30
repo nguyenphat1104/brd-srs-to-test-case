@@ -50,6 +50,28 @@ def test_chunk_splits_preserve_normalized_text() -> None:
     )
 
 
+def test_table_of_contents_pages_are_not_chunked() -> None:
+    chunks = chunk_pages(
+        [
+            (
+                1,
+                "TABLE OF CONTENTS\n"
+                "1. Scope.....................................................1\n"
+                "2. Requirements..............................................5",
+            ),
+            (
+                2,
+                "3. Interfaces...............................................10\n"
+                "APPENDIX A – Commands.......................................A-1\n"
+                "APPENDIX B – Data Dictionary...............................B-1",
+            ),
+            (3, "The system shall authenticate registered users securely."),
+        ]
+    )
+
+    assert [chunk.page_number for chunk in chunks] == [3]
+
+
 def test_source_excerpt_must_exist_in_referenced_chunk() -> None:
     chunks = chunk_pages([(1, "The system shall authenticate users.")])
     valid = SourceReference(
@@ -63,7 +85,7 @@ def test_source_excerpt_must_exist_in_referenced_chunk() -> None:
     assert not verify_source_reference(invalid, chunks)
 
 
-def test_source_excerpt_ignores_pdf_bullet_punctuation() -> None:
+def test_source_excerpt_preserves_pdf_bullet_punctuation() -> None:
     chunks = chunk_pages([(1, "• Easy to use • Easy to learn")])
     reference = SourceReference(
         chunk_id=chunks[0].chunk_id,
@@ -71,7 +93,7 @@ def test_source_excerpt_ignores_pdf_bullet_punctuation() -> None:
         excerpt="Easy to use. Easy to learn.",
     )
 
-    assert verify_source_reference(reference, chunks)
+    assert not verify_source_reference(reference, chunks)
 
 
 def test_empty_source_excerpt_is_rejected() -> None:
@@ -112,7 +134,7 @@ def test_canonicalizes_grounded_reference_metadata() -> None:
     assert verify_source_reference(fixed.requirements[0].source_references[0], chunks)
 
 
-def test_canonicalizes_extract_with_skipped_intermediate_words() -> None:
+def test_does_not_fuzzily_canonicalize_extract_with_skipped_intermediate_words() -> None:
     chunks = chunk_pages(
         [
             (1, "Unrelated introduction."),
@@ -142,10 +164,8 @@ def test_canonicalizes_extract_with_skipped_intermediate_words() -> None:
         RequirementBatch(requirements=[requirement]), chunks
     )
 
-    assert fixed.requirements[0].source_references[0].excerpt == chunks[1].text.rstrip(
-        "."
-    )
-    assert verify_source_reference(fixed.requirements[0].source_references[0], chunks)
+    assert fixed.requirements[0].source_references[0] == reference
+    assert not verify_source_reference(fixed.requirements[0].source_references[0], chunks)
 
 
 def test_strict_canonicalization_does_not_repair_excerpt_text() -> None:
@@ -174,7 +194,7 @@ def test_strict_canonicalization_does_not_repair_excerpt_text() -> None:
         RequirementBatch(requirements=[requirement]), chunks, repair_excerpt=False
     )
 
-    assert verify_source_reference(permissive.requirements[0].source_references[0], chunks)
+    assert not verify_source_reference(permissive.requirements[0].source_references[0], chunks)
     assert not verify_source_reference(strict.requirements[0].source_references[0], chunks)
 
 
@@ -217,7 +237,35 @@ def test_strict_canonicalization_requires_exact_five_to_twenty_five_word_excerpt
         canonicalize_source_references(batch, chunks, strict=True)
 
 
-def test_canonicalizes_extract_interrupted_by_step_numbers() -> None:
+def test_strict_canonicalization_accepts_token_exact_pdf_excerpt() -> None:
+    chunks = chunk_pages(
+        [(1, "The system shall authenticate registered users securely.")]
+    )
+    reference = SourceReference(
+        chunk_id=chunks[0].chunk_id,
+        page_number=1,
+        excerpt="The  system shall authenticate registered users securely",
+    )
+    batch = RequirementBatch(
+        requirements=[
+            Requirement(
+                requirement_id="REQ-001",
+                title="Authenticate",
+                description="Authenticate registered users.",
+                requirement_type=RequirementType.FUNCTIONAL,
+                module="Access",
+                priority=RequirementPriority.HIGH,
+                source_references=[reference],
+            )
+        ]
+    )
+
+    fixed = canonicalize_source_references(batch, chunks, strict=True)
+
+    assert verify_source_reference(fixed.requirements[0].source_references[0], chunks)
+
+
+def test_does_not_fuzzily_canonicalize_extract_interrupted_by_step_numbers() -> None:
     chunks = chunk_pages(
         [
             (
@@ -250,10 +298,10 @@ def test_canonicalizes_extract_interrupted_by_step_numbers() -> None:
         RequirementBatch(requirements=[requirement]), chunks
     )
 
-    assert verify_source_reference(fixed.requirements[0].source_references[0], chunks)
+    assert not verify_source_reference(fixed.requirements[0].source_references[0], chunks)
 
 
-def test_canonicalizes_excerpt_with_explicit_omission() -> None:
+def test_does_not_fuzzily_canonicalize_excerpt_with_explicit_omission() -> None:
     chunks = chunk_pages(
         [
             (
@@ -286,10 +334,10 @@ def test_canonicalizes_excerpt_with_explicit_omission() -> None:
         RequirementBatch(requirements=[requirement]), chunks
     )
 
-    assert verify_source_reference(fixed.requirements[0].source_references[0], chunks)
+    assert not verify_source_reference(fixed.requirements[0].source_references[0], chunks)
 
 
-def test_canonicalizes_substantial_exact_passage_from_composite_excerpt() -> None:
+def test_does_not_fuzzily_canonicalize_substantial_exact_passage_from_composite_excerpt() -> None:
     chunks = chunk_pages(
         [
             (
@@ -326,8 +374,8 @@ def test_canonicalizes_substantial_exact_passage_from_composite_excerpt() -> Non
     )
     reference = fixed.requirements[0].source_references[0]
 
-    assert reference.excerpt != claimed_excerpt
-    assert verify_source_reference(reference, chunks)
+    assert reference.excerpt == claimed_excerpt
+    assert not verify_source_reference(reference, chunks)
 
 
 def test_empty_pdf_text_is_rejected() -> None:

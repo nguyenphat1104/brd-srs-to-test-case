@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import UTC, datetime
+import json
+import re
 
 import pytest
 
@@ -128,6 +130,27 @@ def _score() -> CoverageScore:
         total_coverage_units=1,
         total_test_cases=1,
     )
+
+
+def test_mapping_prompt_deduplicates_evidence_without_losing_test_conditions():
+    units = _units(3)
+    suite = _bundle()
+    suite.test_cases[0].preconditions = ['The account is locked.']
+    suite.test_cases[0].test_data = {'voltage': -5.5, 'restart_allowed': False}
+    prompt = map_test_cases_prompt(suite, units)
+    def block(label):
+        return json.loads(re.search(r'<<<BEGIN ' + label + r' DATA>>>\n(.*?)\n<<<END ' + label + r' DATA>>>', prompt, re.S)[1])
+    catalog, cases = block('COVERAGE UNITS JSON'), block('TEST CASES JSON')
+    assert list(catalog['source_evidence'].values()) == [_source().model_dump(mode='json')]
+    decoded_units = [dict(zip(catalog['units']['columns'], row)) for row in catalog['units']['rows']]
+    cases = [dict(zip(cases['columns'], row)) for row in cases['rows']]
+    assert [u['source_references'] for u in decoded_units] == [['S-001']] * 3
+    for decoded, original in zip(decoded_units, units.units):
+        decoded['source_references'] = [catalog['source_evidence'][key] for key in decoded['source_references']]
+        assert decoded == original.model_dump(mode='json')
+    assert cases[0]['preconditions'] == suite.test_cases[0].preconditions
+    assert cases[0]['test_data'] == suite.test_cases[0].test_data
+    assert cases[0]['steps'] == [s.model_dump(include={'action', 'expected_result'}) for s in suite.test_cases[0].steps]
 
 
 class ScriptedProvider:
@@ -661,6 +684,8 @@ class TestPrompts:
         assert "CU-001" in prompt
         assert "CoverageUnitBatch" in prompt
         assert chunks[0].chunk_id in prompt
+        assert "contiguous 5-to-25-word excerpt" in prompt
+        assert "Do not paraphrase" in prompt
 
     def test_map_test_cases_prompt_contains_both_catalogs(self) -> None:
         bundle = _bundle()

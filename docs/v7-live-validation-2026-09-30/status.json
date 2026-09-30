@@ -1,0 +1,15 @@
+{
+  "state": "live_trials_failed_implementation_and_human_review_pending",
+  "manifest_sha256": "b65dd2388fa574a9e1ed48b73c6be26757ac8eea5ee097fad026f68e543cf7eb",
+  "started_at": "2026-09-30T06:15:26.823184+00:00",
+  "previously_accounted_tokens": 522328,
+  "validation_budget_tokens": 600000,
+  "human_ratings_collected": 0,
+  "recorded_trials": 2,
+  "validation_accounted_tokens": 209891,
+  "total_accounted_tokens": 732219,
+  "remaining_authorized_tokens": 867781,
+  "updated_at": "2026-09-30T06:22:23.983991+00:00",
+  "report": "README.md",
+  "reporting_fix_deployed": true
+}

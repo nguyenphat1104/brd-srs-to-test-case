@@ -12,11 +12,15 @@ from brd_srs_testgen.models import (
     AgentSetup,
     AgentStageOutput,
     ArtifactBundle,
+    ArtifactPatch,
+    RepairVerification,
     CandidateRequirement,
     CandidateRequirementBatch,
     CriticFinding,
     CriticReport,
     CriticSeverity,
+    RequirementAssignment,
+    RequirementAssignmentBatch,
     RequirementDecision,
     RequirementDecisionAction,
     RequirementBatch,
@@ -32,6 +36,7 @@ from brd_srs_testgen.pipelines import (
     PipelineContext,
     _critique_bundle,
     _semantic_payload,
+    _run_curator,
     _validate_synthesis,
     run_centralized_multi_agent,
     run_single_prompt,
@@ -126,109 +131,35 @@ def test_accepted_critique_returns_bundle_unchanged_without_revision() -> None:
     assert [call[1] for call in provider.calls] == [CriticReport]
 
 
-def test_critique_repairs_once_via_highest_severity_role_with_all_findings() -> None:
+def test_critique_routes_patches_to_each_owner_and_verifies_findings():
     artifacts = bundle()
-    repaired = artifacts.model_copy(
-        update={
-            "requirements": [
-                artifacts.requirements[0].model_copy(
-                    update={"title": "Authenticate registered users"}
-                )
-            ],
-            "scenarios": [
-                artifacts.scenarios[0].model_copy(
-                    update={"title": "Registered user authentication"}
-                )
-            ],
-            "test_cases": [
-                artifacts.test_cases[0].model_copy(
-                    update={"title": "Verify registered user authentication"}
-                )
-            ],
-        }
-    )
-    findings = [
-        critic_finding(
-            finding_id="FIND-001",
-            severity="medium",
-            artifact_ids=["REQ-001"],
-            responsible_role="curator",
-        ),
-        critic_finding(
-            finding_id="FIND-002",
-            severity="high",
-            responsible_role="test_writer",
-        ),
-        critic_finding(
-            finding_id="FIND-003",
-            severity="low",
-            artifact_ids=["SCN-001"],
-            responsible_role="scenario_architect",
-        ),
-    ]
-    critic = CritiqueProvider([CriticReport(accepted=False, findings=findings)])
-    writer = CritiqueProvider([repaired])
-    context = AgentRecordingContext(
-        provider=critic,
-        providers={"test_writer": writer},
-        agent_prompts={"test_writer": "Keep the repair narrowly scoped."},
-    )
-
+    req = artifacts.requirements[0].model_copy(update={"title": "Corrected requirement"})
+    case = artifacts.test_cases[0].model_copy(update={"title": "Corrected test"})
+    findings = [critic_finding(artifact_ids=["REQ-001"], responsible_role="curator"), critic_finding(finding_id="FIND-002")]
+    critic = CritiqueProvider([CriticReport(accepted=False, findings=findings), RepairVerification(resolved_finding_ids=["FIND-001", "FIND-002"], unresolved_finding_ids=[], reasons={"FIND-001": "Source-backed correction.", "FIND-002": "Source-backed correction."})])
+    curator = CritiqueProvider([ArtifactPatch(requirements=[req])])
+    writer = CritiqueProvider([ArtifactPatch(test_cases=[case])])
+    context = AgentRecordingContext(provider=critic, providers={"curator": curator, "test_writer": writer})
     result = _critique_bundle(context, artifacts, [chunk()])
-
-    assert result == repaired
-    assert context.agents == ["critic", "test_writer"]
-    assert context.semantic_revisions == 1
-    assert len(critic.calls) == len(writer.calls) == 1
-    repair_messages = writer.calls[0][0]
-    assert "Keep the repair narrowly scoped." in repair_messages[0]["content"]
-    repair_content = repair_messages[-1]["content"]
-    assert all(finding.finding_id in repair_content for finding in findings)
-    assert repair_content == repair_prompt(
-        artifacts,
-        findings,
-        [chunk()],
-        setup=context.agent_setup("test_writer"),
-    )
+    assert result == artifacts.model_copy(update={"requirements": [req], "test_cases": [case]})
+    assert context.agents == ["critic", "curator", "test_writer", "critic"]
+    assert context.semantic_revisions == 2
+    assert context.diagnostics.semantic_status == "accepted"
+    assert context.diagnostics.unresolved_findings == []
+    assert curator.calls[0][1] is writer.calls[0][1] is ArtifactPatch
+    assert "FIND-002" not in curator.calls[0][0][-1]["content"]
 
 
-def test_highest_severity_uses_original_finding_order_to_select_repair_role() -> None:
+def test_authored_change_is_not_accepted_when_finding_remains_unresolved():
     artifacts = bundle()
-    repaired = artifacts.model_copy(
-        update={
-            "requirements": [
-                artifacts.requirements[0].model_copy(
-                    update={"title": "Authenticate every registered user"}
-                )
-            ],
-            "scenarios": [
-                artifacts.scenarios[0].model_copy(
-                    update={"title": "Authenticate a registered user"}
-                )
-            ],
-        }
-    )
-    findings = [
-        critic_finding(
-            severity="high",
-            artifact_ids=["REQ-001"],
-            responsible_role="curator",
-        ),
-        critic_finding(
-            finding_id="FIND-002",
-            severity="high",
-            artifact_ids=["SCN-001"],
-            responsible_role="scenario_architect",
-        ),
-    ]
-    provider = CritiqueProvider(
-        [CriticReport(accepted=False, findings=findings), repaired]
-    )
-    context = AgentRecordingContext(provider=provider)
-
-    _critique_bundle(context, artifacts, [chunk()])
-
-    assert context.agents == ["critic", "curator"]
+    changed = artifacts.test_cases[0].model_copy(update={"title": "Cosmetic title change"})
+    provider = CritiqueProvider([CriticReport(accepted=False, findings=[critic_finding()]), ArtifactPatch(test_cases=[changed]), RepairVerification(resolved_finding_ids=[], unresolved_finding_ids=["FIND-001"], reasons={"FIND-001": "The defect remains."})])
+    context = PipelineContext(provider=provider)
+    with pytest.raises(PipelineOutputError, match="unresolved findings"):
+        _critique_bundle(context, artifacts, [chunk()])
+    assert context.partial_bundle.test_cases == [changed]
+    assert context.diagnostics.semantic_status == "unresolved"
+    assert len(provider.calls) == 3
 
 
 def test_critique_rejects_link_only_repair() -> None:
@@ -245,11 +176,11 @@ def test_critique_rejects_link_only_repair() -> None:
     provider = CritiqueProvider(
         [
             CriticReport(accepted=False, findings=[critic_finding()]),
-            repaired,
+            ArtifactPatch(test_cases=repaired.test_cases),
         ]
     )
 
-    with pytest.raises(PipelineOutputError, match="^Repair changed links only\\.$"):
+    with pytest.raises(PipelineOutputError, match="Semantic repair changed links only"):
         _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
 
 
@@ -325,11 +256,11 @@ def test_critique_rejects_reordered_link_only_repair_without_revision() -> None:
         ),
     ]
     provider = CritiqueProvider(
-        [CriticReport(accepted=False, findings=findings), repaired]
+        [CriticReport(accepted=False, findings=findings), ArtifactPatch(requirements=repaired.requirements)]
     )
     context = PipelineContext(provider=provider)
 
-    with pytest.raises(PipelineOutputError, match="^Repair changed links only\\.$"):
+    with pytest.raises(PipelineOutputError, match="Semantic repair changed links only"):
         _critique_bundle(context, artifacts, [chunk()])
     assert context.semantic_revisions == 0
 
@@ -354,7 +285,7 @@ def test_critique_rejects_invalid_repaired_test_citations(excerpt) -> None:
     provider = CritiqueProvider(
         [
             CriticReport(accepted=False, findings=[critic_finding()]),
-            repaired,
+            ArtifactPatch(test_cases=repaired.test_cases),
         ]
     )
 
@@ -412,7 +343,7 @@ def test_critique_repair_preserves_merged_requirement_citations() -> None:
                     )
                 ],
             ),
-            repaired,
+            ArtifactPatch(requirements=repaired.requirements),
         ]
     )
 
@@ -478,7 +409,7 @@ def test_repair_cannot_change_an_unaffected_artifact() -> None:
         [CriticReport(accepted=False, findings=[critic_finding()]), repaired]
     )
 
-    with pytest.raises(PipelineOutputError, match="outside the findings"):
+    with pytest.raises(PipelineOutputError, match="exactly once and no others"):
         _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
 
 
@@ -506,11 +437,11 @@ def test_critique_rejects_link_only_change_on_one_of_two_named_artifacts() -> No
                 accepted=False,
                 findings=[critic_finding(artifact_ids=["TC-001", "TC-002"])],
             ),
-            repaired,
+            ArtifactPatch(test_cases=repaired.test_cases),
         ]
     )
 
-    with pytest.raises(PipelineOutputError, match="^Repair changed links only\\.$"):
+    with pytest.raises(PipelineOutputError, match="Semantic repair changed links only"):
         _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
 
 
@@ -534,11 +465,11 @@ def test_critique_rejects_requirement_link_with_only_test_metadata_change(
     provider = CritiqueProvider(
         [
             CriticReport(accepted=False, findings=[critic_finding()]),
-            repaired,
+            ArtifactPatch(test_cases=repaired.test_cases),
         ]
     )
 
-    with pytest.raises(PipelineOutputError, match="^Repair changed links only\\.$"):
+    with pytest.raises(PipelineOutputError, match="Semantic repair changed links only"):
         _critique_bundle(PipelineContext(provider=provider), artifacts, [chunk()])
 
 
@@ -568,7 +499,8 @@ def test_critique_accepts_real_test_authored_changes(change) -> None:
     provider = CritiqueProvider(
         [
             CriticReport(accepted=False, findings=[critic_finding()]),
-            repaired,
+            ArtifactPatch(test_cases=repaired.test_cases),
+            RepairVerification(resolved_finding_ids=["FIND-001"], unresolved_finding_ids=[], reasons={"FIND-001": "Source-backed correction."}),
         ]
     )
 
@@ -706,6 +638,7 @@ def test_curator_prompt_includes_all_candidates_and_ordered_evidence() -> None:
     assert reversed_evidence.index(second.chunk_id) < reversed_evidence.index(chunk().chunk_id)
     assert "exactly one decision per candidate" in prompt
     assert "wording similarity is insufficient" in prompt.lower()
+    assert "Keep the response compact" in prompt
 
 
 def test_validate_synthesis_accepts_semantic_merge_of_adjacent_candidates() -> None:
@@ -777,6 +710,84 @@ def test_validate_synthesis_accepts_semantic_merge_of_adjacent_candidates() -> N
     )
     with pytest.raises(PipelineOutputError, match="must preserve citations"):
         _validate_synthesis([first, second], omitted)
+
+
+class SplitCuratorProvider:
+    model = "test-model"
+
+    def __init__(self, candidates) -> None:
+        self.ledger = BudgetLedger(1_000_000)
+        self.calls = []
+        self.candidates = candidates
+        self.requirements = [
+            bundle().requirements[0].model_copy(
+                update={
+                    "requirement_id": f"REQ-{index:03d}",
+                    "title": candidate.title,
+                    "description": candidate.description,
+                    "source_references": candidate.source_references,
+                }
+            )
+            for index, candidate in enumerate(candidates, start=1)
+        ]
+        self.requirement_offset = 0
+
+    def generate(self, messages, schema, *, max_output_tokens):
+        self.calls.append(schema)
+        if schema is RequirementAssignmentBatch:
+            value = RequirementAssignmentBatch(
+                assignments=[
+                    RequirementAssignment(
+                        candidate_id=candidate.candidate_id,
+                        canonical_requirement_id=f"REQ-{index:03d}",
+                        reason_code="distinct",
+                    )
+                    for index, candidate in enumerate(self.candidates, start=1)
+                ]
+            )
+        elif schema is RequirementBatch:
+            size = min(
+                pipeline_module.CURATOR_REQUIREMENTS_PER_TASK,
+                len(self.requirements) - self.requirement_offset,
+            )
+            value = RequirementBatch(
+                requirements=self.requirements[
+                    self.requirement_offset : self.requirement_offset + size
+                ]
+            )
+            self.requirement_offset += size
+        else:
+            raise AssertionError(f"Unexpected schema: {schema}")
+        return GenerationResult(
+            value=value, input_tokens=1, output_tokens=1, latency_seconds=0.01
+        )
+
+
+def test_large_curator_splits_decisions_from_requirement_materialization() -> None:
+    candidates = [
+        CandidateRequirement(
+            candidate_id=f"CAND-001-{index:03d}",
+            title=f"Candidate {index}",
+            description="Registered users can sign in.",
+            requirement_type="functional",
+            module="Authentication",
+            priority="high",
+            source_references=[source_reference()],
+        )
+        for index in range(1, pipeline_module.CURATOR_SINGLE_PASS_MAX_CANDIDATES + 2)
+    ]
+    provider = SplitCuratorProvider(candidates)
+
+    synthesis = _run_curator(
+        PipelineContext(provider=provider, token_ceiling=1_000_000),
+        candidates,
+        [chunk()],
+    )
+
+    assert len(synthesis.decisions) == len(candidates)
+    assert len(synthesis.requirements) == len(candidates)
+    assert provider.calls[0] is RequirementAssignmentBatch
+    assert provider.calls.count(RequirementBatch) == 5
 
 
 @pytest.mark.parametrize(
@@ -1511,6 +1522,53 @@ def test_centralized_rejects_bad_scenario_parent() -> None:
         run_centralized_multi_agent(
             PipelineContext(provider=InvalidWorkerProvider("parent")), [chunk()]
         )
+
+
+class RepairingScoutProvider(CentralProvider):
+    def generate(self, messages, schema, *, max_output_tokens):
+        content = "\n".join(message["content"] for message in messages)
+        if schema is CandidateRequirementBatch and "SCOUT 1/" in content:
+            requirement = self.artifacts.requirements[0]
+            reference = requirement.source_references[0]
+            candidate = CandidateRequirement(
+                candidate_id="CAND-001-001",
+                title=requirement.title,
+                description=requirement.description,
+                requirement_type=requirement.requirement_type,
+                module=requirement.module,
+                priority=requirement.priority,
+                source_references=[
+                    reference
+                    if "CITATION CORRECTION" in content
+                    else reference.model_copy(update={"excerpt": "invented evidence"})
+                ],
+            )
+            candidates = [
+                candidate,
+                candidate.model_copy(
+                    update={
+                        "candidate_id": "CAND-001-002",
+                        "source_references": [
+                            reference.model_copy(
+                                update={"excerpt": "still invented evidence"}
+                            )
+                        ],
+                    }
+                )
+            ]
+            value = CandidateRequirementBatch(candidates=candidates)
+            return GenerationResult(
+                value=value, input_tokens=1, output_tokens=1, latency_seconds=0.01
+            )
+        return super().generate(messages, schema, max_output_tokens=max_output_tokens)
+
+
+def test_centralized_repairs_one_invalid_scout_citation() -> None:
+    provider = RepairingScoutProvider()
+    context = PipelineContext(provider=provider)
+
+    assert run_centralized_multi_agent(context, [chunk()]) == bundle()
+    assert context.semantic_revisions == 1
 
 
 class CancellationAwareContext(PipelineContext):
@@ -2425,7 +2483,7 @@ def test_failed_attempt_records_wall_latency_and_exposes_charged_tokens(
 ) -> None:
     provider = ScriptedProvider([ProviderError("bad", code=400, retryable=False)])
     provider.ledger.used = 37
-    ticks = iter([10.0, 10.25])
+    ticks = iter([10.0, 10.0, 10.25, 10.25])
     monkeypatch.setattr(pipeline_module.time, "perf_counter", lambda: next(ticks))
     context = PipelineContext(provider=provider, sleep=lambda _seconds: None)
 
@@ -2572,18 +2630,18 @@ def test_repair_budget_and_blackboard_use_actual_responsible_role(role, role_cap
     report = CriticReport(accepted=False, findings=[critic_finding(
         responsible_role=role, artifact_ids=[artifact_id]
     )])
-    provider = CritiqueProvider([report, repaired])
+    provider = CritiqueProvider([report, ArtifactPatch(**{field: getattr(repaired, field)}), RepairVerification(resolved_finding_ids=["FIND-001"], unresolved_finding_ids=[], reasons={"FIND-001": "Source-backed correction."})])
     context = PipelineContext(
         provider=provider, token_ceiling=60_000,
         agent_max_output_tokens={role: role_cap},
     )
     assert _critique_bundle(context, artifacts, [chunk()]) == repaired
-    assert [call[2] for call in provider.calls] == [6_000, min(role_cap, 3_000)]
+    assert [call[2] for call in provider.calls] == [6_000, min(role_cap, 3_000), 6_000]
     assert [(row.stage, row.role) for row in context.stage_outputs] == [
-        ("critic", "critic"), ("repair", role),
+        ("critic", "critic"), ("repair", role), ("critic", "critic"),
     ]
-    assert context.stage_outputs[-1].output == repaired.model_dump(mode="json")
-    assert {"FIND-001", artifact_id} <= set(context.stage_outputs[-1].input_ids)
+    assert context.stage_outputs[-2].output == ArtifactPatch(**{field: getattr(repaired, field)}).model_dump(mode="json")
+    assert {"FIND-001", artifact_id} <= set(context.stage_outputs[-2].input_ids)
 
 
 def test_invalid_critic_and_repair_outputs_are_not_recorded() -> None:
@@ -2595,10 +2653,11 @@ def test_invalid_critic_and_repair_outputs_are_not_recorded() -> None:
         _critique_bundle(context, artifacts, [chunk()])
     assert context.stage_outputs == []
     context = PipelineContext(provider=CritiqueProvider([
-        CriticReport(accepted=False, findings=[critic_finding()]), artifacts
+        CriticReport(accepted=False, findings=[critic_finding()]), ArtifactPatch(test_cases=artifacts.test_cases)
     ]))
-    assert _critique_bundle(context, artifacts, [chunk()]) == artifacts
-    assert [row.stage for row in context.stage_outputs] == ["critic", "repair"]
+    with pytest.raises(PipelineOutputError, match="no correction"):
+        _critique_bundle(context, artifacts, [chunk()])
+    assert [row.stage for row in context.stage_outputs] == ["critic"]
 
 
 def test_shared_ledger_still_stops_hierarchical_generation() -> None:

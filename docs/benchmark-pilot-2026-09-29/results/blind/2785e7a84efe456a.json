@@ -1,0 +1,1298 @@
+{
+  "suite_id": "2785e7a84efe456a",
+  "document_id": "D001",
+  "artifacts": {
+    "requirements": [
+      {
+        "requirement_id": "REQ-001",
+        "title": "Centralized Multi-Cluster Management and Job Placement",
+        "description": "The Model Manager shall manage model jobs across one or more clusters and allow users to either let the system select the target cluster or manually specify a target cluster for customized jobs.",
+        "requirement_type": "functional",
+        "module": "Cluster Management",
+        "priority": "high",
+        "ambiguities": [
+          "Automatic cluster selection criteria and node allocation algorithms across multiple clusters are not fully detailed."
+        ],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-bb7294b4b8e0",
+            "page_number": 6,
+            "section": "3.1 Set up and submit a model job",
+            "excerpt": "The MM will manage jobs on one or more clusters."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-002",
+        "title": "Weather FDDA Model Job Setup and Submission",
+        "description": "The Model Manager shall allow users to set up and submit Weather FDDA jobs (real-time or off-line) by choosing model types (MM5 or WRF), defining JOBIDs, selecting/creating domains, setting schedules or cycle times, and choosing data sources.",
+        "requirement_type": "functional",
+        "module": "Job Setup",
+        "priority": "high",
+        "ambiguities": [
+          "WRF domain creation runtime limitations require further clarification on whether dynamic domain creation is supported.",
+          "Default GMOD job configuration parameters and standard executable definitions are marked as TBD."
+        ],
+        "dependency_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-bb7294b4b8e0",
+            "page_number": 6,
+            "section": "3.1 Set up and submit a model job",
+            "excerpt": "This feature allows the user to set up and schedule a model job using the MM's Job-Setup module."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-003",
+        "title": "ClimoFDDA Job Setup and Integration",
+        "description": "The Model Manager shall integrate GCAT functionalities to allow users to set up ClimoFDDA jobs by defining job parameters, domains, time lines, ensemble options, and post-processing product outputs.",
+        "requirement_type": "functional",
+        "module": "Job Setup",
+        "priority": "medium",
+        "ambiguities": [
+          "Ensemble hourly vs daily options and coupled application execution on post-processed output require further specification."
+        ],
+        "dependency_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-80cd4f07468c",
+            "page_number": 9,
+            "section": "\u2022 NAPS",
+            "excerpt": "The objective of this feature is to integrate the GCAT functionalities within the MM."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-004",
+        "title": "Standalone Post-Processing Job Execution",
+        "description": "The Model Manager shall allow users to set up and submit standalone post-processing jobs on existing model output files or output from scheduled/running FDDA jobs, including selecting product types and specifying destination locations.",
+        "requirement_type": "functional",
+        "module": "Post-Processing",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-ad258d385d69",
+            "page_number": 10,
+            "section": "TBD",
+            "excerpt": "The objective of this feature is to provide the ability to only run \u201cpost-processing\u201d on an existing model output file."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-005",
+        "title": "By-Hand Custom Job Submission",
+        "description": "The Model Manager shall accept registration and submission of custom 'by-hand' jobs that run pre-existing user scripts on a specific cluster, given mandatory parameters like script location, start time, and runtime estimates.",
+        "requirement_type": "functional",
+        "module": "Job Submission",
+        "priority": "medium",
+        "ambiguities": [
+          "The complete interface protocol for 'by-hand' scripts to notify the Model Manager upon completion is not fully specified."
+        ],
+        "dependency_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-b1a8090b0217",
+            "page_number": 11,
+            "section": "3.3 Submit a 'By-hand' job",
+            "excerpt": "In order to submit a custom job to the MM, the user must first identify the cluster(s), where his/her job should run on."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-006",
+        "title": "Job Configuration File Loading and Resubmission",
+        "description": "The Model Manager shall support loading existing job configuration files, modifying settings, saving updated configurations, and submitting or re-submitting jobs based on saved configurations.",
+        "requirement_type": "functional",
+        "module": "Job Management",
+        "priority": "medium",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-b1a8090b0217",
+            "page_number": 11,
+            "section": "3.3 Submit a 'By-hand' job",
+            "excerpt": "The objective of this feature is to provide the ability to load a job configuration into MM from a file."
+          },
+          {
+            "chunk_id": "p0012-c001-984984f2dea2",
+            "page_number": 12,
+            "section": "3.5 Retrieve and run a previously saved job configuration",
+            "excerpt": "The objective of this feature is to provide the ability to retrieve a previous job configuration and to re-run this job"
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-007",
+        "title": "Job Queue Monitoring and Lifecycle Control",
+        "description": "The Model Manager shall present a job table to monitor scheduled, running, and past jobs, view detailed status and log files, and allow users and super users to stop, delete, restart, and resume jobs according to their authorization level.",
+        "requirement_type": "functional",
+        "module": "Job Monitoring",
+        "priority": "high",
+        "ambiguities": [
+          "Exact rule for job prioritization in the queue is designated as TBD."
+        ],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-984984f2dea2",
+            "page_number": 12,
+            "section": "3.5 Retrieve and run a previously saved job configuration",
+            "excerpt": "The objective of this feature is to facilitate monitoring of running jobs, viewing the job queue and viewing jobs that ran in the past."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-008",
+        "title": "User Email Notification System",
+        "description": "The Model Manager shall support sending email notifications to users upon start, completion, or termination/killing of their submitted jobs.",
+        "requirement_type": "functional",
+        "module": "Notifications",
+        "priority": "low",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-29cf8dd2e122",
+            "page_number": 7,
+            "section": "",
+            "excerpt": "User can choose to receive email notification upon start, end and termination of the job."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-009",
+        "title": "Dual Access via Web-Based GUI and CLI",
+        "description": "The Model Manager shall be accessible as a stand-alone application or integrated tool via both a Web-based GUI and a command line interface.",
+        "requirement_type": "non_functional",
+        "module": "User Interface",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0005-c001-d314fb36988e",
+            "page_number": 5,
+            "section": "2.2 Product Features",
+            "excerpt": "The MM will be accessible from a web-based GUI and a command line tool."
+          }
+        ]
+      },
+      {
+        "requirement_id": "REQ-010",
+        "title": "Automation and Enhancement of Operational Backend",
+        "description": "The system shall extend existing model back-end frameworks to automate setup, running, monitoring, and node management of model jobs to accommodate increased operational workload and hardware capabilities.",
+        "requirement_type": "business",
+        "module": "Core System",
+        "priority": "high",
+        "ambiguities": [],
+        "dependency_ids": [],
+        "source_references": [
+          {
+            "chunk_id": "p0004-c001-8a0dbfdfbf27",
+            "page_number": 4,
+            "section": "1.3 Intended Audience",
+            "excerpt": "The primary goal of this project is to extend the current model back end system and to automate the setup, running and monitoring of model jobs."
+          }
+        ]
+      }
+    ],
+    "scenarios": [
+      {
+        "scenario_id": "SCN-001",
+        "title": "System-selected cluster placement for job execution",
+        "objective": "Verify that the Model Manager automatically selects a target cluster when the user submits a job without specifying a cluster.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "User is logged into the Model Manager."
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-bb7294b4b8e0",
+            "page_number": 6,
+            "section": "3.1 Set up and submit a model job",
+            "excerpt": "S/he will submit a job to the MM and the MM will make the decision on what cluster(s) the job will be running."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-002",
+        "title": "Manual cluster specification for custom job execution",
+        "objective": "Verify that the user can explicitly select a specific target cluster when submitting a customized job.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "User is logged into the Model Manager with multiple target clusters available."
+        ],
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-bb7294b4b8e0",
+            "page_number": 6,
+            "section": "3.1 Set up and submit a model job",
+            "excerpt": "In this case, the user will need to have the option to specify what cluster his/her job should run on."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-003",
+        "title": "Successful Weather FDDA Job Setup and Submission",
+        "objective": "Verify the successful setup and submission of a Weather FDDA job specifying model type, JOBID, domains, schedule/cycle, and data sources.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "User is logged into the system and selected Weather FDDA job setup."
+        ],
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-bb7294b4b8e0",
+            "page_number": 6,
+            "section": "3.1 Set up and submit a model job",
+            "excerpt": "This feature allows the user to set up and schedule a model job using the MM's Job-Setup module."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-004",
+        "title": "Off-line Weather FDDA Past Cycle Selection Handling",
+        "objective": "Verify that when a past cycle time is defined for an off-line job, the user is prompted to specify whether it is a case study or re-run.",
+        "scenario_type": "boundary",
+        "preconditions": [
+          "User is configuring a Weather FDDA job in the Job-Setup module."
+        ],
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-29cf8dd2e122",
+            "page_number": 7,
+            "section": "",
+            "excerpt": "If the cycle time is in the past, then the user is prompted to specify whether the job is a \u201ccase study\u201d or \u201cre-run\u201d."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-005",
+        "title": "Successful ClimoFDDA Job Setup using GCAT Integrations",
+        "objective": "Verify that a user can set up and submit a ClimoFDDA job with domain, timeline, ensemble options, and post-processing product outputs.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "User is logged in and chooses to set up a Climo job."
+        ],
+        "requirement_ids": [
+          "REQ-003"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-80cd4f07468c",
+            "page_number": 9,
+            "section": "\u2022 NAPS",
+            "excerpt": "The objective of this feature is to integrate the GCAT functionalities within the MM."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-006",
+        "title": "Standalone Post-Processing Job Submission for Existing Model Output",
+        "objective": "Verify that post-processing can be set up and submitted independently using an existing model output file location.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "A valid existing model output file is accessible on the system."
+        ],
+        "requirement_ids": [
+          "REQ-004"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-ad258d385d69",
+            "page_number": 10,
+            "section": "TBD",
+            "excerpt": "The objective of this feature is to provide the ability to only run \u201cpost-processing\u201d on an existing model output file."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-007",
+        "title": "Post-Processing Job Submission for Scheduled or Running FDDA Job Output",
+        "objective": "Verify post-processing setup by referencing the JOBID and cycle time of a scheduled or running FDDA job.",
+        "scenario_type": "state_transition",
+        "preconditions": [
+          "An FDDA job with a specific JOBID and cycle time is active or scheduled."
+        ],
+        "requirement_ids": [
+          "REQ-004"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-ad258d385d69",
+            "page_number": 10,
+            "section": "TBD",
+            "excerpt": "If the model output file will be produced by a running or scheduled FDDA-job, then the user supplies JOBID & cycle time"
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-008",
+        "title": "Registration and Submission of a Valid 'By-Hand' Job",
+        "objective": "Verify that a custom job can be registered and submitted with all mandatory parameters provided.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "User has set up the script on the target cluster."
+        ],
+        "requirement_ids": [
+          "REQ-005"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-b1a8090b0217",
+            "page_number": 11,
+            "section": "3.3 Submit a 'By-hand' job",
+            "excerpt": "In order for the MM to accept the job, the user will have to provide certain mandatory information about the job."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-009",
+        "title": "Rejection of 'By-Hand' Job Submission with Missing Mandatory Parameters",
+        "objective": "Verify system behavior when attempting to submit a 'by-hand' job without providing mandatory parameter fields.",
+        "scenario_type": "negative",
+        "preconditions": [
+          "User is in the Submit a 'By Hand' Job screen."
+        ],
+        "requirement_ids": [
+          "REQ-005"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-b1a8090b0217",
+            "page_number": 11,
+            "section": "3.3 Submit a 'By-hand' job",
+            "excerpt": "In order for the MM to accept the job, the user will have to provide certain mandatory information about the job."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-010",
+        "title": "Loading and Submitting Job Configuration File",
+        "objective": "Verify loading a job configuration file, modifying parameters, and submitting the job.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "A valid job configuration file exists."
+        ],
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-b1a8090b0217",
+            "page_number": 11,
+            "section": "3.3 Submit a 'By-hand' job",
+            "excerpt": "The objective of this feature is to provide the ability to load a job configuration into MM from a file."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-011",
+        "title": "Retrieving, Updating, and Re-submitting Saved Configuration",
+        "objective": "Verify retrieving a previously saved configuration, modifying options, saving, and re-running.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "User has at least one saved job configuration."
+        ],
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-984984f2dea2",
+            "page_number": 12,
+            "section": "3.5 Retrieve and run a previously saved job configuration",
+            "excerpt": "The objective of this feature is to provide the ability to retrieve a previous job configuration and to re-run this job"
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-012",
+        "title": "Job Queue Monitoring, Detail View, and Log Inspection",
+        "objective": "Verify that users can view job tables, inspect job details, and read job log files.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Jobs exist across scheduled, running, or completed states."
+        ],
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-984984f2dea2",
+            "page_number": 12,
+            "section": "3.5 Retrieve and run a previously saved job configuration",
+            "excerpt": "The objective of this feature is to facilitate monitoring of running jobs, viewing the job queue and viewing jobs that ran in the past."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-013",
+        "title": "Standard User Job Operations (Stop, Restart, Resume, Delete)",
+        "objective": "Verify that a standard user can manage (stop, delete, restart, resume) their own jobs.",
+        "scenario_type": "state_transition",
+        "preconditions": [
+          "Standard user has active and stopped jobs in the job queue."
+        ],
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0013-c001-139ddec67a27",
+            "page_number": 13,
+            "section": "",
+            "excerpt": "User can stop his/her running job. A \u201csuper user\u201d can stop any running job."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-014",
+        "title": "Unauthorized Job Management Attempt by Standard User",
+        "objective": "Verify that a standard user cannot stop, delete, restart, or resume another user's job.",
+        "scenario_type": "negative",
+        "preconditions": [
+          "Standard User A is logged in; User B owns a running job in the queue."
+        ],
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0013-c001-139ddec67a27",
+            "page_number": 13,
+            "section": "",
+            "excerpt": "User can stop his/her running job. A \u201csuper user\u201d can stop any running job."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-015",
+        "title": "Super User Lifecycle Management across Any User Jobs",
+        "objective": "Verify that a super user can delete, stop, restart, or resume jobs belonging to any user.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Super user is logged in; jobs created by other users exist in the queue."
+        ],
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0013-c001-139ddec67a27",
+            "page_number": 13,
+            "section": "",
+            "excerpt": "A \u201csuper user\u201d can delete any job from the job queue."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-016",
+        "title": "Email Notification Dispatching on Job Lifecycle Events",
+        "objective": "Verify email notifications are sent upon job start, completion, and termination when opted-in by user.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "User submitted a job with email notifications enabled."
+        ],
+        "requirement_ids": [
+          "REQ-008"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-29cf8dd2e122",
+            "page_number": 7,
+            "section": "",
+            "excerpt": "User can choose to receive email notification upon start, end and termination of the job."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-017",
+        "title": "Dual Access via Web-Based GUI and CLI",
+        "objective": "Verify that Model Manager functions are accessible via both Web-based GUI and Command Line Interface.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Web GUI server is running and CLI client environment is configured."
+        ],
+        "requirement_ids": [
+          "REQ-009"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0005-c001-d314fb36988e",
+            "page_number": 5,
+            "section": "2.2 Product Features",
+            "excerpt": "The MM will be accessible from a web-based GUI and a command line tool."
+          }
+        ]
+      },
+      {
+        "scenario_id": "SCN-018",
+        "title": "Automated Execution and Node Allocation of Model Back-End Jobs",
+        "objective": "Verify automated setup, execution, monitoring, and node management of backend model processes.",
+        "scenario_type": "positive",
+        "preconditions": [
+          "Model Manager backend extension is operational across system nodes."
+        ],
+        "requirement_ids": [
+          "REQ-010"
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0004-c001-8a0dbfdfbf27",
+            "page_number": 4,
+            "section": "1.3 Intended Audience",
+            "excerpt": "The primary goal of this project is to extend the current model back end system and to automate the setup, running and monitoring of model jobs."
+          }
+        ]
+      }
+    ],
+    "test_cases": [
+      {
+        "test_case_id": "TC-001",
+        "scenario_id": "SCN-001",
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "title": "Verify automatic cluster selection when submitting a job without manual target cluster selection",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Log into the Model Manager Web GUI as a standard user.",
+            "expected_result": "The main menu displays options to submit a new job, retrieve saved configurations, or view the job queue."
+          },
+          {
+            "step_number": 2,
+            "action": "Navigate to 'Submit a new job' -> 'Set up a new model job' -> 'Weather FDDA'.",
+            "expected_result": "The Weather FDDA configuration interface opens with target cluster option unselected."
+          },
+          {
+            "step_number": 3,
+            "action": "Configure mandatory parameters including JOBID 'AUTO-CLUSTER-01', model type WRF, and click Submit without picking a cluster.",
+            "expected_result": "The system accepts the job submission and automatically assigns an available execution cluster."
+          },
+          {
+            "step_number": 4,
+            "action": "Navigate to the Job Queue table and inspect the details for JOBID 'AUTO-CLUSTER-01'.",
+            "expected_result": "The job details confirm that the job was assigned to a target cluster selected by the system."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-bb7294b4b8e0",
+            "page_number": 6,
+            "section": "3.1 Set up and submit a model job",
+            "excerpt": "S/he will submit a job to the MM and the MM will make the decision on what cluster(s) the job will be running."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-002",
+        "scenario_id": "SCN-002",
+        "requirement_ids": [
+          "REQ-001"
+        ],
+        "title": "Verify manual cluster selection when submitting a customized job",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Log into the Model Manager Web GUI as a standard user.",
+            "expected_result": "The main interface is loaded successfully."
+          },
+          {
+            "step_number": 2,
+            "action": "Select 'Submit a new job' -> 'Set up a new model job' -> 'Weather FDDA'.",
+            "expected_result": "The job setup form appears, including the cluster selection dropdown/field."
+          },
+          {
+            "step_number": 3,
+            "action": "Explicitly select target cluster 'Cluster-B' from the available cluster options.",
+            "expected_result": "Cluster-B is selected and set as the target execution cluster."
+          },
+          {
+            "step_number": 4,
+            "action": "Fill in JOBID 'MANUAL-CLUSTER-01', complete setup, and click Submit.",
+            "expected_result": "The job is submitted successfully."
+          },
+          {
+            "step_number": 5,
+            "action": "Open the job detail view for 'MANUAL-CLUSTER-01' in the job queue.",
+            "expected_result": "The details indicate that the job is explicitly scheduled and running on 'Cluster-B'."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-bb7294b4b8e0",
+            "page_number": 6,
+            "section": "3.1 Set up and submit a model job",
+            "excerpt": "In this case, the user will need to have the option to specify what cluster his/her job should run on."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-003",
+        "scenario_id": "SCN-003",
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "title": "Verify Weather FDDA model job setup and submission with mandatory parameters",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to 'Submit a new job' -> 'Set up a new model job' -> 'Weather FDDA'.",
+            "expected_result": "The Weather FDDA setup page opens."
+          },
+          {
+            "step_number": 2,
+            "action": "Select model type MM5, enter JOBID 'WX-FDDA-001', select a predefined domain, and set a real-time cycle schedule.",
+            "expected_result": "The inputs are accepted without error messages."
+          },
+          {
+            "step_number": 3,
+            "action": "Choose standard IC/BC data source 'ETA' and standard observation data source 'WMO'.",
+            "expected_result": "Data sources are attached to the job configuration."
+          },
+          {
+            "step_number": 4,
+            "action": "Click Submit to save and launch the job.",
+            "expected_result": "The system confirms successful job submission and displays job status in the queue."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0006-c001-bb7294b4b8e0",
+            "page_number": 6,
+            "section": "3.1 Set up and submit a model job",
+            "excerpt": "This feature allows the user to set up and schedule a model job using the MM's Job-Setup module."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-004",
+        "scenario_id": "SCN-004",
+        "requirement_ids": [
+          "REQ-002"
+        ],
+        "title": "Verify prompt for past cycle time selection in Weather FDDA off-line setup",
+        "priority": "P2",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Open the Weather FDDA Job Setup interface.",
+            "expected_result": "Job setup options are editable."
+          },
+          {
+            "step_number": 2,
+            "action": "Enter a historical cycle timestamp in the past for the job cycle time.",
+            "expected_result": "The system detects a past cycle time."
+          },
+          {
+            "step_number": 3,
+            "action": "Attempt to proceed to the next setup section or save.",
+            "expected_result": "A prompt appears asking the user to specify whether the job is a 'case study' or 're-run'."
+          },
+          {
+            "step_number": 4,
+            "action": "Select 're-run' and complete the submission.",
+            "expected_result": "The job is saved and submitted as an off-line re-run."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-29cf8dd2e122",
+            "page_number": 7,
+            "section": "",
+            "excerpt": "If the cycle time is in the past, then the user is prompted to specify whether the job is a \u201ccase study\u201d or \u201cre-run\u201d."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-005",
+        "scenario_id": "SCN-005",
+        "requirement_ids": [
+          "REQ-003"
+        ],
+        "title": "Verify ClimoFDDA job setup using integrated GCAT parameters",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to 'Submit a new job' -> 'Set up a new model job' -> 'Climo'.",
+            "expected_result": "The ClimoFDDA job setup screen opens."
+          },
+          {
+            "step_number": 2,
+            "action": "Enter JOBID 'CLIMO-TEST-01', specify domain location, timeline start/end dates, and hourly ensemble option.",
+            "expected_result": "Climo parameters are accepted by the form."
+          },
+          {
+            "step_number": 3,
+            "action": "Configure post-processing product outputs including 'Plots (NCL or RIP)' and enter destination host path.",
+            "expected_result": "Post-processing outputs and destination directory are registered."
+          },
+          {
+            "step_number": 4,
+            "action": "Click Submit to finalize the ClimoFDDA job.",
+            "expected_result": "The job submits successfully and appears in the active job queue."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0009-c001-80cd4f07468c",
+            "page_number": 9,
+            "section": "\u2022 NAPS",
+            "excerpt": "The objective of this feature is to integrate the GCAT functionalities within the MM."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-006",
+        "scenario_id": "SCN-006",
+        "requirement_ids": [
+          "REQ-004"
+        ],
+        "title": "Verify standalone post-processing submission using existing output file location",
+        "priority": "P2",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Select 'Submit a new job' -> 'Set up a new post-processing job'.",
+            "expected_result": "The post-processing setup screen is displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Choose existing model output file input mode and enter the path '/data/model_outputs/existing_run.nc'.",
+            "expected_result": "The file location is recorded."
+          },
+          {
+            "step_number": 3,
+            "action": "Select product type 'MDV' and enter output destination path '/data/products/mdv/'.",
+            "expected_result": "Post-processing options and destination path are confirmed."
+          },
+          {
+            "step_number": 4,
+            "action": "Click Submit to launch the post-processing job.",
+            "expected_result": "The post-processing job is queued and begins processing."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-ad258d385d69",
+            "page_number": 10,
+            "section": "TBD",
+            "excerpt": "The objective of this feature is to provide the ability to only run \u201cpost-processing\u201d on an existing model output file."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-007",
+        "scenario_id": "SCN-007",
+        "requirement_ids": [
+          "REQ-004"
+        ],
+        "title": "Verify standalone post-processing setup referencing active JOBID and cycle time",
+        "priority": "P2",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Select 'Submit a new job' -> 'Set up a new post-processing job'.",
+            "expected_result": "The post-processing setup module opens."
+          },
+          {
+            "step_number": 2,
+            "action": "Select running/scheduled FDDA job mode and enter JOBID 'WX-FDDA-001' and cycle time '2006-04-07_12:00'.",
+            "expected_result": "The JOBID and cycle reference are accepted."
+          },
+          {
+            "step_number": 3,
+            "action": "Select post-processing product 'Verification' and specify target destination '/data/postproc/verification/'.",
+            "expected_result": "Configuration settings are linked to the referenced active job."
+          },
+          {
+            "step_number": 4,
+            "action": "Click Submit.",
+            "expected_result": "The post-processing job is scheduled to execute upon output availability."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0010-c001-ad258d385d69",
+            "page_number": 10,
+            "section": "TBD",
+            "excerpt": "If the model output file will be produced by a running or scheduled FDDA-job, then the user supplies JOBID & cycle time"
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-008",
+        "scenario_id": "SCN-008",
+        "requirement_ids": [
+          "REQ-005"
+        ],
+        "title": "Verify registration and submission of a valid custom 'by-hand' job",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Log on to target cluster 'Cluster-A' and prepare user script at 'hostA:/scripts/custom_run.sh'.",
+            "expected_result": "Script exists and is executable on target cluster."
+          },
+          {
+            "step_number": 2,
+            "action": "In Model Manager, select 'Submit a new job' -> 'Submit a By Hand Job'.",
+            "expected_result": "By-hand job submission form opens."
+          },
+          {
+            "step_number": 3,
+            "action": "Fill in mandatory fields: job id 'HAND-01', location 'hostA:/scripts/custom_run.sh', scheduled time, estimated runtime '02:00:00', executable name 'custom_exe', max runtime '02:30:00', output location 'hostA:/out/'.",
+            "expected_result": "All required parameter fields are populated."
+          },
+          {
+            "step_number": 4,
+            "action": "Click Submit.",
+            "expected_result": "The custom by-hand job is successfully registered and visible in the job queue."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-b1a8090b0217",
+            "page_number": 11,
+            "section": "3.3 Submit a 'By-hand' job",
+            "excerpt": "In order for the MM to accept the job, the user will have to provide certain mandatory information about the job."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-009",
+        "scenario_id": "SCN-009",
+        "requirement_ids": [
+          "REQ-005"
+        ],
+        "title": "Verify rejection of 'by-hand' job submission missing required mandatory parameters",
+        "priority": "P2",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to 'Submit a By Hand Job'.",
+            "expected_result": "By-hand submission form is displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Provide job id 'HAND-ERR' but leave script location and estimated runtime blank.",
+            "expected_result": "Mandatory fields remain unpopulated."
+          },
+          {
+            "step_number": 3,
+            "action": "Click Submit.",
+            "expected_result": "Submission fails with validation error listing missing mandatory parameter fields."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-b1a8090b0217",
+            "page_number": 11,
+            "section": "3.3 Submit a 'By-hand' job",
+            "excerpt": "In order for the MM to accept the job, the user will have to provide certain mandatory information about the job."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-010",
+        "scenario_id": "SCN-010",
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "title": "Verify loading a job configuration file, modifying parameters, and submitting",
+        "priority": "P2",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Select 'Submit a new job' -> 'Submit a job configuration file'.",
+            "expected_result": "File upload/load input form is displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Provide valid configuration file path '/configs/standard_gmod.cfg' and click Load.",
+            "expected_result": "Configuration settings are loaded into the form."
+          },
+          {
+            "step_number": 3,
+            "action": "Modify parameter JOBID to 'LOADED-CFG-01' and adjust runtime cycle interval.",
+            "expected_result": "Form displays updated configuration parameters."
+          },
+          {
+            "step_number": 4,
+            "action": "Click Submit.",
+            "expected_result": "Job is submitted and scheduled according to the loaded and modified configuration."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0011-c001-b1a8090b0217",
+            "page_number": 11,
+            "section": "3.3 Submit a 'By-hand' job",
+            "excerpt": "The objective of this feature is to provide the ability to load a job configuration into MM from a file."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-011",
+        "scenario_id": "SCN-011",
+        "requirement_ids": [
+          "REQ-006"
+        ],
+        "title": "Verify retrieving, updating, saving, and re-running a previously saved configuration",
+        "priority": "P2",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Select 'Retrieve saved job configurations' from the main menu.",
+            "expected_result": "A table listing user's saved job configurations is displayed."
+          },
+          {
+            "step_number": 2,
+            "action": "Select saved job configuration 'SAVED-JOB-10' and click Edit.",
+            "expected_result": "Job configuration details are loaded into an editable view."
+          },
+          {
+            "step_number": 3,
+            "action": "Update cycle interval parameter and click Save.",
+            "expected_result": "Updated configuration is saved to file/database."
+          },
+          {
+            "step_number": 4,
+            "action": "Click Submit to re-run the job with saved changes.",
+            "expected_result": "The job is re-submitted and enters the job queue with updated parameters."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-984984f2dea2",
+            "page_number": 12,
+            "section": "3.5 Retrieve and run a previously saved job configuration",
+            "excerpt": "The objective of this feature is to provide the ability to retrieve a previous job configuration and to re-run this job"
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-012",
+        "scenario_id": "SCN-012",
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "title": "Verify job table monitoring, detail inspection, and log file viewing",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Navigate to 'View job queue / monitor running jobs' and select 'All jobs'.",
+            "expected_result": "Job table presents scheduled, running, and past jobs with user id, JOBID, job type, stage, status, and cluster/nodes."
+          },
+          {
+            "step_number": 2,
+            "action": "Select a running job from the table and click 'View Details'.",
+            "expected_result": "Detailed job execution attributes are displayed."
+          },
+          {
+            "step_number": 3,
+            "action": "Click 'View Log File' on the job details pane.",
+            "expected_result": "Job output execution log file opens and contents are visible."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0012-c001-984984f2dea2",
+            "page_number": 12,
+            "section": "3.5 Retrieve and run a previously saved job configuration",
+            "excerpt": "The objective of this feature is to facilitate monitoring of running jobs, viewing the job queue and viewing jobs that ran in the past."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-013",
+        "scenario_id": "SCN-013",
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "title": "Verify standard user lifecycle management on own jobs (Stop, Restart, Resume, Delete)",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Log in as standard user 'UserA' and navigate to the Job Queue.",
+            "expected_result": "Running and scheduled jobs owned by UserA are listed."
+          },
+          {
+            "step_number": 2,
+            "action": "Select active job 'USERA-JOB1' and click Stop.",
+            "expected_result": "Job status transitions to STOPPED."
+          },
+          {
+            "step_number": 3,
+            "action": "Select 'USERA-JOB1' and click Resume.",
+            "expected_result": "Job status transitions back to RUNNING."
+          },
+          {
+            "step_number": 4,
+            "action": "Select 'USERA-JOB1', click Stop, and then click Restart.",
+            "expected_result": "Job restarts from initial execution stage."
+          },
+          {
+            "step_number": 5,
+            "action": "Select completed/stopped job 'USERA-JOB2' and click Delete.",
+            "expected_result": "Job is removed from the active job queue."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0013-c001-139ddec67a27",
+            "page_number": 13,
+            "section": "",
+            "excerpt": "User can stop his/her running job. A \u201csuper user\u201d can stop any running job."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-014",
+        "scenario_id": "SCN-014",
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "title": "Verify standard user cannot control or modify jobs owned by another user",
+        "priority": "P2",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Log in as standard user 'UserA' and open the Job Queue.",
+            "expected_result": "Job queue table displays jobs owned by UserA and UserB."
+          },
+          {
+            "step_number": 2,
+            "action": "Locate job 'USERB-JOB1' owned by UserB.",
+            "expected_result": "Job details confirm owner is UserB."
+          },
+          {
+            "step_number": 3,
+            "action": "Attempt to click Stop or Delete on 'USERB-JOB1'.",
+            "expected_result": "Action controls are disabled or request fails with access denied error message."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0013-c001-139ddec67a27",
+            "page_number": 13,
+            "section": "",
+            "excerpt": "User can stop his/her running job. A \u201csuper user\u201d can stop any running job."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-015",
+        "scenario_id": "SCN-015",
+        "requirement_ids": [
+          "REQ-007"
+        ],
+        "title": "Verify super user job lifecycle control over any user's job",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Log in as super user 'AdminUser' and open the Job Queue.",
+            "expected_result": "Job queue displays jobs across all users."
+          },
+          {
+            "step_number": 2,
+            "action": "Select job 'USERA-RUNNING' owned by standard user 'UserA' and click Stop.",
+            "expected_result": "Job 'USERA-RUNNING' is stopped successfully."
+          },
+          {
+            "step_number": 3,
+            "action": "Select job 'USERB-STOPPED' owned by standard user 'UserB' and click Resume.",
+            "expected_result": "Job 'USERB-STOPPED' resumes running."
+          },
+          {
+            "step_number": 4,
+            "action": "Select job 'USERC-OLD' owned by standard user 'UserC' and click Delete.",
+            "expected_result": "Job 'USERC-OLD' is deleted from queue table."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0013-c001-139ddec67a27",
+            "page_number": 13,
+            "section": "",
+            "excerpt": "A \u201csuper user\u201d can delete any job from the job queue."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-016",
+        "scenario_id": "SCN-016",
+        "requirement_ids": [
+          "REQ-008"
+        ],
+        "title": "Verify email notification dispatch on job start, completion, and termination",
+        "priority": "P3",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Configure a Weather FDDA job and enable email notification checkboxes for start, end, and termination.",
+            "expected_result": "Notification preferences are saved with job submission."
+          },
+          {
+            "step_number": 2,
+            "action": "Submit job 'NOTIFY-TEST-01' and observe email inbox when job starts.",
+            "expected_result": "An email notification confirming job start is received."
+          },
+          {
+            "step_number": 3,
+            "action": "Allow job 'NOTIFY-TEST-01' to finish successfully and inspect email inbox.",
+            "expected_result": "An email notification confirming job end/completion is received."
+          },
+          {
+            "step_number": 4,
+            "action": "Submit job 'NOTIFY-TEST-02' with email notifications enabled, then stop/kill the job.",
+            "expected_result": "An email notification confirming job termination is received."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0007-c001-29cf8dd2e122",
+            "page_number": 7,
+            "section": "",
+            "excerpt": "User can choose to receive email notification upon start, end and termination of the job."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-017",
+        "scenario_id": "SCN-017",
+        "requirement_ids": [
+          "REQ-009"
+        ],
+        "title": "Verify Model Manager accessibility via Web-based GUI and Command Line Interface",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Open web browser, navigate to Model Manager URL, and log in via Web GUI.",
+            "expected_result": "Web GUI loads and allows job configuration and queue monitoring."
+          },
+          {
+            "step_number": 2,
+            "action": "Open command line terminal, execute Model Manager CLI tool login command.",
+            "expected_result": "CLI authenticates successfully and displays command prompt/menu."
+          },
+          {
+            "step_number": 3,
+            "action": "Run CLI command to query active job queue (`mm_tool --list-jobs`).",
+            "expected_result": "Active job queue table is rendered in terminal output matching GUI job status."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0005-c001-d314fb36988e",
+            "page_number": 5,
+            "section": "2.2 Product Features",
+            "excerpt": "The MM will be accessible from a web-based GUI and a command line tool."
+          }
+        ]
+      },
+      {
+        "test_case_id": "TC-018",
+        "scenario_id": "SCN-018",
+        "requirement_ids": [
+          "REQ-010"
+        ],
+        "title": "Verify operational backend automation for job setup, execution, monitoring, and node management",
+        "priority": "P1",
+        "preconditions": [],
+        "test_data": {},
+        "steps": [
+          {
+            "step_number": 1,
+            "action": "Submit a multi-node operational model job via Model Manager.",
+            "expected_result": "Job is accepted by backend automation framework."
+          },
+          {
+            "step_number": 2,
+            "action": "Observe backend execution logs during job startup.",
+            "expected_result": "Backend system automatically allocates target cluster nodes and prepares runtime environment."
+          },
+          {
+            "step_number": 3,
+            "action": "Monitor job execution progress in Model Manager interface.",
+            "expected_result": "Real-time execution status and node utilization update automatically until job completion."
+          }
+        ],
+        "source_references": [
+          {
+            "chunk_id": "p0004-c001-8a0dbfdfbf27",
+            "page_number": 4,
+            "section": "1.3 Intended Audience",
+            "excerpt": "The primary goal of this project is to extend the current model back end system and to automate the setup, running and monitoring of model jobs."
+          }
+        ]
+      }
+    ]
+  }
+}

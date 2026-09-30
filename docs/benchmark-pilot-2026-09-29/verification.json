@@ -1,0 +1,17 @@
+{
+  "verified_at": "2026-09-30T04:47:16.709035+00:00",
+  "manifest_sha256": "104a5ec1aadb19ca5a91ae8f7dfc8135501ba75f5d9a2d02b250ba5bf112f99d",
+  "database_and_exported_run_records_match": 8,
+  "catalogs_approved_and_match_drafts": 2,
+  "trial_order_and_ids_match": true,
+  "all_generation_and_evaluation_allowances_respected": true,
+  "token_components_reconcile": true,
+  "comparison_tokens": 498715,
+  "including_preparation_tokens": 522328,
+  "unspent_authorization_tokens": 1077672,
+  "blinded_artifacts_match_saved_bundles": 5,
+  "blank_rater_forms": 2,
+  "human_ratings_fabricated": false,
+  "historical_telescope_status_and_tokens_unchanged": true,
+  "quality_preservation": "Not established"
+}

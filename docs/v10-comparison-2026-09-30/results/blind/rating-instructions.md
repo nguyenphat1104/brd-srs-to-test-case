@@ -1,0 +1,1 @@
+Rate source coverage, groundedness, executability and redundancy independently on the existing 1–4 rubric. Check expected-result correctness, comparison operators, negation and critical boundaries against the source. Record critical errors separately. Do not view private unblinding data until ratings are frozen.

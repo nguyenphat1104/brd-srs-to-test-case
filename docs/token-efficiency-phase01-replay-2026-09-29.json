@@ -1,0 +1,41 @@
+{
+  "run_id": "20260929T083231067296Z-fe7216c0e95e-3bd1bb11",
+  "full_bundle_json_chars": 275927,
+  "repair_calls": [
+    {
+      "role": "scenario_architect",
+      "prompt_chars": 5839,
+      "target_json_chars": 589,
+      "dependency_json_chars": 1008,
+      "evidence_chunks": 1
+    },
+    {
+      "role": "test_writer",
+      "prompt_chars": 16515,
+      "target_json_chars": 2913,
+      "dependency_json_chars": 5176,
+      "evidence_chunks": 3
+    }
+  ],
+  "verification_prompt_chars": 16999,
+  "old_repair_prompt_chars": 436699,
+  "new_repair_and_verification_prompt_chars": 39353,
+  "prompt_character_reduction_fraction": 0.9098852985694952,
+  "notes": [
+    "Offline reconstruction from saved run; no API calls.",
+    "Prompt characters exclude schemas, configured role instructions and wrappers; not billed tokens.",
+    "Verification measured on the original draft; real corrected output will change its length.",
+    "No claim of measured quality equivalence or end-to-end token savings."
+  ],
+  "scripted_replay": {
+    "changed_ids": [
+      "SCN-013",
+      "TC-013",
+      "TC-062"
+    ],
+    "deterministic_validation": "passed",
+    "repair_response_schema": "ArtifactPatch",
+    "verification": "scripted acceptance; not an independent quality score",
+    "command_expected_result": "The command is ignored."
+  }
+}

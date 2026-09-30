@@ -1,0 +1,64 @@
+{
+  "protocol": "v10-matched-development-comparison-v1",
+  "held_out_approved": false,
+  "documents": [
+    {
+      "document_id": "D001",
+      "path": "/Users/jun/projects/citd-final/req/2009 - model manager.pdf",
+      "sha256": "228f8d258152182bdf94bfcd0f7ac22db55ac076137430a1227eec76c26d3cea"
+    }
+  ],
+  "source_catalog_drafts": {
+    "D001": {
+      "file": "D001-catalog.draft.json",
+      "sha256": "8706c9c3f067e3a22795fdbd2e39185716103d6c8712de3ec0d513229bd93ef0",
+      "units": 91
+    }
+  },
+  "conditions": [
+    "staged",
+    "multi_efficient"
+  ],
+  "repeats": 1,
+  "seed": 20260930,
+  "model": "gemini-3.6-flash",
+  "thinking_level": "minimal",
+  "run_token_ceiling": 200000,
+  "max_total_budget_tokens": 507176,
+  "total_user_authorized_budget_tokens": 1600000,
+  "previously_accounted_tokens": 1092824,
+  "f1_tolerance": null,
+  "implementation": {
+    "source_sha256": {
+      "runner.py": "8af84790e6581bc6816ddd544d93f954202de5e83a49c998688e1bbbc9d805cf",
+      "pipelines.py": "6d79c5a6133bf8c676ab5a826169928ca6c4454f70c75942e107064142f11a03",
+      "prompts.py": "42151de48de07ee9bda420903f122ceac45623c5991e27565c63e69cf467ecdf",
+      "providers.py": "c53ebf1b627eb98aae79788bb96fef765f784447ee889f5a9133a7eb31d67e33",
+      "documents.py": "a1d9aca9e59d19f0dc4d14235f975dad83766952c5bba04612fe52685f4b6aaf",
+      "models.py": "4e4db7f8c7b29b1263b547cd90e7278e9973d5fe08a62279faa86a7f4b752c72",
+      "coverage.py": "998675c48b6ae9706a6ad38acf8dca125893ae3d70b0d58595b7a5a50900d66d",
+      "validation.py": "20f414af71541e189fcd69d8974d2adaced1b5bb91a9964e1b2553b6f4ed0a59",
+      "evidence.py": "aac1c221f4a84b91fe38ed40f5e64168768593fd75d42e1843f46ac900fb71b0",
+      "efficient.py": "5547f5968970d76c3f9d4c36ba39d36458b381f8e2be5e0c50daf105eb0e9141",
+      "evaluation.py": "d1ff55c7a0c8ed39034520d847e32c0825aa4a8f4cc164703123e04faafc80da",
+      "benchmark.py": "76b0be1b05bf09cc5ee817cd30a7f9b78626fccae1a1a3edbd6cb02a34fbd70b",
+      "storage.py": "3dbb38e46c5df5c138325b2dfaa08618278a86bf39767da27a74517f569e21ad",
+      "schema.sql": "88932b3571aeab596fcc203ca9bbdeb0e7351d6bf3d2f4154ba45dd169d3168b"
+    },
+    "dependencies": {
+      "google-genai": "2.19.0",
+      "pydantic": "2.13.4",
+      "pypdf": "6.16.2",
+      "psycopg": "3.3.4"
+    }
+  },
+  "evaluator_version": "coverage-v7:coverage-catalog-v1:gemini:gemini-3.6-flash:medium",
+  "gate": "Run the staged baseline first; stop before the efficient trial unless staged completes generation and evaluation; no automatic recovery purchases.",
+  "authorization": "User continued implementation and validation; same PDFs and derived content already approved for Gemini, within the original total budget.",
+  "comparability_limits": [
+    "Previously inspected development documents, not held out.",
+    "Critic payload sharing and evaluator serialization/batching changed; exact data reconstruction does not establish model quality preservation.",
+    "Both conditions use 200000 generation tokens, the same coverage-v7 evaluator, model and approved catalog; historical scores are not directly comparable."
+  ],
+  "manifest_sha256": "96dd4596b64a9c42c8acb1d208474416f4e3af4f224b0eddbbd07cd2618e2968"
+}

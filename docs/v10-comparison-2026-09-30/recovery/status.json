@@ -1,0 +1,18 @@
+{
+  "status": "failed_provider_billing_cap",
+  "run_id": "228f8d258152-93f5e43fcdcc593997ed320b56ffd569",
+  "parent_run_id": "228f8d258152-ab53f20cf7e65c37b3abbc83c947bb90",
+  "prior_accounted_tokens": 1346446,
+  "additional_provider_reported_tokens": null,
+  "persisted_estimated_tokens": 12497,
+  "unobserved_retry_reserve_tokens": 12497,
+  "recorded_accounted_total": 1358943,
+  "conservative_total_including_retry_reserve": 1371440,
+  "conservative_remaining_authorized_tokens": 228560,
+  "reused_tasks": 31,
+  "new_completed_tasks": 0,
+  "f1": null,
+  "note": "A second sequential attempt may have been in flight at termination; its same-request reservation is held separately, not fabricated as an observed call. Reconcile with provider usage before releasing this hold.",
+  "metrics": "Unavailable because the process was stopped; no aggregate metrics or human scores fabricated.",
+  "completed_at_semantics": "Manual failure-recording timestamp, not an inferred provider completion time."
+}

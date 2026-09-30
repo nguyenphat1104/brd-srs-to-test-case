@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
@@ -14,6 +15,8 @@ from .models import (
     AgentSetup,
     AgentStageOutput,
     ArtifactBundle,
+    CallAttempt,
+    RunDiagnostics,
     CoverageCatalog,
     CoverageCatalogStatus,
     CoverageEvaluation,
@@ -285,6 +288,20 @@ class RunRepository:
         except psycopg.Error as error:
             raise StorageError("Agent setup could not be saved.") from error
 
+    @contextmanager
+    def run_lease(self, *run_ids):
+        """One live execution/recovery per source run; closing releases the locks."""
+        with self._connect() as connection:
+            connection.autocommit = True
+            for run_id in sorted(set(key for key in run_ids if key)):
+                row = connection.execute(
+                    "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS acquired",
+                    (run_id,),
+                ).fetchone()
+                if not row["acquired"]:
+                    raise ImmutableRunError("This run is already executing or being recovered.")
+            yield
+
     def create_run(self, manifest: RunManifest) -> None:
         if manifest.status is not RunStatus.RUNNING:
             raise ImmutableRunError("Runs must start in running state.")
@@ -405,7 +422,59 @@ class RunRepository:
         except psycopg.Error as error:
             raise StorageError("Database operation failed.") from error
 
+    @staticmethod
+    def _insert_call(connection, run_id: str, attempt: CallAttempt) -> None:
+        payload = attempt.model_dump(mode="json")
+        connection.execute(
+            "INSERT INTO model_call_attempts (run_id, call_id, payload) VALUES (%s, %s, %s) "
+            "ON CONFLICT (run_id, call_id) DO NOTHING",
+            (run_id, attempt.call_id, Jsonb(payload)),
+        )
+        stored = connection.execute(
+            "SELECT payload FROM model_call_attempts WHERE run_id = %s AND call_id = %s",
+            (run_id, attempt.call_id),
+        ).fetchone()
+        if stored["payload"] != payload:
+            raise ImmutableRunError("Call attempts are immutable.")
+
+    def append_call_attempt(self, run_id: str, attempt: CallAttempt) -> None:
+        try:
+            with self._connect() as connection:
+                self._require_running(connection, run_id)
+                self._insert_call(connection, run_id, attempt)
+        except psycopg.Error as error:
+            raise StorageError("Could not persist model call attempt.") from error
+
+    @staticmethod
+    def _insert_stage(connection, run_id: str, row: AgentStageOutput) -> None:
+        payload = row.model_dump(mode="json")
+        connection.execute(
+            "INSERT INTO agent_stage_outputs "
+            "(run_id, stage, task_index, role, input_ids, output, created_at, fingerprint, reused_from) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+            (run_id, row.stage, row.task_index, row.role, Jsonb(row.input_ids),
+             Jsonb(row.output), row.created_at, row.fingerprint, row.reused_from),
+        )
+        stored = connection.execute(
+            "SELECT stage, task_index, role, input_ids, output, created_at, fingerprint, reused_from "
+            "FROM agent_stage_outputs WHERE run_id=%s AND stage=%s AND task_index=%s",
+            (run_id, row.stage, row.task_index),
+        ).fetchone()
+        if AgentStageOutput.model_validate(stored).model_dump(mode="json") != payload:
+            raise ImmutableRunError("Validated stage outputs are immutable.")
+
+    def append_stage_output(self, run_id: str, row: AgentStageOutput) -> None:
+        try:
+            with self._connect() as connection:
+                self._require_running(connection, run_id)
+                self._insert_stage(connection, run_id, row)
+        except psycopg.Error as error:
+            raise StorageError("Could not persist validated task.") from error
+
     def finalize(self, result: RunResult) -> None:
+        identities = [(row.stage, row.task_index) for row in result.stage_outputs]
+        if len(identities) != len(set(identities)):
+            raise StorageError("Duplicate stage outputs in final result.")
         manifest = result.manifest
         if manifest.status is RunStatus.RUNNING:
             raise ImmutableRunError("Finalization requires a terminal run.")
@@ -444,6 +513,8 @@ class RunRepository:
                     for field in immutable_fields
                 ):
                     raise ImmutableRunError("Run configuration cannot be changed.")
+                for attempt in result.call_attempts:
+                    self._insert_call(connection, manifest.run_id, attempt)
                 if result.bundle is not None:
                     self._insert_bundle(connection, manifest.run_id, result.bundle)
                 if result.validation is not None:
@@ -456,27 +527,14 @@ class RunRepository:
                     self._insert_coverage_evaluation(connection, evaluation)
                 if result.coverage is not None:
                     self._insert_coverage(connection, manifest.run_id, result.coverage)
-                with connection.cursor() as cursor:
-                    cursor.executemany(
-                        "INSERT INTO agent_stage_outputs "
-                        "(run_id, stage, task_index, role, input_ids, output, created_at) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                        (
-                            (
-                                manifest.run_id, row.stage, row.task_index, row.role,
-                                Jsonb(row.input_ids), Jsonb(row.output), row.created_at,
-                            )
-                            for row in sorted(
-                                result.stage_outputs, key=AgentStageOutput.order_key
-                            )
-                        ),
-                    )
+                for row in sorted(result.stage_outputs, key=AgentStageOutput.order_key):
+                    self._insert_stage(connection, manifest.run_id, row)
                 self._append_event(
                     connection, manifest.run_id, "finished", manifest.completed_at
                 )
                 updated = connection.execute(
                     "UPDATE runs SET status = %s, completed_at = %s, "
-                    "failure_category = %s, failure_message = %s "
+                    "failure_category = %s, failure_message = %s, diagnostics = %s "
                     "WHERE run_id = %s AND status = %s",
                     (
                         manifest.status.value,
@@ -485,6 +543,7 @@ class RunRepository:
                         if manifest.failure_category is not None
                         else None,
                         manifest.failure_message,
+                        Jsonb(result.diagnostics.model_dump(mode="json") if result.diagnostics else {}),
                         manifest.run_id,
                         RunStatus.RUNNING.value,
                     ),
@@ -1017,7 +1076,7 @@ class RunRepository:
                     "SELECT run_id, source_filename, document_hash, run_type, "
                     "status, provider, model, temperature, token_ceiling, "
                     "prompt_version, schema_version, configuration, started_at, completed_at, "
-                    "failure_category, failure_message FROM runs WHERE run_id = %s",
+                    "failure_category, failure_message, diagnostics FROM runs WHERE run_id = %s",
                     (run_id,),
                 ).fetchone()
                 if row is None:
@@ -1026,7 +1085,7 @@ class RunRepository:
                 stage_outputs = [
                     AgentStageOutput.model_validate(item)
                     for item in connection.execute(
-                        "SELECT stage, task_index, role, input_ids, output, created_at "
+                        "SELECT stage, task_index, role, input_ids, output, created_at, fingerprint, reused_from "
                         "FROM agent_stage_outputs WHERE run_id = %s "
                         "ORDER BY CASE stage WHEN 'scout' THEN 0 WHEN 'curator' THEN 1 "
                         "WHEN 'scenario_architect' THEN 2 WHEN 'test_writer' THEN 3 "
@@ -1047,7 +1106,11 @@ class RunRepository:
                 )
                 return RunResult(
                     manifest=manifest,
-                    stage_outputs=stage_outputs,
+                    stage_outputs=sorted(stage_outputs, key=AgentStageOutput.order_key),
+                    call_attempts=[CallAttempt.model_validate(x["payload"]) for x in connection.execute(
+                        "SELECT payload FROM model_call_attempts WHERE run_id = %s ORDER BY payload->>'started_at', call_id", (run_id,)
+                    ).fetchall()],
+                    diagnostics=RunDiagnostics.model_validate(row["diagnostics"]) if row["diagnostics"] else None,
                     bundle=bundle,
                     validation=validation,
                     rtm=build_rtm(bundle) if bundle is not None else [],

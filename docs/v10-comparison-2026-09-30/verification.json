@@ -1,0 +1,80 @@
+{
+  "verified_at": "2026-09-30T15:01:46.971302+00:00",
+  "manifest_sha256": "96dd4596b64a9c42c8acb1d208474416f4e3af4f224b0eddbbd07cd2618e2968",
+  "checks": [
+    "Recorded trial results equal the database and all twelve earlier trials are unchanged.",
+    "Frozen source archive, PDFs and approved catalogs match their recorded hashes.",
+    "Per-call accounting reconciles with run metrics and both budgets.",
+    "Unpurchased efficient trial is absent when the gate stops execution."
+  ],
+  "trials": [
+    {
+      "document_id": "D001",
+      "condition": "staged",
+      "run_id": "228f8d258152-4f89b893392f5051a9a23f295a752501",
+      "status": "completed",
+      "failure_message": null,
+      "budget_tokens": 64520,
+      "phases": {
+        "generation": 39512,
+        "evaluation": 25008
+      },
+      "stages": {
+        "generation/requirements": 8159,
+        "generation/scenarios": 12054,
+        "generation/test_cases": 19299,
+        "evaluation/evaluation": 25008
+      },
+      "call_statuses": {
+        "completed": 4
+      },
+      "estimated_tokens": 0,
+      "artifact_counts": {
+        "requirements": 10,
+        "scenarios": 20,
+        "test_cases": 20
+      },
+      "f1": 0.7092198581560284,
+      "evaluation_error": ""
+    },
+    {
+      "document_id": "D001",
+      "condition": "multi_efficient",
+      "run_id": "228f8d258152-ab53f20cf7e65c37b3abbc83c947bb90",
+      "status": "failed",
+      "failure_message": "Need 12497 tokens; 10898 remain.",
+      "budget_tokens": 189102,
+      "phases": {
+        "generation": 189102
+      },
+      "stages": {
+        "generation/scout": 24054,
+        "generation/source_audit": 17051,
+        "generation/curator": 30513,
+        "generation/test_writer": 52087,
+        "generation/critic": 65397,
+        "generation/repair": 0
+      },
+      "call_statuses": {
+        "completed": 32,
+        "blocked": 1
+      },
+      "estimated_tokens": 0,
+      "artifact_counts": {
+        "requirements": 92,
+        "scenarios": 93,
+        "test_cases": 93
+      },
+      "f1": null,
+      "evaluation_error": ""
+    }
+  ],
+  "prior_spent_tokens": 1092824,
+  "validation_spent_tokens": 253622,
+  "total_spent_tokens": 1346446,
+  "remaining_authorized_tokens": 253554,
+  "recorded_trials": 2,
+  "planned_trials": 2,
+  "stopped_by_gate": null,
+  "quality_preservation": "Not established by development trials; held-out comparisons and independent human reviews remain required."
+}

@@ -1,0 +1,397 @@
+{
+  "source_run": "228f8d258152-b992e6e7f67752d1980370f383c70209",
+  "results_sha256": "f44f5abdca15726478a0faf4d29283bf9c9143edcf4b2c396a7fbbb5f488ee48",
+  "implementation": {
+    "source_sha256": {
+      "runner.py": "8af84790e6581bc6816ddd544d93f954202de5e83a49c998688e1bbbc9d805cf",
+      "pipelines.py": "6d79c5a6133bf8c676ab5a826169928ca6c4454f70c75942e107064142f11a03",
+      "prompts.py": "42151de48de07ee9bda420903f122ceac45623c5991e27565c63e69cf467ecdf",
+      "providers.py": "c53ebf1b627eb98aae79788bb96fef765f784447ee889f5a9133a7eb31d67e33",
+      "documents.py": "a1d9aca9e59d19f0dc4d14235f975dad83766952c5bba04612fe52685f4b6aaf",
+      "models.py": "4e4db7f8c7b29b1263b547cd90e7278e9973d5fe08a62279faa86a7f4b752c72",
+      "coverage.py": "998675c48b6ae9706a6ad38acf8dca125893ae3d70b0d58595b7a5a50900d66d",
+      "validation.py": "20f414af71541e189fcd69d8974d2adaced1b5bb91a9964e1b2553b6f4ed0a59",
+      "evidence.py": "aac1c221f4a84b91fe38ed40f5e64168768593fd75d42e1843f46ac900fb71b0",
+      "efficient.py": "5547f5968970d76c3f9d4c36ba39d36458b381f8e2be5e0c50daf105eb0e9141",
+      "evaluation.py": "d1ff55c7a0c8ed39034520d847e32c0825aa4a8f4cc164703123e04faafc80da",
+      "benchmark.py": "76b0be1b05bf09cc5ee817cd30a7f9b78626fccae1a1a3edbd6cb02a34fbd70b",
+      "storage.py": "3dbb38e46c5df5c138325b2dfaa08618278a86bf39767da27a74517f569e21ad",
+      "schema.sql": "88932b3571aeab596fcc203ca9bbdeb0e7351d6bf3d2f4154ba45dd169d3168b"
+    },
+    "dependencies": {
+      "google-genai": "2.19.0",
+      "pydantic": "2.13.4",
+      "pypdf": "6.16.2",
+      "psycopg": "3.3.4"
+    }
+  },
+  "paid_calls": 0,
+  "measured": {
+    "v9": {
+      "initial_tasks": 10,
+      "request_characters": 381676,
+      "largest_bounded_request": 47696,
+      "global_index_characters": 110400,
+      "tasks": [
+        {
+          "task_index": 0,
+          "requirement_ids": [
+            "REQ-001",
+            "REQ-002",
+            "REQ-003",
+            "REQ-004",
+            "REQ-005",
+            "REQ-006",
+            "REQ-007",
+            "REQ-008",
+            "REQ-009",
+            "REQ-010",
+            "REQ-011",
+            "REQ-012"
+          ],
+          "request_characters": 38908,
+          "bounded_characters": 43457,
+          "global_index_characters": 11040
+        },
+        {
+          "task_index": 3,
+          "requirement_ids": [
+            "REQ-013",
+            "REQ-014",
+            "REQ-015",
+            "REQ-016",
+            "REQ-017",
+            "REQ-018",
+            "REQ-019",
+            "REQ-020",
+            "REQ-021",
+            "REQ-022",
+            "REQ-023"
+          ],
+          "request_characters": 42672,
+          "bounded_characters": 47696,
+          "global_index_characters": 11040
+        },
+        {
+          "task_index": 6,
+          "requirement_ids": [
+            "REQ-024",
+            "REQ-025",
+            "REQ-026",
+            "REQ-027",
+            "REQ-028",
+            "REQ-029",
+            "REQ-030",
+            "REQ-031",
+            "REQ-032",
+            "REQ-033",
+            "REQ-034"
+          ],
+          "request_characters": 40568,
+          "bounded_characters": 44953,
+          "global_index_characters": 11040
+        },
+        {
+          "task_index": 9,
+          "requirement_ids": [
+            "REQ-035",
+            "REQ-036",
+            "REQ-037",
+            "REQ-038",
+            "REQ-039",
+            "REQ-040",
+            "REQ-041",
+            "REQ-042",
+            "REQ-043",
+            "REQ-044"
+          ],
+          "request_characters": 41111,
+          "bounded_characters": 45892,
+          "global_index_characters": 11040
+        },
+        {
+          "task_index": 12,
+          "requirement_ids": [
+            "REQ-045",
+            "REQ-046",
+            "REQ-047",
+            "REQ-048",
+            "REQ-049",
+            "REQ-050",
+            "REQ-051",
+            "REQ-052",
+            "REQ-053",
+            "REQ-054",
+            "REQ-055"
+          ],
+          "request_characters": 42297,
+          "bounded_characters": 47301,
+          "global_index_characters": 11040
+        },
+        {
+          "task_index": 15,
+          "requirement_ids": [
+            "REQ-056",
+            "REQ-057",
+            "REQ-058",
+            "REQ-059",
+            "REQ-060",
+            "REQ-061",
+            "REQ-062",
+            "REQ-063",
+            "REQ-064",
+            "REQ-065"
+          ],
+          "request_characters": 42761,
+          "bounded_characters": 47566,
+          "global_index_characters": 11040
+        },
+        {
+          "task_index": 18,
+          "requirement_ids": [
+            "REQ-066",
+            "REQ-067",
+            "REQ-068",
+            "REQ-069",
+            "REQ-070",
+            "REQ-071",
+            "REQ-072",
+            "REQ-073",
+            "REQ-074",
+            "REQ-075",
+            "REQ-076",
+            "REQ-077"
+          ],
+          "request_characters": 39110,
+          "bounded_characters": 43644,
+          "global_index_characters": 11040
+        },
+        {
+          "task_index": 21,
+          "requirement_ids": [
+            "REQ-078",
+            "REQ-079",
+            "REQ-080",
+            "REQ-081",
+            "REQ-082",
+            "REQ-083",
+            "REQ-084",
+            "REQ-085",
+            "REQ-086",
+            "REQ-087",
+            "REQ-088",
+            "REQ-089"
+          ],
+          "request_characters": 34783,
+          "bounded_characters": 39222,
+          "global_index_characters": 11040
+        },
+        {
+          "task_index": 24,
+          "requirement_ids": [
+            "REQ-090",
+            "REQ-091",
+            "REQ-092",
+            "REQ-093",
+            "REQ-094",
+            "REQ-095",
+            "REQ-096",
+            "REQ-097",
+            "REQ-098"
+          ],
+          "request_characters": 40579,
+          "bounded_characters": 45282,
+          "global_index_characters": 11040
+        },
+        {
+          "task_index": 27,
+          "requirement_ids": [
+            "REQ-099"
+          ],
+          "request_characters": 18887,
+          "bounded_characters": 22153,
+          "global_index_characters": 11040
+        }
+      ]
+    },
+    "v10": {
+      "initial_tasks": 6,
+      "request_characters": 233983,
+      "largest_bounded_request": 47898,
+      "global_index_characters": 44610,
+      "tasks": [
+        {
+          "task_index": 0,
+          "requirement_ids": [
+            "REQ-001",
+            "REQ-002",
+            "REQ-003",
+            "REQ-004",
+            "REQ-005",
+            "REQ-006",
+            "REQ-007",
+            "REQ-008",
+            "REQ-009",
+            "REQ-010",
+            "REQ-011",
+            "REQ-012",
+            "REQ-013",
+            "REQ-014",
+            "REQ-015",
+            "REQ-016",
+            "REQ-017",
+            "REQ-018",
+            "REQ-019"
+          ],
+          "request_characters": 41720,
+          "bounded_characters": 46876,
+          "global_index_characters": 7435
+        },
+        {
+          "task_index": 3,
+          "requirement_ids": [
+            "REQ-020",
+            "REQ-021",
+            "REQ-022",
+            "REQ-023",
+            "REQ-024",
+            "REQ-025",
+            "REQ-026",
+            "REQ-027",
+            "REQ-028",
+            "REQ-029",
+            "REQ-030",
+            "REQ-031",
+            "REQ-032",
+            "REQ-033",
+            "REQ-034",
+            "REQ-035"
+          ],
+          "request_characters": 42749,
+          "bounded_characters": 47740,
+          "global_index_characters": 7435
+        },
+        {
+          "task_index": 6,
+          "requirement_ids": [
+            "REQ-036",
+            "REQ-037",
+            "REQ-038",
+            "REQ-039",
+            "REQ-040",
+            "REQ-041",
+            "REQ-042",
+            "REQ-043",
+            "REQ-044",
+            "REQ-045",
+            "REQ-046",
+            "REQ-047",
+            "REQ-048",
+            "REQ-049",
+            "REQ-050"
+          ],
+          "request_characters": 42708,
+          "bounded_characters": 47898,
+          "global_index_characters": 7435
+        },
+        {
+          "task_index": 9,
+          "requirement_ids": [
+            "REQ-051",
+            "REQ-052",
+            "REQ-053",
+            "REQ-054",
+            "REQ-055",
+            "REQ-056",
+            "REQ-057",
+            "REQ-058",
+            "REQ-059",
+            "REQ-060",
+            "REQ-061",
+            "REQ-062",
+            "REQ-063",
+            "REQ-064",
+            "REQ-065",
+            "REQ-066",
+            "REQ-067",
+            "REQ-068",
+            "REQ-069",
+            "REQ-070"
+          ],
+          "request_characters": 41805,
+          "bounded_characters": 46649,
+          "global_index_characters": 7435
+        },
+        {
+          "task_index": 12,
+          "requirement_ids": [
+            "REQ-071",
+            "REQ-072",
+            "REQ-073",
+            "REQ-074",
+            "REQ-075",
+            "REQ-076",
+            "REQ-077",
+            "REQ-078",
+            "REQ-079",
+            "REQ-080",
+            "REQ-081",
+            "REQ-082",
+            "REQ-083",
+            "REQ-084",
+            "REQ-085",
+            "REQ-086",
+            "REQ-087",
+            "REQ-088",
+            "REQ-089",
+            "REQ-090",
+            "REQ-091",
+            "REQ-092",
+            "REQ-093"
+          ],
+          "request_characters": 42766,
+          "bounded_characters": 47759,
+          "global_index_characters": 7435
+        },
+        {
+          "task_index": 15,
+          "requirement_ids": [
+            "REQ-094",
+            "REQ-095",
+            "REQ-096",
+            "REQ-097",
+            "REQ-098",
+            "REQ-099"
+          ],
+          "request_characters": 22235,
+          "bounded_characters": 25837,
+          "global_index_characters": 7435
+        }
+      ]
+    }
+  },
+  "evaluator": {
+    "v6": {
+      "initial_tasks": 18,
+      "request_characters": 565338,
+      "all_test_unit_pairs_verified": 9555,
+      "largest_request_characters": 35492
+    },
+    "v7": {
+      "initial_tasks": 3,
+      "request_characters": 177048,
+      "all_test_unit_pairs_verified": 9555,
+      "largest_request_characters": 68524
+    }
+  },
+  "request_character_reduction": 0.38695909619677427,
+  "checks": [
+    "All scoped artifacts reconstruct exactly, including differences between a test and its scenario.",
+    "Every requirement remains assigned and each batch retains the complete requirement index.",
+    "All requests fit the unchanged 48,000-character bound. Full relevant source rendering is unchanged."
+  ],
+  "limitations": [
+    "Characters and planned initial calls, not measured model-token savings or semantic quality.",
+    "This fixed-draft replay excludes generated findings, repairs and independent evaluation."
+  ]
+}
