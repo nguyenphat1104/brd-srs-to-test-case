@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
+import re
 
 import pytest
 import streamlit as st
@@ -517,10 +518,9 @@ def test_runs_home_shows_run_item_list_without_global_settings() -> None:
     assert docs_link.url == "/app/static/system-and-coverage.html"
     text = _rendered_text(at)
     assert not at.dataframe
-    assert {button.label for button in at.button} >= {
-        "Open interrupted.pdf",
-        "Open sample.pdf",
-    }
+    assert 'href="/?run=interrupted-run"' in text
+    assert "Open interrupted.pdf" in text
+    assert "Open sample.pdf" in text
     for expected in (
         "interrupted.pdf",
         "sample.pdf",
@@ -767,7 +767,9 @@ def test_selecting_a_run_loads_detail_once_and_back_returns_home() -> None:
     at = _app_test(repository)
     at.run()
 
-    _element_starting(at.button, f"Open {result.manifest.source_filename}").click()
+    assert f'href="/?run={result.manifest.run_id}"' in _rendered_text(at)
+    at = _app_test(repository)
+    at.query_params["run"] = result.manifest.run_id
     at.run()
 
     assert repository.load_calls == [result.manifest.run_id]
@@ -787,7 +789,9 @@ def test_clicking_a_test_case_item_opens_detail_modal_once() -> None:
     at = _app_test(repository)
     at.run()
 
-    _element_starting(at.button, f"Open {result.manifest.source_filename}").click()
+    assert f'href="/?run={result.manifest.run_id}"' in _rendered_text(at)
+    at = _app_test(repository)
+    at.query_params["run"] = result.manifest.run_id
     at.run()
 
     _element(at.button, "Open test case TC-001 detail").click()
@@ -848,7 +852,9 @@ def test_selecting_a_run_uses_the_displayed_row_snapshot() -> None:
     at = _app_test(repository)
     at.run()
 
-    _element_starting(at.button, f"Open {intended.manifest.source_filename}").click()
+    assert f'href="/?run={intended.manifest.run_id}"' in _rendered_text(at)
+    at = _app_test(repository)
+    at.query_params["run"] = intended.manifest.run_id
     at.run()
 
     assert repository.load_calls == [intended.manifest.run_id]
@@ -871,7 +877,7 @@ def test_list_error_is_safe_actionable_and_create_remains_available() -> None:
     assert _element(at.button, "Create new run")
 
 
-def test_missing_selected_run_returns_home_with_safe_error() -> None:
+def test_missing_selected_run_keeps_link_with_safe_error() -> None:
     result = _detailed_run()
     repository = FakeRepository(
         runs=[_history_item(result)],
@@ -886,11 +892,11 @@ def test_missing_selected_run_returns_home_with_safe_error() -> None:
     text = _rendered_text(at)
     assert not at.exception
     assert repository.load_calls == [result.manifest.run_id]
-    assert at.session_state["view"] == "runs"
+    assert at.session_state["view"] == "detail"
     assert "Saved run could not be opened" in text
     assert "DATABASE_URL" in text
     assert "load-secret" not in text
-    assert _element(at.button, "Create new run")
+    assert _element(at.button, "Back to runs")
 
 
 def test_database_initialization_failure_remains_blocking() -> None:
@@ -925,12 +931,10 @@ def test_completed_detail_groups_artifacts_and_configuration() -> None:
     assert headings.index("#### Test cases") < headings.index("#### Requirements")
     assert headings.index("#### Requirements") < headings.index("#### Scenarios")
     assert [tab.label for tab in at.tabs] == [
-        "Test cases (1)",
-        "Requirements (1)",
-        "Scenarios (1)",
-        "Run configuration",
+        "Results", "Test cases (1)", "Requirements (1)", "Scenarios (1)",
+        "Quality", "Human review", "Tokens & activity", "Run configuration",
     ]
-    assert headings.index("### Quality and traceability") < headings.index(
+    assert headings.index("### Quality and traceability") > headings.index(
         "### Generated artifacts"
     )
     assert not any(toggle.label == "Show quality details" for toggle in at.toggle)
@@ -965,7 +969,7 @@ def test_completed_detail_groups_artifacts_and_configuration() -> None:
         f"detail-{result.manifest.run_id}-rtm",
         f"detail-{result.manifest.run_id}-bundle",
     }
-    assert _element(at.metric, "Budget-accounted tokens").value == "30"
+    assert _element(at.metric, "Workflow tokens").value == "30"
     assert "Latency 0.10 s · 0 retries" in text
     assert "Citation coverage" in text
     assert "Positive scenario coverage" in text
@@ -1284,7 +1288,7 @@ def test_failed_result_without_metrics_has_an_actionable_summary() -> None:
     assert "### Coverage analysis (F1)" in [item.value for item in at.markdown]
     assert _element(at.metric, "F1 Score").value == "—"
     assert "did not finish judge analysis" in text
-    assert [tab.label for tab in at.tabs] == ["Run configuration"]
+    assert [tab.label for tab in at.tabs] == ["Results", "Quality", "Human review", "Tokens & activity", "Run configuration"]
     snapshot = next(
         table.value
         for table in at.table
@@ -1312,7 +1316,7 @@ def test_run_list_paginates_ten_items_at_a_time() -> None:
     at.run()
 
     assert "Page 1 of 2 · 12 runs" in _rendered_text(at)
-    assert {button.label for button in at.button if button.label.startswith("Open ")} == {
+    assert set(re.findall(r'>((?:Open )[^<]+)</a>', _rendered_text(at))) == {
         f"Open suite-{index:02d}.pdf" for index in range(10)
     }
     assert _element(at.button, "Previous").disabled
@@ -1320,7 +1324,7 @@ def test_run_list_paginates_ten_items_at_a_time() -> None:
     at.run()
 
     assert "Page 2 of 2 · 12 runs" in _rendered_text(at)
-    assert {button.label for button in at.button if button.label.startswith("Open ")} == {
+    assert set(re.findall(r'>((?:Open )[^<]+)</a>', _rendered_text(at))) == {
         "Open suite-10.pdf",
         "Open suite-11.pdf",
     }
@@ -1362,7 +1366,7 @@ def test_interrupted_result_has_diagnostics_without_a_fake_failure() -> None:
     assert "Unknown failure" not in text
     assert "Technical details" not in text
     assert "Diagnostics and next steps" in text
-    assert [tab.label for tab in at.tabs] == ["Run configuration"]
+    assert [tab.label for tab in at.tabs] == ["Results", "Quality", "Human review", "Tokens & activity", "Run configuration"]
     assert not at.error
     assert not at.success
     assert at.warning
@@ -1772,3 +1776,71 @@ def test_invalid_run_settings_stay_in_settings_without_running(monkeypatch) -> N
     assert at.session_state["create_step"] == 2
     assert "Gemini API key is required." in _rendered_text(at)
     assert "Gemini API key" not in {item.label for item in at.text_input}
+
+
+def test_run_urls_are_public_links_and_invalid_ids_never_reach_storage(monkeypatch):
+    monkeypatch.setenv("RUN_PATH_ROUTING", "1")
+    result = _detailed_run()
+    repo = FakeRepository(runs=[_history_item(result)], results={result.manifest.run_id: result})
+    at = _app_test(repo).run()
+    assert f'href="/run/{result.manifest.run_id}" target="_top"' in _rendered_text(at)
+    for invalid in ("../secret", "<script>", "x" * 161):
+        linked = _app_test(repo)
+        linked.query_params["run"] = invalid
+        linked.run()
+        assert not linked.exception
+        assert "This run link is invalid" in _rendered_text(linked)
+    assert repo.load_calls == []
+
+
+def test_saved_run_url_reloads_independently_and_back_clears_route():
+    result = _detailed_run()
+    repo = FakeRepository(results={result.manifest.run_id: result})
+    for _ in range(2):
+        at = _app_test(repo)
+        at.query_params["run"] = result.manifest.run_id
+        at.run()
+        assert not at.exception
+        assert at.title[0].value == result.manifest.source_filename
+        at.run()
+    assert repo.load_calls == [result.manifest.run_id] * 2
+    _element(at.button, "Back to runs").click().run()
+    assert "run" not in at.query_params
+    assert at.session_state["view"] == "runs"
+
+
+def test_artifact_search_and_pagination_keep_all_items_accessible():
+    result = _detailed_run()
+    base = result.bundle.test_cases[0]
+    result.bundle.test_cases = [base.model_copy(update={
+        "test_case_id": f"TC-{number:03d}", "title": f"Unique behavior {number}"
+    }) for number in range(1, 26)]
+    at = _app_test()
+    _show_detail(at, result)
+    at.run()
+    def visible_cases():
+        return [button.label for button in at.button if button.label.startswith("Open test case")]
+    assert len(visible_cases()) == 12
+    _element(at.selectbox, "Test Cases page").set_value(3).run()
+    assert visible_cases() == ["Open test case TC-025 detail"]
+    _element(at.text_input, "Search test cases").set_value("Unique behavior 24").run()
+    assert visible_cases() == ["Open test case TC-024 detail"]
+    _element(at.button, "Open test case TC-024 detail").click().run()
+    assert "TC-024 · Unique behavior 24" in _rendered_text(at)
+    _element(at.text_input, "Search test cases").set_value("no match").run()
+    assert not visible_cases()
+    assert "No matching items" in _rendered_text(at)
+
+
+def test_workflow_tokens_separate_current_and_inherited_usage():
+    from brd_srs_testgen.models import RunDiagnostics
+    result = _detailed_run()
+    result.diagnostics = RunDiagnostics(recovery_parent_id="earlier-run", inherited_budget_tokens=200)
+    at = _app_test()
+    _show_detail(at, result)
+    at.run()
+    assert _element(at.metric, "This attempt").value == "30"
+    assert _element(at.metric, "Earlier attempts").value == "200"
+    assert _element(at.metric, "Workflow total").value == "230"
+    assert _element(at.metric, "Workflow tokens").value == "230"
+    assert 'href="/?run=earlier-run"' in _rendered_text(at)

@@ -1,4 +1,20 @@
 services:
+  web:
+    image: nginx:1.28-alpine
+    ports:
+      - 127.0.0.1:8501:80
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/_stcore/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   app:
     build: .
     env_file:
@@ -6,8 +22,7 @@ services:
     environment:
       DATABASE_URL: postgresql://brd_srs:brd_srs_local@db:5432/brd_srs
       LLAMA_CPP_BASE_URL: ${LLAMA_CPP_BASE_URL:-http://host.docker.internal:8081/v1}
-    ports:
-      - 127.0.0.1:8501:8501
+      RUN_PATH_ROUTING: "1"
     depends_on:
       db:
         condition: service_healthy

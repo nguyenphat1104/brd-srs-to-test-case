@@ -6,6 +6,14 @@ Research core for generating traceable test cases from a BRD or SRS.
 
 ## Research core quick start
 
+For the complete UI, including shareable `/run/<run-id>` URLs, run
+`docker compose up -d --build --wait` and open <http://localhost:8501>.
+The small Nginx gateway serves a same-origin run frame because Streamlit does
+not support nested page paths. Refresh, browser history, and saved links load
+the run from PostgreSQL. Running Streamlit directly as below uses `/?run=<id>`
+links instead. Results are searchable and paginated; automated quality, human
+review, token accounting, and configuration have separate tabs.
+
 Create `.env` only when it does not already exist; preserve existing local credentials and settings.
 
 ```sh

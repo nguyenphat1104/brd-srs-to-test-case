@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,7 @@ SINGLE_DEFAULT_MODEL = "gemini-3.5-flash"
 STAGED_DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_TOKEN_CEILING = 200_000
 RUNS_PER_PAGE = 10
+ARTIFACTS_PER_PAGE = 12
 GEMINI_THINKING_LEVELS = ("minimal", "low", "medium", "high")
 QUALITY_DIMENSION_LABELS = {
     HumanRatingDimension.COVERAGE: "Coverage",
@@ -322,6 +324,38 @@ def _apply_theme() -> None:
         .stDownloadButton > button {
             min-height: 2.75rem;
             border-radius: 0.65rem;
+        }
+        .run-link {
+            display: inline-flex; align-items: center; min-height: 44px;
+            padding: 0.5rem 0.9rem; border: 1px solid var(--color-border);
+            border-radius: 0.65rem; background: white; color: var(--color-accent-strong);
+            font-weight: 600; text-decoration: none;
+        }
+        .run-link:hover { background: var(--color-accent-soft); }
+        a:focus-visible, [role="tab"]:focus-visible {
+            outline: 3px solid var(--color-focus); outline-offset: 3px;
+        }
+        [data-baseweb="tab-list"] { gap: 1.25rem; overflow-x: auto; }
+        [data-baseweb="tab"] { min-height: 48px; white-space: nowrap; }
+        h1 { font-size: clamp(1.75rem, 3vw, 2.25rem) !important; }
+        [data-testid="stMetricValue"] { font-size: clamp(1.5rem, 3vw, 2.2rem); }
+        [class*="-run-summary"] [data-testid="stMetric"] { height: 7.75rem; }
+        [class*="-run-summary"] [data-testid="stMetricLabel"] p {
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }
+        @media (max-width: 640px) {
+            [class*="-run-summary"] [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+            [class*="-run-summary"] [data-testid="stColumn"] {
+                flex: 1 1 calc(50% - 0.5rem) !important;
+                min-width: calc(50% - 0.5rem) !important;
+            }
+            [class*="-run-summary"] [data-testid="stMetric"] { height: 7rem; padding: 0.65rem; }
+        }
+        @media (max-width: 640px) {
+            [data-testid="stMainBlockContainer"] { padding-inline: 1rem; }
+            [data-testid="stMetric"] { min-height: 5.5rem; }
         }
         /* ---------- App bar ---------- */
         .app-bar {
@@ -1264,6 +1298,8 @@ def _render_agent_blackboard(result: RunResult) -> None:
         st.caption(f"Repair occurred · routed to {role}")
     elif critic is None:
         st.caption("Repair not reached in this trace.")
+    elif "resolved_finding_ids" in critic.output:
+        st.caption("Repair verification recorded · see the saved findings above.")
     elif critic.output.get("accepted") is True:
         st.caption("Repair not required · Critic accepted the bundle.")
     else:
@@ -1390,7 +1426,7 @@ def _quality_chart_html(metrics: RunMetrics) -> str:
     )
     weakest_name, weakest_value = measures[0]
     summary = (
-        "All quality measures are at 100%."
+        "All internal traceability checks are at 100%."
         if weakest_value == 1
         else f"Priority: {weakest_name} is {weakest_value:.0%}. Target: 100%."
     )
@@ -1518,6 +1554,26 @@ def _scenario_dialog(scenario) -> None:
     _render_scenario_detail(scenario)
 
 
+def _artifact_page(items, *, label: str, key: str):
+    query = st.text_input(
+        f"Search {label}", placeholder="Search by title, ID, or source text",
+        key=f"{key}-search",
+    ).strip().casefold()
+    matches = [(index, item) for index, item in enumerate(items)
+               if not query or query in item.model_dump_json().casefold()]
+    if not matches:
+        st.info("No matching items. Try another search or clear the search field.")
+        return []
+    pages = (len(matches) + ARTIFACTS_PER_PAGE - 1) // ARTIFACTS_PER_PAGE
+    page = st.selectbox(
+        f"{label.title()} page", range(1, pages + 1),
+        key=f"{key}-page", format_func=lambda value: f"Page {value} of {pages}",
+    ) if pages > 1 else 1
+    start = (page - 1) * ARTIFACTS_PER_PAGE
+    st.caption(f"Showing {start + 1}–{min(start + ARTIFACTS_PER_PAGE, len(matches))} of {len(matches)} {label}")
+    return matches[start:start + ARTIFACTS_PER_PAGE]
+
+
 def _render_test_cases(
     result: RunResult, *, key_prefix: str, in_dialog: bool = False
 ) -> None:
@@ -1526,7 +1582,10 @@ def _render_test_cases(
 
     st.markdown("#### Test cases")
     selected_case = None
-    for position, test_case in enumerate(bundle.test_cases):
+    for position, test_case in _artifact_page(
+        bundle.test_cases, label="test cases",
+        key=f"{key_prefix}-{result.manifest.run_id}-test_cases",
+    ):
         if _render_artifact_item(
             item_type="test case",
             item_id=test_case.test_case_id,
@@ -1563,7 +1622,10 @@ def _render_requirements(
 
     st.markdown("#### Requirements")
     selected_requirement = None
-    for position, requirement in enumerate(bundle.requirements):
+    for position, requirement in _artifact_page(
+        bundle.requirements, label="requirements",
+        key=f"{key_prefix}-{result.manifest.run_id}-requirements",
+    ):
         if _render_artifact_item(
             item_type="requirement",
             item_id=requirement.requirement_id,
@@ -1599,7 +1661,10 @@ def _render_scenarios(
 
     st.markdown("#### Scenarios")
     selected_scenario = None
-    for position, scenario in enumerate(bundle.scenarios):
+    for position, scenario in _artifact_page(
+        bundle.scenarios, label="scenarios",
+        key=f"{key_prefix}-{result.manifest.run_id}-scenarios",
+    ):
         if _render_artifact_item(
             item_type="scenario",
             item_id=scenario.scenario_id,
@@ -1660,41 +1725,15 @@ def _render_coverage(
     columns[2].metric("Recall", f"{coverage.recall:.2f}")
     columns[3].metric("Coverage units", coverage.total_coverage_units)
 
-    chart_column, composition_column = st.columns(2)
-    with chart_column:
-        st.markdown("**Score breakdown**")
-        st.bar_chart(
-            {
-                "Score": [coverage.precision, coverage.recall, coverage.f1],
-            },
-            y="Score",
-            x_label="Measure",
-            y_label="Score (0–1)",
-            color="#2563eb",
-            horizontal=True,
-            height=220,
-        )
-    with composition_column:
-        st.markdown("**Mapping composition**")
-        st.bar_chart(
-            {
-                "Count": [
-                    coverage.true_positive_count,
-                    coverage.false_positive_count,
-                    coverage.false_negative_count,
-                ],
-            },
-            y="Count",
-            x_label="Category",
-            y_label="Artifacts",
-            color="#2563eb",
-            horizontal=True,
-            height=220,
-        )
     st.caption(
-        "Scores: precision, recall, F1. "
-        "Composition: true positives (mapped test cases), "
-        "false positives (unmapped test cases), false negatives (uncovered units)."
+        "Precision: share of tests mapped to a source coverage unit. "
+        "Recall: share of source units covered by at least one test. "
+        "F1: the harmonic mean of precision and recall. These are automated judge scores."
+    )
+    st.info(
+        f"{coverage.true_positive_count} mapped tests · "
+        f"{coverage.false_positive_count} unmapped tests · "
+        f"{coverage.false_negative_count} uncovered source units"
     )
 
     with st.expander(
@@ -1957,6 +1996,9 @@ def _render_human_ratings(
         st.error("Human ratings could not be loaded. Check the database and retry.")
         return
 
+    reviewer_count = len({item.rater_id for item in ratings})
+    if reviewer_count < 2:
+        st.info(f"Human review pending · {reviewer_count} of 2 reviewers have submitted ratings.")
     if ratings:
         st.dataframe(
             [
@@ -2053,12 +2095,11 @@ def _render_bundle(
         return
 
     st.markdown("### Generated artifacts")
-    test_cases, requirements, scenarios, configuration = st.tabs(
+    test_cases, requirements, scenarios = st.tabs(
         [
             f"Test cases ({len(bundle.test_cases)})",
             f"Requirements ({len(bundle.requirements)})",
             f"Scenarios ({len(bundle.scenarios)})",
-            "Run configuration",
         ]
     )
     with test_cases:
@@ -2067,8 +2108,6 @@ def _render_bundle(
         _render_requirements(result, key_prefix=key_prefix, in_dialog=in_dialog)
     with scenarios:
         _render_scenarios(result, key_prefix=key_prefix, in_dialog=in_dialog)
-    with configuration:
-        _render_snapshot(result)
 
 
 def _render_snapshot(result: RunResult) -> None:
@@ -2150,6 +2189,58 @@ def _settings_for_recovery(result: RunResult) -> ProviderSettings:
     )
 
 
+def _current_tokens(result: RunResult) -> int | None:
+    if result.call_attempts:
+        return sum(call.budget_tokens for call in result.call_attempts)
+    if result.metrics is not None:
+        return result.metrics.charged_tokens or result.metrics.input_tokens + result.metrics.output_tokens
+    return None
+
+
+def _render_token_usage(result: RunResult) -> None:
+    st.markdown("### Token usage")
+    current = _current_tokens(result)
+    inherited = result.diagnostics.inherited_budget_tokens if result.diagnostics else 0
+    columns = st.columns(3)
+    columns[0].metric("This attempt", f"{current:,}" if current is not None else "—")
+    columns[1].metric("Earlier attempts", f"{inherited:,}")
+    columns[2].metric("Workflow total", f"{current + inherited:,}" if current is not None else "—")
+    st.caption("Workflow total = this attempt + recorded earlier attempts. Totals accumulate across API calls; they are not the context size of one request. Budget accounting can include estimates and is not a billing invoice.")
+    if result.diagnostics and result.diagnostics.recovery_parent_id:
+        parent = result.diagnostics.recovery_parent_id
+        _run_link(parent, "Open previous attempt")
+        st.caption(f"{result.diagnostics.reused_tasks} tasks reused through checkpoint recovery on this attempt.")
+    if not result.call_attempts:
+        st.info("Legacy aggregate usage: no per-call or phase breakdown was recorded for this run." if result.metrics else "Token usage was not recorded for this attempt.")
+    if result.call_attempts:
+        st.table([
+            {"Phase": phase.title(), "Calls": len(calls),
+             "Accounted tokens": f"{sum(call.budget_tokens for call in calls):,}",
+             "Estimated tokens": f"{sum(call.estimated_tokens for call in calls):,}"}
+            for phase in ("generation", "catalog", "evaluation")
+            if (calls := [call for call in result.call_attempts if call.phase == phase])
+        ])
+        with st.expander("Token usage by phase and call"):
+            st.caption("Totals are cumulative across requests, not the context size of one request. Budget accounting includes estimates for calls whose usage was unavailable. Provider totals are authoritative; reasoning and cache details remain in raw usage metadata.")
+            rows = []
+            for phase in ("generation", "catalog", "evaluation"):
+                calls = [c for c in result.call_attempts if c.phase == phase]
+                rows.append({"Phase": phase, "Calls": len(calls),
+                             "Provider reported total": sum(c.reported_total_tokens or 0 for c in calls),
+                             "Unknown totals": sum(c.reported_total_tokens is None for c in calls),
+                             "Failed/blocked calls": sum(c.status != "completed" for c in calls),
+                             "Failed call budget tokens": sum(c.budget_tokens for c in calls if c.status != "completed"),
+                             "Max observed input": max((c.input_tokens for c in calls if c.input_tokens is not None), default=None),
+                             "Budget accounted": sum(c.budget_tokens for c in calls),
+                             "Estimated": sum(c.estimated_tokens for c in calls)})
+            st.table(rows)
+            st.dataframe([{"Phase": c.phase, "Stage": c.stage, "Task": c.task_index,
+                           "Attempt": c.attempt, "Model": c.model, "Status": c.status,
+                           "Input": c.input_tokens, "Output": c.output_tokens,
+                           "Reported total": c.reported_total_tokens, "Budget accounted": c.budget_tokens,
+                           "Finish reason": c.finish_reason} for c in result.call_attempts], hide_index=True)
+
+
 def _render_result(
     result: RunResult,
     repository: RunRepository,
@@ -2158,7 +2249,6 @@ def _render_result(
     in_dialog: bool = False,
 ) -> None:
     manifest = result.manifest
-    st.caption(f"Source · {manifest.source_filename}")
 
     if manifest.failure_category is not None or manifest.failure_message:
         category = _failure_name(manifest.failure_category)
@@ -2183,7 +2273,7 @@ def _render_result(
                 f"{key_prefix}-{manifest.run_id}-diagnostics",
             )
     elif manifest.status is RunStatus.COMPLETED:
-        st.success("Generation completed and passed deterministic validation.")
+        st.success("Generation complete · structural validation passed. Review quality and coverage before using the tests.")
     else:
         st.warning("Generation was interrupted. Review diagnostics before retrying.")
         with st.expander(
@@ -2219,50 +2309,18 @@ def _render_result(
                     st.error(str(error))
 
     metrics = result.metrics
-    if metrics is not None:
-        charged = metrics.charged_tokens
-        token_label = "Budget-accounted tokens" if charged else "Reported tokens"
-        token_value = charged or metrics.input_tokens + metrics.output_tokens
+    current_tokens = _current_tokens(result)
+    inherited_tokens = result.diagnostics.inherited_budget_tokens if result.diagnostics else 0
+    with st.container(key=f"{key_prefix}-run-summary"):
         columns = st.columns(4)
-        columns[0].metric("Requirements", metrics.requirement_count)
-        columns[1].metric("Scenarios", metrics.scenario_count)
-        columns[2].metric("Test cases", metrics.test_case_count)
-        columns[3].metric(token_label, f"{token_value:,}")
-
-    if not result.call_attempts and result.metrics is not None:
-        st.caption("Legacy aggregate usage: no per-call or phase breakdown was recorded for this run.")
-    if result.diagnostics is not None:
-        st.caption(f"Semantic review: {result.diagnostics.semantic_status.replace('_', ' ')}.")
-        if result.diagnostics.recovery_parent_id:
-            st.caption(f"Recovery of {result.diagnostics.recovery_parent_id} · {result.diagnostics.reused_tasks} reused tasks · {result.diagnostics.inherited_budget_tokens:,} tokens accounted in earlier attempts. Current-run tokens exclude inherited work.")
-        if result.diagnostics.source_dispositions:
-            with st.expander("Source coverage audit"):
-                st.dataframe(result.diagnostics.source_dispositions, hide_index=True)
-        if result.diagnostics.evaluation_error:
-            st.warning(f"Independent evaluation unavailable: {result.diagnostics.evaluation_error}")
-        if result.diagnostics.unresolved_findings:
-            with st.expander("Unresolved review findings"):
-                st.json([f.model_dump(mode="json") for f in result.diagnostics.unresolved_findings])
-    if result.call_attempts:
-        with st.expander("Token usage by phase and call"):
-            st.caption("Totals are cumulative across requests, not the context size of one request. Budget accounting includes estimates for calls whose usage was unavailable. Provider totals are authoritative; reasoning and cache details remain in raw usage metadata.")
-            rows = []
-            for phase in ("generation", "catalog", "evaluation"):
-                calls = [c for c in result.call_attempts if c.phase == phase]
-                rows.append({"Phase": phase, "Calls": len(calls),
-                             "Provider reported total": sum(c.reported_total_tokens or 0 for c in calls),
-                             "Unknown totals": sum(c.reported_total_tokens is None for c in calls),
-                             "Failed/blocked calls": sum(c.status != "completed" for c in calls),
-                             "Failed call budget tokens": sum(c.budget_tokens for c in calls if c.status != "completed"),
-                             "Max observed input": max((c.input_tokens for c in calls if c.input_tokens is not None), default=None),
-                             "Budget accounted": sum(c.budget_tokens for c in calls),
-                             "Estimated": sum(c.estimated_tokens for c in calls)})
-            st.table(rows)
-            st.dataframe([{"Phase": c.phase, "Stage": c.stage, "Task": c.task_index,
-                           "Attempt": c.attempt, "Model": c.model, "Status": c.status,
-                           "Input": c.input_tokens, "Output": c.output_tokens,
-                           "Reported total": c.reported_total_tokens, "Budget accounted": c.budget_tokens,
-                           "Finish reason": c.finish_reason} for c in result.call_attempts], hide_index=True)
+        columns[0].metric("Test cases", len(result.bundle.test_cases) if result.bundle else 0)
+        columns[1].metric("Requirements", len(result.bundle.requirements) if result.bundle else 0)
+        columns[2].metric("Scenarios", len(result.bundle.scenarios) if result.bundle else 0)
+        columns[3].metric(
+            "Workflow tokens", f"{current_tokens + inherited_tokens:,}" if current_tokens is not None else "—",
+            help="Budget-accounted tokens across this attempt and its recorded recovery ancestors. Includes estimates, not a billing invoice.",
+        )
+    st.caption("Start with the test cases below. Quality contains automated checks; human assessment is recorded separately.")
     if manifest.status is not RunStatus.COMPLETED and result.bundle is not None:
         st.warning("Draft artifacts retained. This run has not completed validation and review.")
         _download("Download draft bundle", result.download_bundle(), f"{manifest.run_id}-draft.json", f"{key_prefix}-{manifest.run_id}-draft")
@@ -2284,43 +2342,53 @@ def _render_result(
                 f"{key_prefix}-{manifest.run_id}-bundle",
             )
 
-    _render_agent_blackboard(result)
-
-    st.markdown("### Quality and traceability")
-    if manifest.status is RunStatus.COMPLETED and result.bundle is not None:
-        _render_human_ratings(
-            repository,
-            run_id=manifest.run_id,
-            key_prefix=key_prefix,
-        )
-    if metrics is not None:
-        st.markdown(_quality_chart_html(metrics), unsafe_allow_html=True)
-        st.caption(
-            f"Latency {metrics.latency_seconds:.2f} s · {metrics.retries} retries"
-        )
-    if result.coverage is not None or result.coverage_evaluation is not None:
-        agents = manifest.configuration.get("agents", {})
-        judge = agents.get("judge", {}) if isinstance(agents, dict) else {}
-        if isinstance(judge, dict):
-            model = judge.get("model")
-            if model:
-                st.caption(
-                    f"Independent judge · {_model_label(str(model))} · fixed"
-                )
-    _render_coverage_evidence(result, repository, key_prefix=key_prefix)
-    _render_coverage(
-        result.coverage,
-        result.coverage_evaluation,
-        key_prefix=key_prefix,
-        run_id=manifest.run_id,
+    artifacts, quality, human, activity, configuration = st.tabs(
+        ["Results", "Quality", "Human review", "Tokens & activity", "Run configuration"]
     )
-
-    if result.bundle is not None:
-        _render_bundle(result, key_prefix=key_prefix, in_dialog=in_dialog)
-    else:
-        (configuration,) = st.tabs(["Run configuration"])
-        with configuration:
-            _render_snapshot(result)
+    with artifacts:
+        if result.bundle is not None:
+            _render_bundle(result, key_prefix=key_prefix, in_dialog=in_dialog)
+        else:
+            st.info("No test cases were saved. Use the diagnostics above to decide the next step.")
+    with quality:
+        st.markdown("### Quality and traceability")
+        st.caption("Completed means structural validation passed. It does not mean all source behavior is covered or human quality has been approved.")
+        if result.diagnostics:
+            st.write(f"**Semantic review:** {result.diagnostics.semantic_status.replace('_', ' ')}")
+            if result.diagnostics.evaluation_error:
+                st.warning(f"Independent evaluation unavailable: {result.diagnostics.evaluation_error}")
+            if result.diagnostics.unresolved_findings:
+                with st.expander("Unresolved review findings"):
+                    st.json([f.model_dump(mode="json") for f in result.diagnostics.unresolved_findings])
+        _render_coverage(result.coverage, result.coverage_evaluation,
+                         key_prefix=key_prefix, run_id=manifest.run_id)
+        if metrics is not None:
+            with st.expander("Internal traceability checks"):
+                st.caption("These checks measure links within the generated suite, not completeness against the source document.")
+                st.markdown(_quality_chart_html(metrics), unsafe_allow_html=True)
+        with st.expander("Source coverage evidence"):
+            agents = manifest.configuration.get("agents", {})
+            judge = agents.get("judge", {}) if isinstance(agents, dict) else {}
+            if isinstance(judge, dict) and judge.get("model"):
+                st.caption(f"Independent judge · {_model_label(str(judge['model']))} · fixed")
+            _render_coverage_evidence(result, repository, key_prefix=key_prefix)
+            if result.diagnostics and result.diagnostics.source_dispositions:
+                st.markdown("**Source coverage audit**")
+                st.dataframe(result.diagnostics.source_dispositions, hide_index=True)
+    with human:
+        if manifest.status is RunStatus.COMPLETED and result.bundle is not None:
+            _render_human_ratings(repository, run_id=manifest.run_id, key_prefix=key_prefix)
+        else:
+            st.info("Human review becomes available after generation completes.")
+    with activity:
+        _render_token_usage(result)
+        if metrics is not None:
+            st.caption(f"Latency {metrics.latency_seconds:.2f} s · {metrics.retries} retries")
+        with st.expander("Agent log and saved outputs"):
+            st.caption("This log shows records stored on this attempt; earlier work may belong to a linked run.")
+            _render_agent_blackboard(result)
+    with configuration:
+        _render_snapshot(result)
 
 
 @st.dialog("Run result", width="large")
@@ -2344,6 +2412,7 @@ def _render_timeline_result_action(
         "</div>",
         unsafe_allow_html=True,
     )
+    _run_link(result.manifest.run_id, "Open run page")
     action = "View result" if completed else "View diagnostics"
     if st.button(
         action,
@@ -2354,7 +2423,36 @@ def _render_timeline_result_action(
         _result_dialog(result, repository)
 
 
+def _run_path(run_id: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,159}", run_id):
+        raise ValueError("Invalid run ID")
+    return f"/run/{run_id}"
+
+
+def _run_link(run_id: str, label: str) -> None:
+    path = _run_path(run_id)
+    if os.environ.get("RUN_PATH_ROUTING") != "1":
+        path = f"/?run={run_id}"
+    st.markdown(
+        f'<a class="run-link" href="{html.escape(path)}" target="_top">{html.escape(label)}</a>',
+        unsafe_allow_html=True,
+    )
+
+
+def _navigate_url(path: str) -> None:
+    # The gateway retains the public path while Streamlit runs at its supported root URL.
+    # With `streamlit run` alone, query links still work without redirecting to the gateway.
+    if os.environ.get("RUN_PATH_ROUTING") == "1":
+        st.html(
+            "<script>(() => {const path = " + json.dumps(path) + ";"
+            "if (window.top.location.pathname !== path) window.top.location.replace(path);})();</script>",
+            unsafe_allow_javascript=True,
+        )
+
+
 def _go_home() -> None:
+    st.query_params.pop("run", None)
+    st.session_state["navigate_to"] = "/"
     st.session_state["view"] = "runs"
     st.session_state.pop("selected_run_id", None)
     st.session_state.pop("selected_run", None)
@@ -2406,7 +2504,7 @@ def _run_item_html(item: RunHistoryItem) -> str:
         "<div><div class='run-list-item__label'>Created</div>"
         f"<div class='run-list-item__value'>{item.started_at.strftime('%Y-%m-%d %H:%M UTC')}</div></div>"
         "<div><div class='run-list-item__label'>Output</div>"
-        f"<div class='run-list-item__value'>{test_cases}</div></div>"
+        f"<div class='run-list-item__value'>{test_cases} · Run {html.escape(item.run_id[-8:])}</div></div>"
         "</div>"
         "</div>"
     )
@@ -2432,31 +2530,8 @@ def _render_runs(repository: RunRepository) -> None:
     except StorageError:
         runs = None
 
-    st.markdown(
-        "<div class='runs-hero'>"
-        "<div class='runs-hero__kicker'>Document to test cases</div>"
-        "<div class='runs-hero__title'>Turn a BRD or SRS into test cases</div>"
-        "<div class='runs-hero__sub'>"
-        "Add one PDF and get a test suite with requirements, scenarios, source "
-        "references, and coverage checks."
-        "</div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "<div class='simple-steps' aria-label='How it works'>"
-        "<div class='simple-step'><div class='simple-step__number'>1</div>"
-        "<div class='simple-step__title'>Add your PDF</div>"
-        "<div class='simple-step__detail'>Use a text-based BRD or SRS.</div></div>"
-        "<div class='simple-step'><div class='simple-step__number'>2</div>"
-        "<div class='simple-step__title'>Generate</div>"
-        "<div class='simple-step__detail'>We extract, organize, and check the coverage.</div></div>"
-        "<div class='simple-step'><div class='simple-step__number'>3</div>"
-        "<div class='simple-step__title'>Review or download</div>"
-        "<div class='simple-step__detail'>Open each test case or export the full bundle.</div></div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    st.title("Test runs")
+    st.caption("Open a saved test suite or generate one from a BRD/SRS document.")
     st.button(
         "Create new run",
         type="primary",
@@ -2478,6 +2553,11 @@ def _render_runs(repository: RunRepository) -> None:
         st.info("No test suites yet. Add your first PDF to get started.")
         return
 
+    query = st.text_input("Find a run", placeholder="Search by filename or run ID").strip().casefold()
+    runs = [item for item in runs if not query or query in f"{item.source_filename} {item.run_id}".casefold()]
+    if not runs:
+        st.info("No runs match this search. Clear the search to see all runs.")
+        return
     page_count = (len(runs) + RUNS_PER_PAGE - 1) // RUNS_PER_PAGE
     page = min(max(st.session_state.get("runs_page", 1), 1), page_count)
     st.session_state["runs_page"] = page
@@ -2487,12 +2567,8 @@ def _render_runs(repository: RunRepository) -> None:
     for item in runs[start : start + RUNS_PER_PAGE]:
         with st.container(border=True, key=f"run-item-{item.run_id}"):
             st.markdown(_run_item_html(item), unsafe_allow_html=True)
-            st.button(
-                f"Open {item.source_filename}",
-                key=f"open-run-{item.run_id}",
-                on_click=_open_run,
-                args=(item.run_id,),
-            )
+            _run_link(item.run_id, f"Open {item.source_filename}")
+
     if page_count > 1:
         previous, position, following = st.columns([1, 2, 1])
         previous.button(
@@ -3236,23 +3312,20 @@ def _render_create(repository: RunRepository) -> None:
 def _render_detail(repository: RunRepository) -> None:
     st.button("Back to runs", on_click=_go_home)
     run_id = st.session_state.get("selected_run_id")
-    if not isinstance(run_id, str) or not run_id:
-        _go_home()
-        st.session_state["flash_error"] = "Select a saved run to open its details."
-        st.rerun()
+    if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,159}", run_id):
+        st.error("This run link is invalid. Return to runs and choose a saved run.")
+        return
     result = st.session_state.get("selected_run")
     if not isinstance(result, RunResult) or result.manifest.run_id != run_id:
         try:
             result = repository.load_run(run_id)
         except StorageError:
-            _go_home()
-            st.session_state["flash_error"] = (
-                "Saved run could not be opened. Check PostgreSQL and DATABASE_URL, "
-                "then try again."
-            )
-            st.rerun()
+            st.error("Saved run could not be opened. It may not exist, or PostgreSQL may be unavailable. Return to runs or check DATABASE_URL and retry.")
+            return
         st.session_state["selected_run"] = result
+    _navigate_url(_run_path(run_id))
     st.title(result.manifest.source_filename)
+    st.caption(f"{_run_type_label(result.manifest.run_type)} · {result.manifest.started_at.strftime('%d %b %Y, %H:%M UTC')} · Run {run_id[-8:]}")
     _render_result(result, repository, key_prefix="detail")
 
 
@@ -3285,6 +3358,12 @@ def main() -> None:
         )
         st.stop()
 
+    if not st.session_state.get("route_initialized"):
+        st.session_state["route_initialized"] = True
+        if run_id := st.query_params.get("run"):
+            _open_run(run_id)
+    if destination := st.session_state.pop("navigate_to", None):
+        _navigate_url(destination)
     st.session_state.setdefault("view", "runs")
     view = st.session_state["view"]
     if view == "create":
